@@ -120,8 +120,13 @@ typedef struct uacpi_operation_region {
     uacpi_u64 offset;
     uacpi_u64 length;
 
-    // If space == TABLE_DATA
-    uacpi_u64 table_idx;
+    union {
+        // If space == TABLE_DATA
+        uacpi_u64 table_idx;
+
+        // If space == PCC
+        uacpi_u8 *internal_buffer;
+    };
 
     // Used to link regions sharing the same handler
     struct uacpi_operation_region *next;

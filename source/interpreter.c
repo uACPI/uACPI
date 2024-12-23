@@ -1117,6 +1117,13 @@ static uacpi_status handle_create_op_region(struct execution_context *ctx)
         return UACPI_STATUS_AML_BAD_ENCODING;
     }
 
+    if (op_region->space == UACPI_ADDRESS_SPACE_PCC && op_region->offset > 255) {
+        uacpi_warn(
+            "invalid PCC operation region %.4s subspace %"UACPI_PRIX64"\n",
+            node->name.text, UACPI_FMT64(op_region->offset)
+        );
+    }
+
     node->object = uacpi_create_internal_reference(
         UACPI_REFERENCE_KIND_NAMED, obj
     );
