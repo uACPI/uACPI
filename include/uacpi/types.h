@@ -355,10 +355,11 @@ uacpi_status uacpi_object_get_power_resource_info(
 );
 
 typedef enum uacpi_region_op {
-    UACPI_REGION_OP_ATTACH = 1,
-    UACPI_REGION_OP_READ = 2,
-    UACPI_REGION_OP_WRITE = 3,
-    UACPI_REGION_OP_DETACH = 4,
+    UACPI_REGION_OP_ATTACH = 0,
+    UACPI_REGION_OP_DETACH,
+
+    UACPI_REGION_OP_READ,
+    UACPI_REGION_OP_WRITE,
 } uacpi_region_op;
 
 typedef struct uacpi_generic_region_info {
