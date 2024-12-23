@@ -361,9 +361,15 @@ typedef enum uacpi_region_op {
     UACPI_REGION_OP_DETACH = 4,
 } uacpi_region_op;
 
+typedef struct uacpi_generic_region_info {
+    uacpi_u64 base;
+    uacpi_u64 length;
+} uacpi_generic_region_info;
+
 typedef struct uacpi_region_attach_data {
     void *handler_context;
     uacpi_namespace_node *region_node;
+    uacpi_generic_region_info generic_info;
     void *out_region_context;
 } uacpi_region_attach_data;
 

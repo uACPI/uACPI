@@ -231,6 +231,8 @@ uacpi_status uacpi_opregion_attach(uacpi_namespace_node *node)
 
     handler = region->handler;
     attach_data.region_node = node;
+    attach_data.generic_info.base = region->offset;
+    attach_data.generic_info.length = region->length;
     attach_data.handler_context = handler->user_context;
 
     uacpi_object_ref(obj);
