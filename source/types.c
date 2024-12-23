@@ -561,8 +561,19 @@ static void free_op_region(uacpi_handle handle)
         );
     }
 
-    if (op_region->space == UACPI_ADDRESS_SPACE_TABLE_DATA)
-        uacpi_table_unref(&(struct uacpi_table) { .index = op_region->table_idx });
+    switch (op_region->space) {
+    case UACPI_ADDRESS_SPACE_PCC:
+        uacpi_free(op_region->internal_buffer, op_region->length);
+        break;
+    case UACPI_ADDRESS_SPACE_TABLE_DATA:
+        uacpi_table_unref(
+            &(struct uacpi_table) { .index = op_region->table_idx }
+        );
+        break;
+    default:
+        break;
+    }
+
     uacpi_free(op_region, sizeof(*op_region));
 }
 
