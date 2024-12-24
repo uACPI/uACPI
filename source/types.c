@@ -1018,14 +1018,19 @@ uacpi_status uacpi_object_assign_integer(uacpi_object *obj, uacpi_u64 value)
     }, UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
 }
 
+void uacpi_buffer_to_view(uacpi_buffer *buf, uacpi_data_view *out_view)
+{
+    out_view->bytes = buf->byte_data;
+    out_view->length = buf->size;
+}
+
 static uacpi_status uacpi_object_do_get_string_or_buffer(
     uacpi_object *obj, uacpi_data_view *out, uacpi_u32 mask
 )
 {
     TYPE_CHECK_USER_OBJ(obj, mask);
 
-    out->bytes = obj->buffer->data;
-    out->length = obj->buffer->size;
+    uacpi_buffer_to_view(obj->buffer, out);
     return UACPI_STATUS_OK;
 }
 

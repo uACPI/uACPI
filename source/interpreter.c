@@ -3009,6 +3009,7 @@ static uacpi_status handle_concatenate_res(struct execution_context *ctx)
 {
     uacpi_status ret;
     struct op_context *op_ctx = ctx->cur_op_ctx;
+    uacpi_data_view buffer;
     uacpi_object *arg0, *arg1, *dst;
     uacpi_u8 *dst_buf;
     uacpi_size dst_size, arg0_size, arg1_size;
@@ -3017,11 +3018,13 @@ static uacpi_status handle_concatenate_res(struct execution_context *ctx)
     arg1 = item_array_at(&op_ctx->items, 1)->obj;
     dst = item_array_at(&op_ctx->items, 3)->obj;
 
-    ret = uacpi_find_aml_resource_end_tag(arg0->buffer, &arg0_size);
+    uacpi_buffer_to_view(arg0->buffer, &buffer);
+    ret = uacpi_find_aml_resource_end_tag(buffer, &arg0_size);
     if (uacpi_unlikely_error(ret))
         return ret;
 
-    ret = uacpi_find_aml_resource_end_tag(arg1->buffer, &arg1_size);
+    uacpi_buffer_to_view(arg1->buffer, &buffer);
+    ret = uacpi_find_aml_resource_end_tag(buffer, &arg1_size);
     if (uacpi_unlikely_error(ret))
         return ret;
 

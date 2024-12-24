@@ -1413,7 +1413,7 @@ static uacpi_status validate_aml_serial_type(uacpi_u8 type)
 }
 
 uacpi_status uacpi_for_each_aml_resource(
-    uacpi_buffer *buffer, uacpi_aml_resource_iteration_callback cb, void *user
+    uacpi_data_view buffer, uacpi_aml_resource_iteration_callback cb, void *user
 )
 {
     uacpi_status ret;
@@ -1424,8 +1424,8 @@ uacpi_status uacpi_for_each_aml_resource(
     enum uacpi_aml_resource type;
     const struct uacpi_resource_spec *spec;
 
-    bytes_left = buffer->size;
-    data = buffer->data;
+    bytes_left = buffer.length;
+    data = buffer.bytes;
 
     while (bytes_left) {
         type = get_aml_resource_type(*data);
@@ -1516,13 +1516,13 @@ static uacpi_size native_size_for_aml_resource(
 }
 
 uacpi_status uacpi_find_aml_resource_end_tag(
-    uacpi_buffer *buffer, uacpi_size *out_offset
+    uacpi_data_view buffer, uacpi_size *out_offset
 )
 {
-    uacpi_u8 *end_tag_ptr;
+    uacpi_u8 *end_tag_ptr = UACPI_NULL;
     uacpi_status ret;
 
-    if (!buffer || buffer->size == 0) {
+    if (buffer.length == 0) {
         *out_offset = 0;
         return UACPI_STATUS_OK;
     }
@@ -1536,7 +1536,7 @@ uacpi_status uacpi_find_aml_resource_end_tag(
     if (uacpi_unlikely_error(ret))
         return ret;
 
-    *out_offset = end_tag_ptr - buffer->byte_data;
+    *out_offset = end_tag_ptr - buffer.bytes;
     return UACPI_STATUS_OK;
 }
 
@@ -1919,7 +1919,7 @@ static uacpi_iteration_decision do_aml_resource_to_native(
 }
 
 static uacpi_status aml_resources_to_native(
-    uacpi_buffer *aml_buffer, void *native_buffer
+    uacpi_data_view aml_buffer, void *native_buffer
 )
 {
     uacpi_status ret;
@@ -1961,19 +1961,23 @@ static uacpi_status eval_resource_helper(
     uacpi_object **out_obj
 )
 {
-    uacpi_object *obj;
+    uacpi_status ret;
+    uacpi_bool is_device;
 
-    obj = uacpi_namespace_node_get_object(node);
-    if (uacpi_unlikely(obj == UACPI_NULL || obj->type != UACPI_OBJECT_DEVICE))
+    ret = uacpi_namespace_node_is(node, UACPI_OBJECT_DEVICE, &is_device);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    if (uacpi_unlikely(!is_device))
         return UACPI_STATUS_INVALID_ARGUMENT;
 
-    return uacpi_eval_typed(
-        node, method, UACPI_NULL, UACPI_OBJECT_BUFFER_BIT, out_obj
+    return uacpi_eval_simple_buffer(
+        node, method, out_obj
     );
 }
 
 uacpi_status uacpi_native_resources_from_aml(
-    uacpi_buffer *aml_buffer, uacpi_resources **out_resources
+    uacpi_data_view aml_buffer, uacpi_resources **out_resources
 )
 {
     uacpi_status ret;
@@ -2026,12 +2030,15 @@ static uacpi_status extract_native_resources_from_method(
 {
     uacpi_status ret;
     uacpi_object *obj;
+    uacpi_data_view buffer;
 
     ret = eval_resource_helper(device, method, &obj);
     if (uacpi_unlikely_error(ret))
         return ret;
 
-    ret = uacpi_native_resources_from_aml(obj->buffer, out_resources);
+    uacpi_buffer_to_view(obj->buffer, &buffer);
+
+    ret = uacpi_native_resources_from_aml(buffer, out_resources);
     uacpi_object_unref(obj);
 
     return ret;

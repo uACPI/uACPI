@@ -2158,15 +2158,15 @@ void run_resource_tests()
         std::cout << "Running resource test '" << test.name << "'...";
 
         uacpi_resources *resources;
-        uacpi_buffer aml_buffer;
+        uacpi_data_view aml_buffer;
         uint8_t *bytes;
         uacpi_status ret;
         uacpi_object *resource_template = nullptr;
 
-        aml_buffer.data = test.aml_bytes.data();
-        aml_buffer.size = test.aml_bytes.size();
+        aml_buffer.bytes = test.aml_bytes.data();
+        aml_buffer.length = test.aml_bytes.size();
 
-        ret = uacpi_native_resources_from_aml(&aml_buffer, &resources);
+        ret = uacpi_native_resources_from_aml(aml_buffer, &resources);
         if (uacpi_unlikely_error(ret)) {
             std::printf("from_aml error: %s\n", uacpi_status_to_string(ret));
             fail_count++;
