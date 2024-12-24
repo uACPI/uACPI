@@ -307,15 +307,15 @@ typedef uacpi_iteration_decision (*uacpi_aml_resource_iteration_callback)(
 );
 
 uacpi_status uacpi_for_each_aml_resource(
-    uacpi_buffer *buffer, uacpi_aml_resource_iteration_callback cb, void *user
+    uacpi_data_view, uacpi_aml_resource_iteration_callback cb, void *user
 );
 
 uacpi_status uacpi_find_aml_resource_end_tag(
-    uacpi_buffer *buffer, uacpi_size *out_offset
+    uacpi_data_view, uacpi_size *out_offset
 );
 
 uacpi_status uacpi_native_resources_from_aml(
-    uacpi_buffer *aml_buffer, uacpi_resources **out_resources
+    uacpi_data_view, uacpi_resources **out_resources
 );
 
 uacpi_status uacpi_native_resources_to_aml(

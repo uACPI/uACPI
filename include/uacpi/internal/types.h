@@ -309,3 +309,5 @@ void uacpi_mutex_unref(uacpi_mutex*);
 void uacpi_method_unref(uacpi_control_method*);
 
 void uacpi_address_space_handler_unref(uacpi_address_space_handler *handler);
+
+void uacpi_buffer_to_view(uacpi_buffer*, uacpi_data_view*);
