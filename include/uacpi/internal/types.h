@@ -244,6 +244,7 @@ typedef struct uacpi_field_unit {
 
     uacpi_u32 byte_offset;
     uacpi_u32 bit_length;
+    uacpi_u32 pin_offset;
     uacpi_u8 bit_offset_within_first_byte;
     uacpi_u8 access_width_bytes;
     uacpi_u8 access_length;
