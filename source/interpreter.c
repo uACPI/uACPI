@@ -1600,6 +1600,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
     uacpi_object *obj, *connection_obj = UACPI_NULL;
     struct field_specific_data field_data = { 0 };
     uacpi_size i = 1, bit_offset = 0;
+    uacpi_u32 length, pin_offset = 0;
 
     uacpi_u8 raw_value, access_type, lock_rule, update_rule;
     uacpi_u8 access_attrib = 0, access_length = 0;
@@ -1673,7 +1674,6 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
 
         // An actual field object
         if (item->type == ITEM_NAMESPACE_NODE) {
-            uacpi_u32 length;
             uacpi_field_unit *field;
 
             length = get_field_length(item_array_at(&op_ctx->items, i++));
@@ -1721,6 +1721,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
             }
 
             field->bit_length = length;
+            field->pin_offset = pin_offset;
 
             // FIXME: overflow, OOB, etc checks
             field->byte_offset = UACPI_ALIGN_DOWN(
@@ -1781,6 +1782,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
                 return ret;
 
             bit_offset += length;
+            pin_offset += length;
             continue;
         }
 
@@ -1788,7 +1790,9 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
         switch (item->immediate) {
         // ReservedField := 0x00 PkgLength
         case 0x00:
-            bit_offset += get_field_length(item_array_at(&op_ctx->items, i++));
+            length = get_field_length(item_array_at(&op_ctx->items, i++));
+            bit_offset += length;
+            pin_offset += length;
             break;
 
         // AccessField := 0x01 AccessType AccessAttrib
@@ -1835,6 +1839,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
         // ConnectField := <0x02 NameString> | <0x02 BufferData>
         case 0x02:
             connection_obj = item_array_at(&op_ctx->items, i++)->obj;
+            pin_offset = 0;
             break;
 
         default:
