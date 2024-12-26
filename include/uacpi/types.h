@@ -84,6 +84,9 @@ typedef struct uacpi_data_view {
 
         uacpi_char *text;
         const uacpi_char *const_text;
+
+        void *data;
+        const void *const_data;
     };
     uacpi_size length;
 } uacpi_data_view;
