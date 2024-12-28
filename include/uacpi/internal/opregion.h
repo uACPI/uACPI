@@ -37,6 +37,6 @@ uacpi_status uacpi_opregion_attach(uacpi_namespace_node *node);
 void uacpi_install_default_address_space_handlers(void);
 
 uacpi_status uacpi_dispatch_opregion_io(
-    uacpi_namespace_node *region_node, uacpi_u32 offset, uacpi_u8 byte_width,
-    uacpi_region_op op, uacpi_u64 *in_out
+    uacpi_namespace_node *region_node, uacpi_field_unit *field,
+    uacpi_u32 offset, uacpi_region_op op, uacpi_u64 *in_out
 );
