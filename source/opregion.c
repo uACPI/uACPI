@@ -261,7 +261,6 @@ uacpi_status uacpi_opregion_attach(uacpi_namespace_node *node)
     uacpi_namespace_write_lock();
 
     if (uacpi_unlikely_error(ret)) {
-        uacpi_trace_region_error(node, "failed to attach a handler to", ret);
         uacpi_object_unref(obj);
         return ret;
     }
