@@ -5288,6 +5288,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
 
         case UACPI_PARSE_OP_ITEM_POP:
             pop_item(op_ctx);
+            item = item_array_last(&op_ctx->items);
             break;
 
         case UACPI_PARSE_OP_IF_HAS_DATA: {
