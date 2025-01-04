@@ -818,8 +818,8 @@ static uacpi_bool space_needs_bounds_checking(uacpi_address_space space)
 }
 
 uacpi_status uacpi_dispatch_opregion_io(
-    uacpi_namespace_node *region_node, uacpi_field_unit *field,
-    uacpi_u32 offset, uacpi_region_op op, uacpi_u64 *in_out
+    uacpi_field_unit *field, uacpi_u32 offset, uacpi_region_op op,
+    uacpi_u64 *in_out
 )
 {
     uacpi_status ret;
@@ -840,16 +840,16 @@ uacpi_status uacpi_dispatch_opregion_io(
     if (uacpi_unlikely_error(ret))
         return ret;
 
-    ret = uacpi_opregion_attach(region_node);
+    ret = uacpi_opregion_attach(field->region);
     if (uacpi_unlikely_error(ret)) {
         uacpi_trace_region_error(
-            region_node, "unable to attach", ret
+            field->region, "unable to attach", ret
         );
         goto out;
     }
 
     obj = uacpi_namespace_node_get_object_typed(
-        region_node, UACPI_OBJECT_OPERATION_REGION_BIT
+        field->region, UACPI_OBJECT_OPERATION_REGION_BIT
     );
     if (uacpi_unlikely(obj == UACPI_NULL)) {
         ret = UACPI_STATUS_INVALID_ARGUMENT;
@@ -868,7 +868,7 @@ uacpi_status uacpi_dispatch_opregion_io(
     if (uacpi_unlikely(is_oob)) {
         const uacpi_char *path;
 
-        path = uacpi_namespace_node_generate_absolute_path(region_node);
+        path = uacpi_namespace_node_generate_absolute_path(field->region);
         uacpi_error(
             "out-of-bounds access to opregion %s[0x%"UACPI_PRIX64"->"
             "0x%"UACPI_PRIX64"] at 0x%"UACPI_PRIX64" (idx=%u, width=%d)\n",
@@ -883,7 +883,7 @@ uacpi_status uacpi_dispatch_opregion_io(
 
     if (op == UACPI_REGION_OP_WRITE) {
         uacpi_trace_region_io(
-            region_node, space, op, abs_offset,
+            field->region, space, op, abs_offset,
             field->access_width_bytes, *in_out
         );
     }
@@ -959,7 +959,7 @@ uacpi_status uacpi_dispatch_opregion_io(
 
 io_done:
     if (uacpi_unlikely_error(ret)) {
-        uacpi_trace_region_error(region_node, "unable to perform IO", ret);
+        uacpi_trace_region_error(field->region, "unable to perform IO", ret);
         goto out;
     }
 
@@ -973,7 +973,7 @@ io_done:
         }
 
         uacpi_trace_region_io(
-            region_node, space, op, abs_offset,
+            field->region, space, op, abs_offset,
             field->access_width_bytes, *in_out
         );
     }

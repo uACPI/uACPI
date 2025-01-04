@@ -180,7 +180,6 @@ static uacpi_status access_field_unit(
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
-    uacpi_namespace_node *region_node;
 
     if (field->lock_rule) {
         ret = uacpi_acquire_aml_mutex(
@@ -195,10 +194,8 @@ static uacpi_status access_field_unit(
         ret = uacpi_write_field_unit(
             field->bank_selection, &field->bank_value, sizeof(field->bank_value)
         );
-        region_node = field->bank_region;
         break;
     case UACPI_FIELD_UNIT_KIND_NORMAL:
-        region_node = field->region;
         break;
     case UACPI_FIELD_UNIT_KIND_INDEX:
         ret = uacpi_write_field_unit(
@@ -233,9 +230,7 @@ static uacpi_status access_field_unit(
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    ret = uacpi_dispatch_opregion_io(
-        region_node, field, offset, op, in_out
-    );
+    ret = uacpi_dispatch_opregion_io(field, offset, op, in_out);
 
 out:
     if (field->lock_rule)
