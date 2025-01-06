@@ -176,7 +176,7 @@ void uacpi_write_buffer_field(
 
 static uacpi_status access_field_unit(
     uacpi_field_unit *field, uacpi_u32 offset, uacpi_region_op op,
-    uacpi_u64 *in_out
+    union uacpi_opregion_io_data data
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
@@ -192,14 +192,16 @@ static uacpi_status access_field_unit(
     switch (field->kind) {
     case UACPI_FIELD_UNIT_KIND_BANK:
         ret = uacpi_write_field_unit(
-            field->bank_selection, &field->bank_value, sizeof(field->bank_value)
+            field->bank_selection, &field->bank_value, sizeof(field->bank_value),
+            UACPI_NULL
         );
         break;
     case UACPI_FIELD_UNIT_KIND_NORMAL:
         break;
     case UACPI_FIELD_UNIT_KIND_INDEX:
         ret = uacpi_write_field_unit(
-            field->index, &offset, sizeof(offset)
+            field->index, &offset, sizeof(offset),
+            UACPI_NULL
         );
         if (uacpi_unlikely_error(ret))
             goto out;
@@ -207,12 +209,14 @@ static uacpi_status access_field_unit(
         switch (op) {
         case UACPI_REGION_OP_READ:
             ret = uacpi_read_field_unit(
-                field->data, in_out, field->access_width_bytes
+                field->data, data.integer, field->access_width_bytes,
+                UACPI_NULL
             );
             break;
         case UACPI_REGION_OP_WRITE:
             ret = uacpi_write_field_unit(
-                field->data, in_out, field->access_width_bytes
+                field->data, data.integer, field->access_width_bytes,
+                UACPI_NULL
             );
             break;
         default:
@@ -230,7 +234,7 @@ static uacpi_status access_field_unit(
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    ret = uacpi_dispatch_opregion_io(field, offset, op, in_out);
+    ret = uacpi_dispatch_opregion_io(field, offset, op, data);
 
 out:
     if (field->lock_rule)
@@ -238,59 +242,108 @@ out:
     return ret;
 }
 
+#define OPREGION_IO_U64(x) (union uacpi_opregion_io_data) { .integer = x }
+
+#define SERIAL_HEADER_SIZE 2
+#define IPMI_DATA_SIZE 64
+
+static uacpi_size wtr_buffer_size(
+    uacpi_field_unit *field, uacpi_address_space space
+)
+{
+    UACPI_UNUSED(field);
+
+    switch (space) {
+    case UACPI_ADDRESS_SPACE_IPMI:
+        return SERIAL_HEADER_SIZE + IPMI_DATA_SIZE;
+    default:
+        return 0;
+    }
+}
+
 static uacpi_status handle_special_field(
     uacpi_field_unit *field, uacpi_data_view buf,
-    uacpi_region_op op, uacpi_bool *did_handle
+    uacpi_region_op op, uacpi_data_view *wtr_response,
+    uacpi_bool *did_handle
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
     uacpi_object *obj;
     uacpi_operation_region *region;
-    uacpi_namespace_node *region_node;
     uacpi_u64 in_out;
+    uacpi_data_view wtr_buffer;
 
     *did_handle = UACPI_FALSE;
 
-    switch (field->kind) {
-    case UACPI_FIELD_UNIT_KIND_BANK:
-        region_node = field->region;
-        break;
-    case UACPI_FIELD_UNIT_KIND_NORMAL:
-        region_node = field->bank_region;
-        break;
-    case UACPI_FIELD_UNIT_KIND_INDEX:
-    default:
+    if (field->kind == UACPI_FIELD_UNIT_KIND_INDEX)
         return ret;
-    }
 
     obj = uacpi_namespace_node_get_object_typed(
-        region_node, UACPI_OBJECT_OPERATION_REGION_BIT
+        field->region, UACPI_OBJECT_OPERATION_REGION_BIT
     );
     if (uacpi_unlikely(obj == UACPI_NULL)) {
         ret = UACPI_STATUS_INVALID_ARGUMENT;
+        uacpi_trace_region_error(
+            field->region, "attempted access to deleted", ret
+        );
         goto out_handled;
     }
     region = obj->op_region;
 
     switch (region->space) {
     case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
-        break;
+        if (op == UACPI_REGION_OP_WRITE) {
+            uacpi_memcpy_zerout(
+                &in_out, buf.const_data, sizeof(in_out), buf.length
+            );
+        }
+
+        ret = access_field_unit(field, 0, op, OPREGION_IO_U64(&in_out));
+        if (uacpi_unlikely_error(ret))
+            goto out_handled;
+
+        if (op == UACPI_REGION_OP_READ)
+            uacpi_memcpy_zerout(buf.data, &in_out, buf.length, sizeof(in_out));
+        goto out_handled;
+    case UACPI_ADDRESS_SPACE_IPMI:
+        if (uacpi_unlikely(op == UACPI_REGION_OP_READ)) {
+            ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
+            uacpi_trace_region_error(
+                field->region, "attempted to read from a write-only", ret
+            );
+            goto out_handled;
+        }
+
+        goto do_wtr;
     default:
         return ret;
     }
 
-    if (op == UACPI_REGION_OP_WRITE) {
-        uacpi_memcpy_zerout(
-            &in_out, buf.const_data, sizeof(in_out), buf.length
-        );
+do_wtr:
+    wtr_buffer.length = wtr_buffer_size(field, region->space);
+
+    wtr_buffer.data = uacpi_kernel_alloc(wtr_buffer.length);
+    if (uacpi_unlikely(wtr_buffer.data == UACPI_NULL)) {
+        ret = UACPI_STATUS_OUT_OF_MEMORY;
+        goto out_handled;
     }
 
-    ret = access_field_unit(field, 0, op, &in_out);
-    if (uacpi_unlikely_error(ret))
+    uacpi_memcpy_zerout(
+        wtr_buffer.data, buf.const_data, wtr_buffer.length, buf.length
+    );
+    ret = access_field_unit(
+        field, field->byte_offset,
+        op, (union uacpi_opregion_io_data) {
+            .buffer = wtr_buffer,
+        }
+    );
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_free(wtr_buffer.data, wtr_buffer.length);
         goto out_handled;
+    }
 
-    if (op == UACPI_REGION_OP_READ)
-        uacpi_memcpy_zerout(buf.data, &in_out, buf.length, sizeof(in_out));
+    if (wtr_response != UACPI_NULL)
+        *wtr_response = wtr_buffer;
 
 out_handled:
     *did_handle = UACPI_TRUE;
@@ -332,7 +385,7 @@ static uacpi_status do_read_misaligned_field_unit(
 
         ret = access_field_unit(
             field, byte_offset, UACPI_REGION_OP_READ,
-            &out
+            OPREGION_IO_U64(&out)
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -349,7 +402,8 @@ static uacpi_status do_read_misaligned_field_unit(
 }
 
 uacpi_status uacpi_read_field_unit(
-    uacpi_field_unit *field, void *dst, uacpi_size size
+    uacpi_field_unit *field, void *dst, uacpi_size size,
+    uacpi_data_view *wtr_response
 )
 {
     uacpi_status ret;
@@ -360,7 +414,8 @@ uacpi_status uacpi_read_field_unit(
         field, (uacpi_data_view) {
             .data = dst,
             .length = size,
-        }, UACPI_REGION_OP_READ, &did_handle
+        }, UACPI_REGION_OP_READ,
+        wtr_response, &did_handle
     );
     if (did_handle)
         return ret;
@@ -379,7 +434,8 @@ uacpi_status uacpi_read_field_unit(
         uacpi_u64 out;
 
         ret = access_field_unit(
-            field, field->byte_offset, UACPI_REGION_OP_READ, &out
+            field, field->byte_offset, UACPI_REGION_OP_READ,
+            OPREGION_IO_U64(&out)
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -426,7 +482,8 @@ static uacpi_status write_generic_field_unit(
             switch (field->update_rule) {
             case UACPI_UPDATE_RULE_PRESERVE:
                 ret = access_field_unit(
-                    field, byte_offset, UACPI_REGION_OP_READ, &in
+                    field, byte_offset, UACPI_REGION_OP_READ,
+                    OPREGION_IO_U64(&in)
                 );
                 if (uacpi_unlikely_error(ret))
                     return ret;
@@ -447,7 +504,8 @@ static uacpi_status write_generic_field_unit(
         bit_span_offset(&src_span, dst_span.length);
 
         ret = access_field_unit(
-            field, byte_offset, UACPI_REGION_OP_WRITE, &in
+            field, byte_offset, UACPI_REGION_OP_WRITE,
+            OPREGION_IO_U64(&in)
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -461,7 +519,8 @@ static uacpi_status write_generic_field_unit(
 }
 
 uacpi_status uacpi_write_field_unit(
-    uacpi_field_unit *field, const void *src, uacpi_size size
+    uacpi_field_unit *field, const void *src, uacpi_size size,
+    uacpi_data_view *wtr_response
 )
 {
     uacpi_status ret;
@@ -471,12 +530,71 @@ uacpi_status uacpi_write_field_unit(
         field, (uacpi_data_view) {
             .const_data = src,
             .length = size,
-        }, UACPI_REGION_OP_WRITE, &did_handle
+        }, UACPI_REGION_OP_WRITE,
+        wtr_response, &did_handle
     );
     if (did_handle)
         return ret;
 
     return write_generic_field_unit(field, src, size);
+}
+
+uacpi_status uacpi_field_unit_get_read_type(
+    struct uacpi_field_unit *field, uacpi_object_type *out_type
+)
+{
+    uacpi_object *obj;
+
+    if (field->kind == UACPI_FIELD_UNIT_KIND_INDEX)
+        goto out_basic_field;
+
+    obj = uacpi_namespace_node_get_object_typed(
+        field->region, UACPI_OBJECT_OPERATION_REGION_BIT
+    );
+    if (uacpi_unlikely(obj == UACPI_NULL))
+        return UACPI_STATUS_INVALID_ARGUMENT;
+
+    if (uacpi_is_buffer_access_address_space(obj->op_region->space)) {
+        *out_type = UACPI_OBJECT_BUFFER;
+        return UACPI_STATUS_OK;
+    }
+
+out_basic_field:
+    if (field->bit_length > (g_uacpi_rt_ctx.is_rev1 ? 32u : 64u))
+        *out_type = UACPI_OBJECT_BUFFER;
+    else
+        *out_type = UACPI_OBJECT_INTEGER;
+
+    return UACPI_STATUS_OK;
+}
+
+uacpi_status uacpi_field_unit_get_bit_length(
+    struct uacpi_field_unit *field, uacpi_size *out_length
+)
+{
+    uacpi_object *obj;
+
+    if (field->kind == UACPI_FIELD_UNIT_KIND_INDEX)
+        goto out_basic_field;
+
+    obj = uacpi_namespace_node_get_object_typed(
+        field->region, UACPI_OBJECT_OPERATION_REGION_BIT
+    );
+    if (uacpi_unlikely(obj == UACPI_NULL))
+        return UACPI_STATUS_INVALID_ARGUMENT;
+
+    if (uacpi_is_buffer_access_address_space(obj->op_region->space)) {
+        /*
+         * Bit length is protocol specific, the data will be returned
+         * via the write-then-read response buffer.
+         */
+        *out_length = 0;
+        return UACPI_STATUS_OK;
+    }
+
+out_basic_field:
+    *out_length = field->bit_length;
+    return UACPI_STATUS_OK;
 }
 
 static uacpi_u8 gas_get_access_bit_width(const struct acpi_gas *gas)

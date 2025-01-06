@@ -42,14 +42,11 @@ void uacpi_trace_region_error(
     uacpi_free_dynamic_string(path);
 }
 
-#define UACPI_TRACE_REGION_IO
-
-void uacpi_trace_region_io(
-    uacpi_namespace_node *node, uacpi_address_space space, uacpi_region_op op,
-    uacpi_u64 offset, uacpi_u8 byte_size, uacpi_u64 ret
+static void trace_region_io(
+    uacpi_field_unit *field, uacpi_address_space space, uacpi_u64 offset,
+    uacpi_region_op op, union uacpi_opregion_io_data data
 )
 {
-#ifdef UACPI_TRACE_REGION_IO
     const uacpi_char *path;
     const uacpi_char *type_str;
 
@@ -67,23 +64,36 @@ void uacpi_trace_region_io(
         type_str = "<INVALID-OP>";
     }
 
-    path = uacpi_namespace_node_generate_absolute_path(node);
+    path = uacpi_namespace_node_generate_absolute_path(field->region);
 
-    uacpi_trace(
-        "%s [%s] (%d bytes) %s[0x%016"UACPI_PRIX64"] = 0x%"UACPI_PRIX64"\n",
-        type_str, path, byte_size,
-        uacpi_address_space_to_string(space),
-        UACPI_FMT64(offset), UACPI_FMT64(ret)
-    );
+    switch (space) {
+    case UACPI_ADDRESS_SPACE_IPMI:
+        uacpi_trace(
+            "write-then-read from [%s] %s[0x%016"UACPI_PRIX64"] = "
+            "<buffer of %zu bytes>\n", path,
+            uacpi_address_space_to_string(space),
+            UACPI_FMT64(offset), data.buffer.length
+        );
+        break;
+    case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
+        uacpi_trace(
+            "%s [%s] %s pins[%u..%u] = 0x%"UACPI_PRIX64"\n",
+            type_str, path, uacpi_address_space_to_string(space),
+            field->pin_offset, (field->pin_offset + field->bit_length) - 1,
+            UACPI_FMT64(*data.integer)
+        );
+        break;
+    default:
+        uacpi_trace(
+            "%s [%s] (%d bytes) %s[0x%016"UACPI_PRIX64"] = 0x%"UACPI_PRIX64"\n",
+            type_str, path, field->access_width_bytes,
+            uacpi_address_space_to_string(space),
+            UACPI_FMT64(offset), UACPI_FMT64(*data.integer)
+        );
+        break;
+    }
 
     uacpi_free_dynamic_string(path);
-#else
-    UACPI_UNUSED(op);
-    UACPI_UNUSED(node);
-    UACPI_UNUSED(offset);
-    UACPI_UNUSED(byte_size);
-    UACPI_UNUSED(ret);
-#endif
 }
 
 static uacpi_bool space_needs_reg(enum uacpi_address_space space)
@@ -802,24 +812,29 @@ out:
     return ret;
 }
 
-static uacpi_bool space_needs_bounds_checking(uacpi_address_space space)
+uacpi_bool uacpi_is_buffer_access_address_space(uacpi_address_space space)
 {
     switch (space) {
     case UACPI_ADDRESS_SPACE_SMBUS:
     case UACPI_ADDRESS_SPACE_IPMI:
-    case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
     case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
     case UACPI_ADDRESS_SPACE_PRM:
     case UACPI_ADDRESS_SPACE_FFIXEDHW:
-        return UACPI_FALSE;
-    default:
         return UACPI_TRUE;
+    default:
+        return UACPI_FALSE;
     }
+}
+
+static uacpi_bool space_needs_bounds_checking(uacpi_address_space space)
+{
+    return !uacpi_is_buffer_access_address_space(space) &&
+        space != UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO;
 }
 
 uacpi_status uacpi_dispatch_opregion_io(
     uacpi_field_unit *field, uacpi_u32 offset, uacpi_region_op op,
-    uacpi_u64 *in_out
+    union uacpi_opregion_io_data data
 )
 {
     uacpi_status ret;
@@ -829,12 +844,14 @@ uacpi_status uacpi_dispatch_opregion_io(
     uacpi_address_space space;
     uacpi_u64 abs_offset, offset_end = offset;
     uacpi_bool is_oob = UACPI_FALSE;
+    uacpi_region_op orig_op = op;
 
     union {
         uacpi_region_rw_data rw;
         uacpi_region_pcc_send_data pcc;
         uacpi_region_gpio_rw_data gpio;
-    } data;
+        uacpi_region_ipmi_rw_data ipmi;
+    } handler_data;
 
     ret = upgrade_to_opregion_lock();
     if (uacpi_unlikely_error(ret))
@@ -881,15 +898,8 @@ uacpi_status uacpi_dispatch_opregion_io(
         goto out;
     }
 
-    if (op == UACPI_REGION_OP_WRITE) {
-        uacpi_trace_region_io(
-            field->region, space, op, abs_offset,
-            field->access_width_bytes, *in_out
-        );
-    }
-
-    data.rw.region_context = region->user_context;
-    data.rw.handler_context = handler->user_context;
+    handler_data.rw.region_context = region->user_context;
+    handler_data.rw.handler_context = handler->user_context;
 
     switch (region->space) {
     case UACPI_ADDRESS_SPACE_PCC: {
@@ -903,12 +913,13 @@ uacpi_status uacpi_dispatch_opregion_io(
          */
         if (op == UACPI_REGION_OP_READ) {
             uacpi_memcpy_zerout(
-                in_out, cursor, sizeof(*in_out), field->access_width_bytes
+                data.integer, cursor, sizeof(*data.integer),
+                field->access_width_bytes
             );
             goto io_done;
         }
 
-        uacpi_memcpy(cursor, in_out, field->access_width_bytes);
+        uacpi_memcpy(cursor, data.integer, field->access_width_bytes);
 
         /*
          * Dispatch a PCC send command if this was a write to the command field
@@ -916,7 +927,7 @@ uacpi_status uacpi_dispatch_opregion_io(
          * ACPI 6.5: 14.3. Extended PCC Subspace Shared Memory Region
          */
         if (offset >= 12 && offset < 16) {
-            data.pcc.buffer = (uacpi_data_view){
+            handler_data.pcc.buffer = (uacpi_data_view){
                 .bytes = region->internal_buffer,
                 .length = region->length,
             };
@@ -929,12 +940,12 @@ uacpi_status uacpi_dispatch_opregion_io(
         goto io_done;
     }
     case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
-        data.gpio.pin_offset = field->pin_offset;
-        data.gpio.num_pins = field->bit_length;
-        data.gpio.value = *in_out;
+        handler_data.gpio.pin_offset = field->pin_offset;
+        handler_data.gpio.num_pins = field->bit_length;
+        handler_data.gpio.value = *data.integer;
 
         ret = uacpi_object_get_string_or_buffer(
-            field->connection, &data.gpio.connection
+            field->connection, &handler_data.gpio.connection
         );
         if (uacpi_unlikely_error(ret))
             goto io_done;
@@ -942,17 +953,22 @@ uacpi_status uacpi_dispatch_opregion_io(
         op = op == UACPI_REGION_OP_READ ?
             UACPI_REGION_OP_GPIO_READ : UACPI_REGION_OP_GPIO_WRITE;
         break;
+    case UACPI_ADDRESS_SPACE_IPMI:
+        handler_data.ipmi.in_out_message = data.buffer;
+        handler_data.ipmi.command = abs_offset;
+        op = UACPI_REGION_OP_IPMI_COMMAND;
+        break;
     default:
-        data.rw.byte_width = field->access_width_bytes;
-        data.rw.offset = abs_offset;
-        data.rw.value = *in_out;
+        handler_data.rw.byte_width = field->access_width_bytes;
+        handler_data.rw.offset = abs_offset;
+        handler_data.rw.value = *data.integer;
         break;
     }
 
     uacpi_object_ref(obj);
     uacpi_namespace_write_unlock();
 
-    ret = handler->callback(op, &data);
+    ret = handler->callback(op, &handler_data);
 
     uacpi_namespace_write_lock();
     uacpi_object_unref(obj);
@@ -963,20 +979,25 @@ io_done:
         goto out;
     }
 
-    if (op == UACPI_REGION_OP_READ) {
+    if (orig_op == UACPI_REGION_OP_READ) {
         switch (region->space) {
         case UACPI_ADDRESS_SPACE_PCC:
+        case UACPI_ADDRESS_SPACE_IPMI:
+        case UACPI_ADDRESS_SPACE_FFIXEDHW:
+        case UACPI_ADDRESS_SPACE_PRM:
+        case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
+        case UACPI_ADDRESS_SPACE_SMBUS:
+            break;
+        case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
+            *data.integer = handler_data.gpio.value;
             break;
         default:
-            *in_out = data.rw.value;
+            *data.integer = handler_data.rw.value;
             break;
         }
-
-        uacpi_trace_region_io(
-            field->region, space, op, abs_offset,
-            field->access_width_bytes, *in_out
-        );
     }
+
+    trace_region_io(field, space, abs_offset, orig_op, data);
 
 out:
     uacpi_recursive_lock_release(&g_opregion_lock);

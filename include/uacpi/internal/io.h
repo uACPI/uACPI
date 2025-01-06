@@ -13,11 +13,21 @@ void uacpi_write_buffer_field(
     uacpi_buffer_field *field, const void *src, uacpi_size size
 );
 
+uacpi_status uacpi_field_unit_get_read_type(
+    struct uacpi_field_unit *field, uacpi_object_type *out_type
+);
+
+uacpi_status uacpi_field_unit_get_bit_length(
+    struct uacpi_field_unit *field, uacpi_size *out_length
+);
+
 uacpi_status uacpi_read_field_unit(
-    uacpi_field_unit *field, void *dst, uacpi_size size
+    uacpi_field_unit *field, void *dst, uacpi_size size,
+    uacpi_data_view *wtr_response
 );
 uacpi_status uacpi_write_field_unit(
-    uacpi_field_unit *field, const void *src, uacpi_size size
+    uacpi_field_unit *field, const void *src, uacpi_size size,
+    uacpi_data_view *wtr_response
 );
 
 uacpi_status uacpi_system_io_read(

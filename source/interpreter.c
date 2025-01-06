@@ -867,18 +867,6 @@ static uacpi_status handle_package(struct execution_context *ctx)
     return UACPI_STATUS_OK;
 }
 
-static uacpi_size field_byte_size(uacpi_object *obj)
-{
-    uacpi_size bit_length;
-
-    if (obj->type == UACPI_OBJECT_BUFFER_FIELD)
-        bit_length = obj->buffer_field.bit_length;
-    else
-        bit_length = obj->field_unit->bit_length;
-
-    return uacpi_round_up_bits_to_bytes(bit_length);
-}
-
 static uacpi_size sizeof_int(void)
 {
     return g_uacpi_rt_ctx.is_rev1 ? 4 : 8;
@@ -941,8 +929,9 @@ static void write_buffer_index(uacpi_buffer_index *buf_idx,
  * the specification. In reality, we just copy one buffer to another
  * because that's what NT does.
  */
-static uacpi_status object_assign_with_implicit_cast(uacpi_object *dst,
-                                                     uacpi_object *src)
+static uacpi_status object_assign_with_implicit_cast(
+    uacpi_object *dst, uacpi_object *src, uacpi_data_view *wtr_response
+)
 {
     uacpi_status ret;
     uacpi_data_view src_buf;
@@ -975,7 +964,8 @@ static uacpi_status object_assign_with_implicit_cast(uacpi_object *dst,
 
     case UACPI_OBJECT_FIELD_UNIT:
         return uacpi_write_field_unit(
-            dst->field_unit, src_buf.bytes, src_buf.length
+            dst->field_unit, src_buf.bytes, src_buf.length,
+            wtr_response
         );
 
     case UACPI_OBJECT_BUFFER_INDEX:
@@ -2279,8 +2269,9 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
  * 3. NAME -> Store with implicit cast.
  * 4. RefOf -> Not allowed here.
  */
-static uacpi_status store_to_reference(uacpi_object *dst,
-                                       uacpi_object *src)
+static uacpi_status store_to_reference(
+    uacpi_object *dst, uacpi_object *src, uacpi_data_view *wtr_response
+)
 {
     uacpi_object *src_obj;
     uacpi_bool overwrite = UACPI_FALSE;
@@ -2335,7 +2326,9 @@ static uacpi_status store_to_reference(uacpi_object *dst,
         return UACPI_STATUS_OK;
     }
 
-    return object_assign_with_implicit_cast(dst->inner_object, src_obj);
+    return object_assign_with_implicit_cast(
+        dst->inner_object, src_obj, wtr_response
+    );
 }
 
 static uacpi_status handle_ref_or_deref_of(struct execution_context *ctx)
@@ -3769,48 +3762,69 @@ static uacpi_object_type buffer_field_get_read_type(
     return UACPI_OBJECT_INTEGER;
 }
 
-static uacpi_object_type field_unit_get_read_type(
-    struct uacpi_field_unit *field
+static uacpi_status field_get_read_type(
+    uacpi_object *obj, uacpi_object_type *out_type
 )
 {
-    if (field->bit_length > (g_uacpi_rt_ctx.is_rev1 ? 32u : 64u))
-        return UACPI_OBJECT_BUFFER;
+    if (obj->type == UACPI_OBJECT_BUFFER_FIELD) {
+        *out_type = buffer_field_get_read_type(&obj->buffer_field);
+        return UACPI_STATUS_OK;
+    }
 
-    return UACPI_OBJECT_INTEGER;
+    return uacpi_field_unit_get_read_type(obj->field_unit, out_type);
 }
 
-static uacpi_object_type field_get_read_type(uacpi_object *obj)
+static uacpi_status field_byte_size(
+    uacpi_object *obj, uacpi_size *out_size
+)
 {
-    if (obj->type == UACPI_OBJECT_BUFFER_FIELD)
-        return buffer_field_get_read_type(&obj->buffer_field);
+    uacpi_size bit_length;
 
-    return field_unit_get_read_type(obj->field_unit);
+    if (obj->type == UACPI_OBJECT_BUFFER_FIELD) {
+        bit_length = obj->buffer_field.bit_length;
+    } else {
+        uacpi_status ret;
+
+        ret = uacpi_field_unit_get_bit_length(obj->field_unit, &bit_length);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+    }
+
+    *out_size = uacpi_round_up_bits_to_bytes(bit_length);
+    return UACPI_STATUS_OK;
 }
 
 static uacpi_status handle_field_read(struct execution_context *ctx)
 {
+    uacpi_status ret;
     struct op_context *op_ctx = ctx->cur_op_ctx;
     struct uacpi_namespace_node *node;
     uacpi_object *src_obj, *dst_obj;
     uacpi_size dst_size;
-    void *dst;
+    void *dst = UACPI_NULL;
+    uacpi_data_view wtr_response = { 0 };
 
     node = item_array_at(&op_ctx->items, 0)->node;
     src_obj = uacpi_namespace_node_get_object(node);
     dst_obj = item_array_at(&op_ctx->items, 1)->obj;
 
-    if (field_get_read_type(src_obj) == UACPI_OBJECT_BUFFER) {
+    if (op_ctx->op->code == UACPI_AML_OP_InternalOpReadFieldAsBuffer) {
         uacpi_buffer *buf;
 
-        buf = dst_obj->buffer;
-        dst_size = field_byte_size(src_obj);
+        ret = field_byte_size(src_obj, &dst_size);
+        if (uacpi_unlikely_error(ret))
+            return ret;
 
-        dst = uacpi_kernel_alloc_zeroed(dst_size);
-        if (dst == UACPI_NULL)
-            return UACPI_STATUS_OUT_OF_MEMORY;
+        if (dst_size != 0) {
+            buf = dst_obj->buffer;
 
-        buf->data = dst;
-        buf->size = dst_size;
+            dst = uacpi_kernel_alloc_zeroed(dst_size);
+            if (dst == UACPI_NULL)
+                return UACPI_STATUS_OUT_OF_MEMORY;
+
+            buf->data = dst;
+            buf->size = dst_size;
+        }
     } else {
         dst = &dst_obj->integer;
         dst_size = sizeof(uacpi_u64);
@@ -3821,7 +3835,21 @@ static uacpi_status handle_field_read(struct execution_context *ctx)
         return UACPI_STATUS_OK;
     }
 
-    return uacpi_read_field_unit(src_obj->field_unit, dst, dst_size);
+    ret = uacpi_read_field_unit(
+        src_obj->field_unit, dst, dst_size, &wtr_response
+    );
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    if (wtr_response.data != UACPI_NULL) {
+        uacpi_buffer *buf;
+
+        buf = dst_obj->buffer;
+        buf->data = wtr_response.data;
+        buf->size = wtr_response.length;
+    }
+
+    return ret;
 }
 
 static uacpi_status handle_create_buffer_field(struct execution_context *ctx)
@@ -4192,7 +4220,9 @@ static uacpi_bool maybe_end_block(struct execution_context *ctx)
     return UACPI_TRUE;
 }
 
-static uacpi_status store_to_target(uacpi_object *dst, uacpi_object *src)
+static uacpi_status store_to_target(
+    uacpi_object *dst, uacpi_object *src, uacpi_data_view *wtr_response
+)
 {
     uacpi_status ret;
 
@@ -4201,12 +4231,12 @@ static uacpi_status store_to_target(uacpi_object *dst, uacpi_object *src)
         ret = debug_store(src);
         break;
     case UACPI_OBJECT_REFERENCE:
-        ret = store_to_reference(dst, src);
+        ret = store_to_reference(dst, src, wtr_response);
         break;
 
     case UACPI_OBJECT_BUFFER_INDEX:
         src = uacpi_unwrap_internal_reference(src);
-        ret = object_assign_with_implicit_cast(dst, src);
+        ret = object_assign_with_implicit_cast(dst, src, wtr_response);
         break;
 
     case UACPI_OBJECT_INTEGER:
@@ -4233,8 +4263,38 @@ static uacpi_status handle_copy_object_or_store(struct execution_context *ctx)
     src = item_array_at(&op_ctx->items, 0)->obj;
     dst = item_array_at(&op_ctx->items, 1)->obj;
 
-    if (op_ctx->op->code == UACPI_AML_OP_StoreOp)
-        return store_to_target(dst, src);
+    if (op_ctx->op->code == UACPI_AML_OP_StoreOp) {
+        uacpi_status ret;
+        uacpi_data_view wtr_response = { 0 };
+
+        ret = store_to_target(dst, src, &wtr_response);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+
+        /*
+         * This was a write-then-read field access since we got a response
+         * buffer back from this store. Now we have to return this buffer
+         * as a prvalue from the StoreOp so that it can be used by AML to
+         * retrieve the response.
+         */
+        if (wtr_response.data != UACPI_NULL) {
+            uacpi_object *wtr_response_obj;
+
+            wtr_response_obj = uacpi_create_object(UACPI_OBJECT_BUFFER);
+            if (uacpi_unlikely(wtr_response_obj == UACPI_NULL)) {
+                uacpi_free(wtr_response.data, wtr_response.length);
+                return UACPI_STATUS_OUT_OF_MEMORY;
+            }
+
+            wtr_response_obj->buffer->data = wtr_response.data;
+            wtr_response_obj->buffer->size = wtr_response.length;
+
+            uacpi_object_unref(src);
+            item_array_at(&op_ctx->items, 0)->obj = wtr_response_obj;
+        }
+
+        return ret;
+    }
 
     if (dst->type != UACPI_OBJECT_REFERENCE)
         return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
@@ -4279,13 +4339,16 @@ static uacpi_status handle_inc_dec(struct execution_context *ctx)
         if (uacpi_unlikely(!field_allowed))
             goto out_bad_type;
 
-        true_src_type = field_get_read_type(src);
+        ret = field_get_read_type(src, &true_src_type);
+        if (uacpi_unlikely_error(ret))
+            goto out_bad_type;
         if (true_src_type != UACPI_OBJECT_INTEGER)
             goto out_bad_type;
 
         if (src->type == UACPI_OBJECT_FIELD_UNIT) {
             ret = uacpi_read_field_unit(
-                src->field_unit, &dst->integer, sizeof_int()
+                src->field_unit, &dst->integer, sizeof_int(),
+                UACPI_NULL
             );
             if (uacpi_unlikely_error(ret))
                 return ret;
@@ -5497,7 +5560,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 src = item->obj;
             }
 
-            ret = store_to_target(dst, src);
+            ret = store_to_target(dst, src, UACPI_NULL);
             break;
         }
 
@@ -5589,11 +5652,28 @@ static uacpi_status exec_op(struct execution_context *ctx)
             }
 
             case UACPI_OBJECT_BUFFER_FIELD:
-            case UACPI_OBJECT_FIELD_UNIT:
+            case UACPI_OBJECT_FIELD_UNIT: {
+                uacpi_object_type type;
+
                 if (!op_wants_term_arg_or_operand(prev_op))
                     break;
 
-                switch (field_get_read_type(obj)) {
+                ret = field_get_read_type(obj, &type);
+                if (uacpi_unlikely_error(ret)) {
+                    const uacpi_char *field_path;
+
+                    field_path = uacpi_namespace_node_generate_absolute_path(
+                        item->node
+                    );
+
+                    uacpi_error(
+                        "unable to perform a read from field %s: "
+                        "parent opregion gone\n", field_path
+                    );
+                    uacpi_free_absolute_path(field_path);
+                }
+
+                switch (type) {
                 case UACPI_OBJECT_BUFFER:
                     new_op = UACPI_AML_OP_InternalOpReadFieldAsBuffer;
                     break;
@@ -5605,6 +5685,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
                     continue;
                 }
                 break;
+            }
             default:
                 break;
             }
