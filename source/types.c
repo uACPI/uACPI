@@ -80,7 +80,7 @@ const uacpi_char *uacpi_address_space_to_string(
     case UACPI_ADDRESS_SPACE_PCC:
         return "PCC";
     case UACPI_ADDRESS_SPACE_PRM:
-        return "PRM";
+        return "PlatformRtMechanism";
     case UACPI_ADDRESS_SPACE_FFIXEDHW:
         return "FFixedHW";
     case UACPI_ADDRESS_SPACE_TABLE_DATA:
