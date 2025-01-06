@@ -3,7 +3,7 @@
 #include <uacpi/platform/config.h>
 
 #ifndef uacpi_memcpy
-void *uacpi_memcpy(void *dest, const void *src, size_t count)
+void *uacpi_memcpy(void *dest, const void *src, uacpi_size count)
 {
     uacpi_char *cd = dest;
     const uacpi_char *cs = src;
