@@ -665,9 +665,10 @@ UACPI_OP(                                                        \
     StoreOp, 0x70,                                               \
     {                                                            \
         UACPI_PARSE_OP_TERM_ARG,                                 \
-        UACPI_PARSE_OP_OBJECT_COPY_TO_PREV,                      \
         UACPI_PARSE_OP_SUPERNAME,                                \
         UACPI_PARSE_OP_INVOKE_HANDLER,                           \
+        UACPI_PARSE_OP_ITEM_POP,                                 \
+        UACPI_PARSE_OP_OBJECT_COPY_TO_PREV,                      \
     },                                                           \
     UACPI_OP_PROPERTY_TERM_ARG                                   \
 )                                                                \
