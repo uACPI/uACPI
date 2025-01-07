@@ -358,9 +358,12 @@ uacpi_status uacpi_object_get_power_resource_info(
 );
 
 typedef enum uacpi_region_op {
+    // data => uacpi_region_attach_data
     UACPI_REGION_OP_ATTACH = 0,
+    // data => uacpi_region_detach_data
     UACPI_REGION_OP_DETACH,
 
+    // data => uacpi_region_rw_data
     UACPI_REGION_OP_READ,
     UACPI_REGION_OP_WRITE,
 
