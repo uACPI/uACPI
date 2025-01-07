@@ -68,6 +68,7 @@ static void trace_region_io(
 
     switch (space) {
     case UACPI_ADDRESS_SPACE_IPMI:
+    case UACPI_ADDRESS_SPACE_PRM:
     case UACPI_ADDRESS_SPACE_FFIXEDHW:
         uacpi_trace(
             "write-then-read from [%s] %s[0x%016"UACPI_PRIX64"] = "
@@ -853,6 +854,7 @@ uacpi_status uacpi_dispatch_opregion_io(
         uacpi_region_gpio_rw_data gpio;
         uacpi_region_ipmi_rw_data ipmi;
         uacpi_region_ffixedhw_rw_data ffixedhw;
+        uacpi_region_prm_rw_data prm;
     } handler_data;
 
     ret = upgrade_to_opregion_lock();
@@ -964,6 +966,10 @@ uacpi_status uacpi_dispatch_opregion_io(
         handler_data.ffixedhw.in_out_message = data.buffer;
         handler_data.ffixedhw.command = abs_offset;
         op = UACPI_REGION_OP_FFIXEDHW_COMMAND;
+        break;
+    case UACPI_ADDRESS_SPACE_PRM:
+        handler_data.prm.in_out_message = data.buffer;
+        op = UACPI_REGION_OP_PRM_COMMAND;
         break;
     default:
         handler_data.rw.byte_width = field->access_width_bytes;

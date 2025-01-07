@@ -256,6 +256,8 @@ static uacpi_size wtr_buffer_size(
     switch (space) {
     case UACPI_ADDRESS_SPACE_IPMI:
         return SERIAL_HEADER_SIZE + IPMI_DATA_SIZE;
+    case UACPI_ADDRESS_SPACE_PRM:
+        return 26;
     case UACPI_ADDRESS_SPACE_FFIXEDHW:
         return 256;
     default:
@@ -308,6 +310,7 @@ static uacpi_status handle_special_field(
             uacpi_memcpy_zerout(buf.data, &in_out, buf.length, sizeof(in_out));
         goto out_handled;
     case UACPI_ADDRESS_SPACE_IPMI:
+    case UACPI_ADDRESS_SPACE_PRM:
         if (uacpi_unlikely(op == UACPI_REGION_OP_READ)) {
             ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
             uacpi_trace_region_error(
