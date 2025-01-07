@@ -42,7 +42,7 @@ static uint8_t *io_space;
 uacpi_status uacpi_kernel_initialize(uacpi_init_level lvl)
 {
     if (lvl == UACPI_INIT_LEVEL_EARLY)
-        io_space = new uint8_t[UINT16_MAX + 1];
+        io_space = new uint8_t[UINT16_MAX + 1]{};
     return UACPI_STATUS_OK;
 }
 
