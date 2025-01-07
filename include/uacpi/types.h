@@ -373,6 +373,9 @@ typedef enum uacpi_region_op {
 
     // data => uacpi_region_ipmi_rw_data
     UACPI_REGION_OP_IPMI_COMMAND,
+
+    // data => uacpi_region_ffixedhw_rw_data
+    UACPI_REGION_OP_FFIXEDHW_COMMAND,
 } uacpi_region_op;
 
 typedef struct uacpi_generic_region_info {
@@ -435,6 +438,8 @@ typedef struct uacpi_region_ipmi_rw_data
     uacpi_data_view in_out_message;
     uacpi_u64 command;
 } uacpi_region_ipmi_rw_data;
+
+typedef uacpi_region_ipmi_rw_data uacpi_region_ffixedhw_rw_data;
 
 typedef struct uacpi_region_detach_data {
     void *handler_context;

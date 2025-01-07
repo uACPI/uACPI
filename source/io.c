@@ -256,6 +256,8 @@ static uacpi_size wtr_buffer_size(
     switch (space) {
     case UACPI_ADDRESS_SPACE_IPMI:
         return SERIAL_HEADER_SIZE + IPMI_DATA_SIZE;
+    case UACPI_ADDRESS_SPACE_FFIXEDHW:
+        return 256;
     default:
         return 0;
     }
@@ -313,7 +315,8 @@ static uacpi_status handle_special_field(
             );
             goto out_handled;
         }
-
+        UACPI_FALLTHROUGH;
+    case UACPI_ADDRESS_SPACE_FFIXEDHW:
         goto do_wtr;
     default:
         return ret;
