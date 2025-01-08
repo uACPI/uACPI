@@ -77,6 +77,15 @@ static void trace_region_io(
             UACPI_FMT64(offset), data.buffer.length
         );
         break;
+    case UACPI_ADDRESS_SPACE_SMBUS:
+    case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
+        uacpi_trace(
+            "%s [%s] %s[0x%016"UACPI_PRIX64"] = "
+            "<buffer of %zu bytes>\n", type_str, path,
+            uacpi_address_space_to_string(space),
+            UACPI_FMT64(offset), data.buffer.length
+        );
+        break;
     case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
         uacpi_trace(
             "%s [%s] %s pins[%u..%u] = 0x%"UACPI_PRIX64"\n",
@@ -855,6 +864,7 @@ uacpi_status uacpi_dispatch_opregion_io(
         uacpi_region_ipmi_rw_data ipmi;
         uacpi_region_ffixedhw_rw_data ffixedhw;
         uacpi_region_prm_rw_data prm;
+        uacpi_region_serial_rw_data serial;
     } handler_data;
 
     ret = upgrade_to_opregion_lock();
@@ -970,6 +980,31 @@ uacpi_status uacpi_dispatch_opregion_io(
     case UACPI_ADDRESS_SPACE_PRM:
         handler_data.prm.in_out_message = data.buffer;
         op = UACPI_REGION_OP_PRM_COMMAND;
+        break;
+    case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
+    case UACPI_ADDRESS_SPACE_SMBUS:
+        ret = uacpi_object_get_string_or_buffer(
+            field->connection, &handler_data.serial.connection
+        );
+        if (uacpi_unlikely_error(ret))
+            goto io_done;
+
+        handler_data.serial.command = abs_offset;
+        handler_data.serial.in_out_buffer = data.buffer;
+        handler_data.serial.access_attribute = field->attributes;
+
+        switch (field->attributes) {
+        case UACPI_ACCESS_ATTRIBUTE_BYTES:
+        case UACPI_ACCESS_ATTRIBUTE_RAW_BYTES:
+        case UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES:
+            handler_data.serial.access_length = field->access_length;
+            break;
+        default:
+            handler_data.serial.access_length = 0;
+        }
+
+        op = op == UACPI_REGION_OP_READ ?
+            UACPI_REGION_OP_SERIAL_READ : UACPI_REGION_OP_SERIAL_WRITE;
         break;
     default:
         handler_data.rw.byte_width = field->access_width_bytes;

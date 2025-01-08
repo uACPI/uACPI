@@ -382,6 +382,10 @@ typedef enum uacpi_region_op {
 
     // data => uacpi_region_prm_rw_data
     UACPI_REGION_OP_PRM_COMMAND,
+
+    // data => uacpi_region_serial_rw_data
+    UACPI_REGION_OP_SERIAL_READ,
+    UACPI_REGION_OP_SERIAL_WRITE,
 } uacpi_region_op;
 
 typedef struct uacpi_generic_region_info {
@@ -453,6 +457,36 @@ typedef struct uacpi_region_prm_rw_data
     void *region_context;
     uacpi_data_view in_out_message;
 } uacpi_region_prm_rw_data;
+
+typedef enum uacpi_access_attribute {
+    UACPI_ACCESS_ATTRIBUTE_QUICK = 0x02,
+    UACPI_ACCESS_ATTRIBUTE_SEND_RECEIVE = 0x04,
+    UACPI_ACCESS_ATTRIBUTE_BYTE = 0x06,
+    UACPI_ACCESS_ATTRIBUTE_WORD = 0x08,
+    UACPI_ACCESS_ATTRIBUTE_BLOCK = 0x0A,
+    UACPI_ACCESS_ATTRIBUTE_BYTES = 0x0B,
+    UACPI_ACCESS_ATTRIBUTE_PROCESS_CALL = 0x0C,
+    UACPI_ACCESS_ATTRIBUTE_BLOCK_PROCESS_CALL = 0x0D,
+    UACPI_ACCESS_ATTRIBUTE_RAW_BYTES = 0x0E,
+    UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES = 0x0F,
+} uacpi_access_attribute;
+
+typedef struct uacpi_region_serial_rw_data {
+    void *handler_context;
+    void *region_context;
+    uacpi_u64 command;
+    uacpi_data_view connection;
+    uacpi_data_view in_out_buffer;
+    uacpi_access_attribute access_attribute;
+
+    /*
+     * Applicable if access_attribute is one of:
+     * - UACPI_ACCESS_ATTRIBUTE_BYTES
+     * - UACPI_ACCESS_ATTRIBUTE_RAW_BYTES
+     * - UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES
+     */
+    uacpi_u8 access_length;
+} uacpi_region_serial_rw_data;
 
 typedef struct uacpi_region_detach_data {
     void *handler_context;
