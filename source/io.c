@@ -247,22 +247,65 @@ out:
 #define SERIAL_HEADER_SIZE 2
 #define IPMI_DATA_SIZE 64
 
-static uacpi_size wtr_buffer_size(
-    uacpi_field_unit *field, uacpi_address_space space
+static uacpi_status wtr_buffer_size(
+    uacpi_field_unit *field, uacpi_address_space space,
+    uacpi_size *out_size
 )
 {
-    UACPI_UNUSED(field);
-
     switch (space) {
     case UACPI_ADDRESS_SPACE_IPMI:
-        return SERIAL_HEADER_SIZE + IPMI_DATA_SIZE;
+        *out_size = SERIAL_HEADER_SIZE + IPMI_DATA_SIZE;
+        break;
     case UACPI_ADDRESS_SPACE_PRM:
-        return 26;
+        *out_size = 26;
+        break;
     case UACPI_ADDRESS_SPACE_FFIXEDHW:
-        return 256;
-    default:
-        return 0;
+        *out_size = 256;
+        break;
+    case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
+    case UACPI_ADDRESS_SPACE_SMBUS: {
+        uacpi_size size_for_protocol = SERIAL_HEADER_SIZE;
+
+        switch (field->attributes) {
+        case UACPI_ACCESS_ATTRIBUTE_QUICK:
+            break; // + 0
+        case UACPI_ACCESS_ATTRIBUTE_SEND_RECEIVE:
+        case UACPI_ACCESS_ATTRIBUTE_BYTE:
+            size_for_protocol += 1;
+            break;
+
+        case UACPI_ACCESS_ATTRIBUTE_WORD:
+        case UACPI_ACCESS_ATTRIBUTE_PROCESS_CALL:
+            size_for_protocol += 2;
+            break;
+
+        case UACPI_ACCESS_ATTRIBUTE_BYTES:
+            size_for_protocol += field->access_length;
+            break;
+
+        case UACPI_ACCESS_ATTRIBUTE_BLOCK:
+        case UACPI_ACCESS_ATTRIBUTE_BLOCK_PROCESS_CALL:
+        case UACPI_ACCESS_ATTRIBUTE_RAW_BYTES:
+        case UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES:
+            size_for_protocol += 255;
+            break;
+
+        default:
+            uacpi_error(
+                "unsupported field@%p access attribute %d\n",
+                field, field->attributes
+            );
+            return UACPI_STATUS_UNIMPLEMENTED;
+        }
+
+        *out_size = size_for_protocol;
+        break;
     }
+    default:
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    return UACPI_STATUS_OK;
 }
 
 static uacpi_status handle_special_field(
@@ -320,13 +363,17 @@ static uacpi_status handle_special_field(
         }
         UACPI_FALLTHROUGH;
     case UACPI_ADDRESS_SPACE_FFIXEDHW:
+    case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
+    case UACPI_ADDRESS_SPACE_SMBUS:
         goto do_wtr;
     default:
         return ret;
     }
 
 do_wtr:
-    wtr_buffer.length = wtr_buffer_size(field, region->space);
+    ret = wtr_buffer_size(field, region->space, &wtr_buffer.length);
+    if (uacpi_unlikely_error(ret))
+        goto out_handled;
 
     wtr_buffer.data = uacpi_kernel_alloc(wtr_buffer.length);
     if (uacpi_unlikely(wtr_buffer.data == UACPI_NULL)) {
