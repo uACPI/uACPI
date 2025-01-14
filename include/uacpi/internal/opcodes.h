@@ -241,6 +241,15 @@ enum uacpi_parse_op {
      */
     UACPI_PARSE_OP_IF_LAST_EQUALS,
 
+   /*
+    * Execute the next instruction only if the last object is a false value
+    * (has a value of 0), otherwise skip decode_ops[pc + 1] bytes.
+    */
+    UACPI_PARSE_OP_IF_LAST_FALSE,
+
+    // The inverse of UACPI_PARSE_OP_IF_LAST_FALSE
+    UACPI_PARSE_OP_IF_LAST_TRUE,
+
     /*
      * pc = decode_ops[pc + 1]
      */
