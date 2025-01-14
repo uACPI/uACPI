@@ -253,6 +253,8 @@ const uacpi_char *const pop_names[UACPI_PARSE_OP_MAX + 1] = {
     [POP(IF_LAST_EQUALS)] = "IF_LAST_EQUALS",
     [POP(IF_LAST_FALSE)] = "IF_LAST_FALSE",
     [POP(IF_LAST_TRUE)] = "IF_LAST_TRUE",
+    [POP(SWITCH_TO_NEXT_IF_EQUALS)] = "SWITCH_TO_NEXT_IF_EQUALS",
+    [POP(IF_SWITCHED_FROM)] = "IF_SWITCHED_FROM",
     [POP(JMP)] = "JMP",
 };
 
