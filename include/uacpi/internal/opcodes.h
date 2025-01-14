@@ -928,6 +928,9 @@ UACPI_OP(                                                        \
     {                                                            \
         UACPI_PARSE_OP_TRACKED_PKGLEN,                           \
         UACPI_PARSE_OP_OPERAND,                                  \
+        UACPI_PARSE_OP_IF_LAST_NULL, 3,                          \
+            UACPI_PARSE_OP_EMIT_SKIP_WARN,                       \
+            UACPI_PARSE_OP_JMP, 9,                               \
         UACPI_PARSE_OP_IF_LAST_FALSE, 4,                         \
             UACPI_PARSE_OP_SWITCH_TO_NEXT_IF_EQUALS, 0xA1, 0x00, \
             UACPI_PARSE_OP_END,                                  \
@@ -938,6 +941,10 @@ UACPI_OP(                                                        \
    ElseOp, 0xA1,                                                 \
    {                                                             \
        UACPI_PARSE_OP_IF_SWITCHED_FROM, 0xA0, 0x00, 10,          \
+           UACPI_PARSE_OP_IF_LAST_NULL, 3,                       \
+               UACPI_PARSE_OP_TRACKED_PKGLEN,                    \
+               UACPI_PARSE_OP_EMIT_SKIP_WARN,                    \
+               UACPI_PARSE_OP_END,                               \
            UACPI_PARSE_OP_ITEM_POP,                              \
            UACPI_PARSE_OP_ITEM_POP,                              \
            UACPI_PARSE_OP_PKGLEN,                                \
@@ -951,7 +958,7 @@ UACPI_OP(                                                        \
     {                                                            \
         UACPI_PARSE_OP_TRACKED_PKGLEN,                           \
         UACPI_PARSE_OP_OPERAND,                                  \
-        UACPI_PARSE_OP_INVOKE_HANDLER,                           \
+        UACPI_PARSE_OP_SKIP_WITH_WARN_IF_NULL, 1,                \
         UACPI_PARSE_OP_IF_LAST_TRUE, 1,                          \
             UACPI_PARSE_OP_INVOKE_HANDLER,                       \
     }                                                            \
