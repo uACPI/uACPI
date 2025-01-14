@@ -5486,15 +5486,18 @@ static uacpi_status exec_op(struct execution_context *ctx)
             if (uacpi_unlikely_error(ret)) {
                 enum uacpi_log_level lvl = UACPI_LOG_ERROR;
                 uacpi_status trace_ret = ret;
+                uacpi_bool abort_whileif = UACPI_FALSE;
 
-                if (frame->method->named_objects_persist) {
-                    uacpi_bool is_ok;
+                if (frame->method->named_objects_persist &&
+                    (ret == UACPI_STATUS_AML_OBJECT_ALREADY_EXISTS ||
+                     ret == UACPI_STATUS_NOT_FOUND)) {
+                    struct op_context *first_ctx;
 
-                    is_ok = op_allows_unresolved_if_load(op);
-                    is_ok &= ret == UACPI_STATUS_AML_OBJECT_ALREADY_EXISTS ||
-                             ret == UACPI_STATUS_NOT_FOUND;
+                    first_ctx = op_context_array_at(&frame->pending_ops, 0);
+                    abort_whileif = first_ctx->op->code == UACPI_AML_OP_WhileOp ||
+                                    first_ctx->op->code == UACPI_AML_OP_IfOp;
 
-                    if (is_ok) {
+                    if (op_allows_unresolved_if_load(op) || abort_whileif) {
                         lvl = UACPI_LOG_WARN;
                         ret = UACPI_STATUS_OK;
                     }
@@ -5503,6 +5506,16 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 trace_named_object_lookup_or_creation_failure(
                     frame, offset, op, trace_ret, lvl
                 );
+
+                if (abort_whileif) {
+                    while (op_context_array_size(&frame->pending_ops) != 1)
+                        pop_op(ctx);
+
+                    op_ctx = op_context_array_at(&frame->pending_ops, 0);
+                    op_ctx->pc++;
+                    op_ctx->preempted = UACPI_FALSE;
+                    break;
+                }
 
                 if (ret == UACPI_STATUS_NOT_FOUND)
                     ret = UACPI_STATUS_AML_UNDEFINED_REFERENCE;
