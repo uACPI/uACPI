@@ -329,7 +329,6 @@ struct execution_context {
     struct op_context *prev_op_ctx;
     struct op_context *cur_op_ctx;
 
-    uacpi_bool skip_else;
     uacpi_u8 sync_level;
 };
 
@@ -1974,6 +1973,9 @@ static uacpi_status begin_block_execution(struct execution_context *ctx)
 
     pkg = &item_array_at(&op_ctx->items, 0)->pkg;
 
+    // Disarm the tracked package so that we don't skip the Scope
+    op_ctx->tracked_pkg_idx = 0;
+
     switch (op_ctx->op->code) {
     case UACPI_AML_OP_IfOp:
         block->type = CODE_BLOCK_IF;
@@ -2012,9 +2014,6 @@ static uacpi_status begin_block_execution(struct execution_context *ctx)
     case UACPI_AML_OP_ProcessorOp:
     case UACPI_AML_OP_PowerResOp:
     case UACPI_AML_OP_ThermalZoneOp:
-        // Disarm the tracked package so that we don't skip the Scope
-        op_ctx->tracked_pkg_idx = 0;
-
         block->type = CODE_BLOCK_SCOPE;
         block->node = item_array_at(&op_ctx->items, 1)->node;
         break;
@@ -4032,15 +4031,8 @@ static uacpi_status create_named_scope(struct op_context *op_ctx)
 static uacpi_status handle_code_block(struct execution_context *ctx)
 {
     struct op_context *op_ctx = ctx->cur_op_ctx;
-    struct package_length *pkg;
-    uacpi_bool skip_block;
-
-    pkg = &item_array_at(&op_ctx->items, 0)->pkg;
 
     switch (op_ctx->op->code) {
-    case UACPI_AML_OP_ElseOp:
-        skip_block = ctx->skip_else;
-        break;
     case UACPI_AML_OP_ProcessorOp:
     case UACPI_AML_OP_PowerResOp:
     case UACPI_AML_OP_ThermalZoneOp:
@@ -4054,23 +4046,13 @@ static uacpi_status handle_code_block(struct execution_context *ctx)
         UACPI_FALLTHROUGH;
     }
     case UACPI_AML_OP_ScopeOp:
-        skip_block = UACPI_FALSE;
-        break;
     case UACPI_AML_OP_IfOp:
+    case UACPI_AML_OP_ElseOp:
     case UACPI_AML_OP_WhileOp: {
-        uacpi_object *operand;
-
-        operand = item_array_at(&op_ctx->items, 1)->obj;
-        skip_block = operand->integer == 0;
         break;
     }
     default:
         return UACPI_STATUS_INVALID_ARGUMENT;
-    }
-
-    if (skip_block) {
-        ctx->cur_frame->code_offset = pkg->end;
-        return UACPI_STATUS_OK;
     }
 
     return begin_block_execution(ctx);
@@ -4229,13 +4211,8 @@ static uacpi_bool maybe_end_block(struct execution_context *ctx)
     if (cur_frame->code_offset != block->end)
         return UACPI_FALSE;
 
-    ctx->skip_else = UACPI_FALSE;
-
-    if (block->type == CODE_BLOCK_WHILE) {
+    if (block->type == CODE_BLOCK_WHILE)
         cur_frame->code_offset = block->begin;
-    } else if (block->type == CODE_BLOCK_IF) {
-        ctx->skip_else = UACPI_TRUE;
-    }
 
     frame_reset_post_end_block(ctx, block->type);
     return UACPI_TRUE;
@@ -5956,7 +5933,6 @@ uacpi_status uacpi_execute_control_method(
         if (uacpi_unlikely_error(ret))
             goto handle_method_abort;
 
-        ctx->skip_else = UACPI_FALSE;
         continue;
 
     handle_method_abort:
