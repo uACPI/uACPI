@@ -24,6 +24,9 @@ enum uacpi_parse_op {
      */
     UACPI_PARSE_OP_SKIP_WITH_WARN_IF_NULL,
 
+    // Emit a warning as if the current opcode is being skipped
+    UACPI_PARSE_OP_EMIT_SKIP_WARN,
+
     // SimpleName := NameString | ArgObj | LocalObj
     UACPI_PARSE_OP_SIMPLE_NAME,
 
