@@ -4722,6 +4722,11 @@ static uacpi_status typecheck_computational_data(
     }
 }
 
+static void emit_op_skip_warn(const struct op_context *op_ctx)
+{
+    EXEC_OP_WARN("skipping due to previous errors");
+}
+
 static void trace_named_object_lookup_or_creation_failure(
     struct call_frame *frame, uacpi_size offset, enum uacpi_parse_op op,
     uacpi_status ret, enum uacpi_log_level level
@@ -5214,7 +5219,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 if (item_array_at(&op_ctx->items, idx)->handle != UACPI_NULL)
                     break;
 
-                EXEC_OP_WARN("skipping due to previous errors");
+                emit_op_skip_warn(op_ctx);
             }
 
             if (op_ctx->tracked_pkg_idx) {
@@ -5230,6 +5235,10 @@ static uacpi_status exec_op(struct execution_context *ctx)
 
             return UACPI_STATUS_OK;
         }
+
+        case UACPI_PARSE_OP_EMIT_SKIP_WARN:
+            emit_op_skip_warn(op_ctx);
+            break;
 
         case UACPI_PARSE_OP_SIMPLE_NAME:
         case UACPI_PARSE_OP_SUPERNAME:
