@@ -644,25 +644,44 @@ static uacpi_status do_install_node_item(struct call_frame *frame,
     return ret;
 }
 
+static uacpi_u8 peek_next_op(struct call_frame *frame, uacpi_aml_op *out_op)
+{
+    uacpi_aml_op op;
+    uacpi_size bytes_left;
+    uacpi_u8 length = 0;
+    uacpi_u8 *cursor;
+    struct code_block *block;
+
+    block = code_block_array_last(&frame->code_blocks);
+    bytes_left = block->end - frame->code_offset;
+    if (bytes_left == 0)
+        return 0;
+
+    cursor = call_frame_cursor(frame);
+
+    op = AML_READ(cursor, length++);
+    if (op == UACPI_EXT_PREFIX) {
+        if (uacpi_unlikely(bytes_left < 2))
+            return 0;
+
+        op <<= 8;
+        op |= AML_READ(cursor, length++);
+    }
+
+    *out_op = op;
+    return length;
+}
+
 static uacpi_status get_op(struct execution_context *ctx)
 {
     uacpi_aml_op op;
-    struct call_frame *frame = ctx->cur_frame;
-    void *code = frame->method->code;
-    uacpi_size size = frame->method->size;
+    uacpi_u8 length;
 
-    if (uacpi_unlikely(frame->code_offset >= size))
+    length = peek_next_op(ctx->cur_frame, &op);
+    if (uacpi_unlikely(length == 0))
         return UACPI_STATUS_AML_BAD_ENCODING;
 
-    op = AML_READ(code, frame->code_offset++);
-    if (op == UACPI_EXT_PREFIX) {
-        if (uacpi_unlikely(frame->code_offset >= size))
-            return UACPI_STATUS_AML_BAD_ENCODING;
-
-        op <<= 8;
-        op |= AML_READ(code, frame->code_offset++);
-    }
-
+    ctx->cur_frame->code_offset += length;
     g_uacpi_rt_ctx.opcodes_executed++;
 
     ctx->cur_op = uacpi_get_op_spec(op);
