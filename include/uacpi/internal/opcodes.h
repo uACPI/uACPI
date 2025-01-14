@@ -227,7 +227,7 @@ enum uacpi_parse_op {
      * Execute the next instruction only if the last immediate is equal to
      * decode_ops[pc + 1], otherwise skip decode_ops[pc + 2] bytes.
      */
-    UACPI_PARSE_OP_IF_EQUALS,
+    UACPI_PARSE_OP_IF_LAST_EQUALS,
 
     /*
      * pc = decode_ops[pc + 1]

@@ -5385,7 +5385,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
             break;
         }
 
-        case UACPI_PARSE_OP_IF_EQUALS: {
+        case UACPI_PARSE_OP_IF_LAST_EQUALS: {
             uacpi_u8 value, bytes_skip;
 
             value = op_decode_byte(op_ctx);
