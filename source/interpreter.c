@@ -57,6 +57,8 @@ struct op_context {
      */
     uacpi_u8 tracked_pkg_idx;
 
+    uacpi_aml_op switched_from;
+
     const struct uacpi_op_spec *op;
     struct item_array items;
 };
@@ -4562,6 +4564,16 @@ static uacpi_u8 op_decode_byte(struct op_context *ctx)
     return byte;
 }
 
+static uacpi_aml_op op_decode_aml_op(struct op_context *op_ctx)
+{
+    uacpi_aml_op op = 0;
+
+    op |= op_decode_byte(op_ctx);
+    op |= op_decode_byte(op_ctx) << 8;
+
+    return op;
+}
+
 // MSVC doesn't support __VA_OPT__ so we do this weirdness
 #define EXEC_OP_DO_LVL(lvl, reason, ...)                              \
     uacpi_##lvl("Op 0x%04X ('%s'): "reason"\n",                       \
@@ -5159,6 +5171,19 @@ method_dispatch_error:
     return ret;
 }
 
+static void apply_tracked_pkg(
+    struct call_frame *frame, struct op_context *op_ctx
+)
+{
+    struct item *item;
+
+    if (op_ctx->tracked_pkg_idx == 0)
+        return;
+
+    item = item_array_at(&op_ctx->items, op_ctx->tracked_pkg_idx - 1);
+    frame->code_offset = item->pkg.end;
+}
+
 static uacpi_status exec_op(struct execution_context *ctx)
 {
     uacpi_status ret = UACPI_STATUS_OK;
@@ -5241,10 +5266,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 emit_op_skip_warn(op_ctx);
             }
 
-            if (op_ctx->tracked_pkg_idx) {
-                item = item_array_at(&op_ctx->items, op_ctx->tracked_pkg_idx - 1);
-                frame->code_offset = item->pkg.end;
-            }
+            apply_tracked_pkg(frame, op_ctx);
 
             pop_op(ctx);
             if (ctx->cur_op_ctx) {
@@ -5743,6 +5765,41 @@ static uacpi_status exec_op(struct execution_context *ctx)
 
             op_ctx->pc = 0;
             op_ctx->op = uacpi_get_op_spec(new_op);
+            break;
+        }
+
+        case UACPI_PARSE_OP_SWITCH_TO_NEXT_IF_EQUALS: {
+            uacpi_aml_op op, target_op;
+            uacpi_u32 cur_offset;
+            uacpi_u8 op_length;
+
+            cur_offset = frame->code_offset;
+            apply_tracked_pkg(frame, op_ctx);
+            op_length = peek_next_op(frame, &op);
+
+            target_op = op_decode_aml_op(op_ctx);
+            if (op_length == 0 || op != target_op) {
+                // Revert tracked package
+                frame->code_offset = cur_offset;
+                break;
+            }
+
+            frame->code_offset += op_length;
+            op_ctx->switched_from = op_ctx->op->code;
+            op_ctx->op = uacpi_get_op_spec(target_op);
+            op_ctx->pc = 0;
+            break;
+        }
+
+        case UACPI_PARSE_OP_IF_SWITCHED_FROM: {
+            uacpi_aml_op target_op;
+            uacpi_u8 skip_bytes;
+
+            target_op = op_decode_aml_op(op_ctx);
+            skip_bytes = op_decode_byte(op_ctx);
+
+            if (op_ctx->switched_from != target_op)
+                op_ctx->pc += skip_bytes;
             break;
         }
 

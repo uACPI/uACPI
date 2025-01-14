@@ -251,6 +251,21 @@ enum uacpi_parse_op {
     UACPI_PARSE_OP_IF_LAST_TRUE,
 
     /*
+     * Switch to opcode at decode_ops[pc + 1] only if the next AML instruction
+     * in the stream is equal to it. Note that this looks ahead of the tracked
+     * package if one is active. Switching to the next op also applies the
+     * currently tracked package.
+     */
+    UACPI_PARSE_OP_SWITCH_TO_NEXT_IF_EQUALS,
+
+   /*
+    * Execute the next instruction only if this op was switched to from op at
+    * (decode_ops[pc + 1] | decode_ops[pc + 2] << 8), otherwise skip
+    * decode_ops[pc + 3] bytes.
+    */
+    UACPI_PARSE_OP_IF_SWITCHED_FROM,
+
+    /*
      * pc = decode_ops[pc + 1]
      */
     UACPI_PARSE_OP_JMP,
