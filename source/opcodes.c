@@ -247,7 +247,9 @@ const uacpi_char *const pop_names[UACPI_PARSE_OP_MAX + 1] = {
     [POP(CONVERT_NAMESTRING)] = "CONVERT_NAMESTRING",
     [POP(IF_HAS_DATA)] = "IF_HAS_DATA",
     [POP(IF_NULL)] = "IF_NULL",
+    [POP(IF_LAST_NULL)] = "IF_LAST_NULL",
     [POP(IF_NOT_NULL)] = "IF_NOT_NULL",
+    [POP(IF_LAST_NOT_NULL)] = "IF_NOT_NULL",
     [POP(IF_LAST_EQUALS)] = "IF_LAST_EQUALS",
     [POP(JMP)] = "JMP",
 };

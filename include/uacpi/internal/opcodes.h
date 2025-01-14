@@ -223,8 +223,17 @@ enum uacpi_parse_op {
      */
     UACPI_PARSE_OP_IF_NULL,
 
+   /*
+    * Execute the next instruction only if the handle at
+    * items[-1] is null. Otherwise skip decode_ops[pc + 1] bytes.
+    */
+    UACPI_PARSE_OP_IF_LAST_NULL,
+
     // The inverse of UACPI_PARSE_OP_IF_NULL
     UACPI_PARSE_OP_IF_NOT_NULL,
+
+    // The inverse of UACPI_PARSE_OP_IF_LAST_NULL
+    UACPI_PARSE_OP_IF_LAST_NOT_NULL,
 
     /*
      * Execute the next instruction only if the last immediate is equal to

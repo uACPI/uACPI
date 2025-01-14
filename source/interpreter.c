@@ -5378,15 +5378,23 @@ static uacpi_status exec_op(struct execution_context *ctx)
         }
 
         case UACPI_PARSE_OP_IF_NOT_NULL:
-        case UACPI_PARSE_OP_IF_NULL: {
+        case UACPI_PARSE_OP_IF_NULL:
+        case UACPI_PARSE_OP_IF_LAST_NULL:
+        case UACPI_PARSE_OP_IF_LAST_NOT_NULL: {
             uacpi_u8 idx, bytes_skip;
             uacpi_bool is_null, skip_if_null;
 
-            idx = op_decode_byte(op_ctx);
-            bytes_skip = op_decode_byte(op_ctx);
+            if (op == UACPI_PARSE_OP_IF_LAST_NULL ||
+                op == UACPI_PARSE_OP_IF_LAST_NOT_NULL) {
+                is_null = item->handle == UACPI_NULL;
+            } else {
+                idx = op_decode_byte(op_ctx);
+                is_null = item_array_at(&op_ctx->items, idx)->handle == UACPI_NULL;
+            }
 
-            is_null = item_array_at(&op_ctx->items, idx)->handle == UACPI_NULL;
-            skip_if_null = op == UACPI_PARSE_OP_IF_NOT_NULL;
+            bytes_skip = op_decode_byte(op_ctx);
+            skip_if_null = op == UACPI_PARSE_OP_IF_NOT_NULL ||
+                           op == UACPI_PARSE_OP_IF_LAST_NOT_NULL;
 
             if (is_null == skip_if_null)
                 op_ctx->pc += bytes_skip;
