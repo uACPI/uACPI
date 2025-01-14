@@ -5414,6 +5414,21 @@ static uacpi_status exec_op(struct execution_context *ctx)
             break;
         }
 
+        case UACPI_PARSE_OP_IF_LAST_FALSE:
+        case UACPI_PARSE_OP_IF_LAST_TRUE: {
+            uacpi_u8 bytes_skip;
+            uacpi_bool is_false, skip_if_false;
+
+            bytes_skip = op_decode_byte(op_ctx);
+            is_false = item->obj->integer == 0;
+            skip_if_false = op == UACPI_PARSE_OP_IF_LAST_TRUE;
+
+            if (is_false == skip_if_false)
+                op_ctx->pc += bytes_skip;
+
+            break;
+        }
+
         case UACPI_PARSE_OP_JMP: {
             op_ctx->pc = op_decode_byte(op_ctx);
             break;
