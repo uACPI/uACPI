@@ -1547,12 +1547,21 @@ struct resource_conversion_ctx {
         uacpi_size size;
     };
     uacpi_status st;
+    uacpi_bool just_one;
 };
+
+static uacpi_iteration_decision conditional_continue(
+    struct resource_conversion_ctx *ctx
+)
+{
+    return ctx->just_one ? UACPI_ITERATION_DECISION_BREAK :
+                           UACPI_ITERATION_DECISION_CONTINUE;
+}
 
 // Opcodes that are the same for both AML->native and native->AML
 #define CONVERSION_OPCODES_COMMON(native_buf)                                \
     case UACPI_RESOURCE_CONVERT_OPCODE_END:                                  \
-        return UACPI_ITERATION_DECISION_CONTINUE;                            \
+        return conditional_continue(ctx);                                    \
                                                                              \
     case UACPI_RESOURCE_CONVERT_OPCODE_FIELD_8:                              \
     case UACPI_RESOURCE_CONVERT_OPCODE_FIELD_16:                             \
@@ -1679,7 +1688,7 @@ static uacpi_iteration_decision do_aml_resource_to_native(
     base_aml_size_with_header += header_size;
 
     if (insns == UACPI_NULL)
-        return UACPI_ITERATION_DECISION_CONTINUE;
+        return conditional_continue(ctx);
 
     for (;;) {
         insn = &insns[pc++];
@@ -1918,24 +1927,6 @@ static uacpi_iteration_decision do_aml_resource_to_native(
     }
 }
 
-static uacpi_status aml_resources_to_native(
-    uacpi_data_view aml_buffer, void *native_buffer
-)
-{
-    uacpi_status ret;
-    struct resource_conversion_ctx ctx = {
-        .buf = native_buffer,
-    };
-
-    ret = uacpi_for_each_aml_resource(
-        aml_buffer, do_aml_resource_to_native, &ctx
-    );
-    if (uacpi_unlikely_error(ret))
-        return ret;
-
-    return ctx.st;
-}
-
 static uacpi_iteration_decision accumulate_native_buffer_size(
     void *opaque, uacpi_u8 *data, uacpi_u16 resource_size,
     const struct uacpi_resource_spec *spec
@@ -1953,7 +1944,7 @@ static uacpi_iteration_decision accumulate_native_buffer_size(
     }
 
     ctx->size += size_for_this;
-    return UACPI_ITERATION_DECISION_CONTINUE;
+    return conditional_continue(ctx);
 }
 
 static uacpi_status eval_resource_helper(
@@ -2005,7 +1996,11 @@ uacpi_status uacpi_native_resources_from_aml(
     resources->length = ctx.size;
     resources->entries = UACPI_PTR_ADD(resources, sizeof(uacpi_resources));
 
-    ret = aml_resources_to_native(aml_buffer, resources->entries);
+    ctx = (struct resource_conversion_ctx) {
+        .buf = resources->entries,
+    };
+
+    ret = uacpi_for_each_aml_resource(aml_buffer, do_aml_resource_to_native, &ctx);
     if (uacpi_unlikely_error(ret)) {
         uacpi_free_resources(resources);
         return ret;
@@ -2015,12 +2010,55 @@ uacpi_status uacpi_native_resources_from_aml(
     return ret;
 }
 
+uacpi_status uacpi_get_resource_from_buffer(
+    uacpi_data_view aml_buffer, uacpi_resource **out_resource
+)
+{
+    uacpi_status ret;
+    struct resource_conversion_ctx ctx = {
+        .just_one = UACPI_TRUE,
+    };
+    uacpi_resource *resource;
+
+    ret = uacpi_for_each_aml_resource(
+        aml_buffer, accumulate_native_buffer_size, &ctx
+    );
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    resource = uacpi_kernel_alloc_zeroed(ctx.size);
+    if (uacpi_unlikely(resource == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    ctx = (struct resource_conversion_ctx) {
+        .buf = resource,
+        .just_one = UACPI_TRUE,
+    };
+
+    ret = uacpi_for_each_aml_resource(aml_buffer, do_aml_resource_to_native, &ctx);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_free_resource(resource);
+        return ret;
+    }
+
+    *out_resource = resource;
+    return ret;
+}
+
 void uacpi_free_resources(uacpi_resources *resources)
 {
     if (resources == UACPI_NULL)
         return;
 
     uacpi_free(resources, sizeof(uacpi_resources) + resources->length);
+}
+
+void uacpi_free_resource(uacpi_resource *resource)
+{
+    if (resource == UACPI_NULL)
+        return;
+
+    uacpi_free(resource, resource->length);
 }
 
 static uacpi_status extract_native_resources_from_method(

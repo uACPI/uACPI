@@ -711,6 +711,20 @@ uacpi_status uacpi_for_each_device_resource(
     uacpi_resource_iteration_callback cb, void *user
 );
 
+/*
+ * Convert a single AML-encoded resource to native format.
+ *
+ * This should be used for converting Connection() fields (passed during IO on
+ * GeneralPurposeIO or GenericSerialBus operation regions) or other similar
+ * buffers with only one resource to native format.
+ *
+ * NOTE: the returned buffer must be released via uacpi_free_resource()
+ */
+uacpi_status uacpi_get_resource_from_buffer(
+    uacpi_data_view aml_buffer, uacpi_resource **out_resource
+);
+void uacpi_free_resource(uacpi_resource*);
+
 #ifdef __cplusplus
 }
 #endif
