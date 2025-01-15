@@ -2058,6 +2058,14 @@ uacpi_status uacpi_get_possible_resources(
     return extract_native_resources_from_method(device, "_PRS", out_resources);
 }
 
+uacpi_status uacpi_get_device_resources(
+    uacpi_namespace_node *device, const uacpi_char *method,
+    uacpi_resources **out_resources
+)
+{
+    return extract_native_resources_from_method(device, method, out_resources);
+}
+
 uacpi_status uacpi_for_each_resource(
     uacpi_resources *resources, uacpi_resource_iteration_callback cb, void *user
 )
