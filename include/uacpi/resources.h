@@ -425,7 +425,7 @@ typedef struct uacpi_resource_i2c_connection {
 
 // phase
 #define UACPI_SPI_PHASE_FIRST 0
-#define UACPI_SPI_PHASE_SECOND 0
+#define UACPI_SPI_PHASE_SECOND 1
 
 // polarity
 #define UACPI_SPI_START_LOW 0
