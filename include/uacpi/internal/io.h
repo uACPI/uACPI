@@ -4,6 +4,27 @@
 #include <uacpi/acpi.h>
 #include <uacpi/io.h>
 
+typedef struct uacpi_mapped_gas {
+    uacpi_handle mapping;
+    uacpi_u8 access_bit_width;
+    uacpi_u8 total_bit_width;
+    uacpi_u8 bit_offset;
+
+    uacpi_status (*read)(
+        uacpi_handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
+    );
+    uacpi_status (*write)(
+        uacpi_handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
+    );
+
+    void (*unmap)(uacpi_handle, uacpi_size);
+} uacpi_mapped_gas;
+
+uacpi_status uacpi_map_gas_noalloc(
+    const struct acpi_gas *gas, uacpi_mapped_gas *out_mapped
+);
+void uacpi_unmap_gas_nofree(uacpi_mapped_gas *gas);
+
 uacpi_size uacpi_round_up_bits_to_bytes(uacpi_size bit_length);
 
 void uacpi_read_buffer_field(
