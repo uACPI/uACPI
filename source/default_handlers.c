@@ -220,13 +220,13 @@ static uacpi_status memory_region_do_rw(
 )
 {
     struct memory_region_ctx *ctx = data->region_context;
-    uacpi_u8 *ptr;
+    uacpi_size offset;
 
-    ptr = ctx->virt + (data->address - ctx->phys);
+    offset = data->address - ctx->phys;
 
     return op == UACPI_REGION_OP_READ ?
-        uacpi_system_memory_read(ptr, data->byte_width, &data->value) :
-        uacpi_system_memory_write(ptr, data->byte_width, data->value);
+        uacpi_system_memory_read(ctx->virt, offset, data->byte_width, &data->value) :
+        uacpi_system_memory_write(ctx->virt, offset, data->byte_width, data->value);
 }
 
 static uacpi_status handle_memory_region(uacpi_region_op op, uacpi_handle op_data)
@@ -251,8 +251,8 @@ static uacpi_status table_data_region_do_rw(
     void *addr = UACPI_VIRT_ADDR_TO_PTR((uacpi_virt_addr)data->offset);
 
     return op == UACPI_REGION_OP_READ ?
-       uacpi_system_memory_read(addr, data->byte_width, &data->value) :
-       uacpi_system_memory_write(addr, data->byte_width, data->value);
+       uacpi_system_memory_read(addr, 0, data->byte_width, &data->value) :
+       uacpi_system_memory_write(addr, 0, data->byte_width, data->value);
 }
 
 static uacpi_status handle_table_data_region(uacpi_region_op op, uacpi_handle op_data)

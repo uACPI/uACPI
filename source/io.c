@@ -881,8 +881,12 @@ uacpi_status uacpi_system_io_write(
     return ret;
 }
 
-uacpi_status uacpi_system_memory_read(void *ptr, uacpi_u8 width, uacpi_u64 *out)
+uacpi_status uacpi_system_memory_read(
+    void *ptr, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
+)
 {
+    ptr = UACPI_PTR_ADD(ptr, offset);
+
     switch (width) {
     case 1:
         *out = *(volatile uacpi_u8*)ptr;
@@ -903,8 +907,12 @@ uacpi_status uacpi_system_memory_read(void *ptr, uacpi_u8 width, uacpi_u64 *out)
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_system_memory_write(void *ptr, uacpi_u8 width, uacpi_u64 in)
+uacpi_status uacpi_system_memory_write(
+    void *ptr, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
+)
 {
+    ptr = UACPI_PTR_ADD(ptr, offset);
+
     switch (width) {
     case 1:
         *(volatile uacpi_u8*)ptr = in;
