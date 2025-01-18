@@ -925,40 +925,6 @@ uacpi_status uacpi_gas_write(const struct acpi_gas *gas, uacpi_u64 in_value)
     return ret;
 }
 
-uacpi_status uacpi_system_io_read(
-    uacpi_io_addr address, uacpi_u8 width, uacpi_u64 *out
-)
-{
-    uacpi_status ret;
-    uacpi_handle handle;
-
-    ret = uacpi_kernel_io_map(address, width, &handle);
-    if (uacpi_unlikely_error(ret))
-        return ret;
-
-    ret = uacpi_kernel_io_read(handle, 0, width, out);
-    uacpi_kernel_io_unmap(handle);
-
-    return ret;
-}
-
-uacpi_status uacpi_system_io_write(
-    uacpi_io_addr address, uacpi_u8 width, uacpi_u64 in
-)
-{
-    uacpi_status ret;
-    uacpi_handle handle;
-
-    ret = uacpi_kernel_io_map(address, width, &handle);
-    if (uacpi_unlikely_error(ret))
-        return ret;
-
-    ret = uacpi_kernel_io_write(handle, 0, width, in);
-    uacpi_kernel_io_unmap(handle);
-
-    return ret;
-}
-
 uacpi_status uacpi_system_memory_read(
     void *ptr, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
 )

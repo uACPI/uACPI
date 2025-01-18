@@ -51,13 +51,6 @@ uacpi_status uacpi_write_field_unit(
     uacpi_data_view *wtr_response
 );
 
-uacpi_status uacpi_system_io_read(
-    uacpi_io_addr address, uacpi_u8 width, uacpi_u64 *out
-);
-uacpi_status uacpi_system_io_write(
-    uacpi_io_addr address, uacpi_u8 width, uacpi_u64 in
-);
-
 uacpi_status uacpi_system_memory_read(
     void *ptr, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
 );
