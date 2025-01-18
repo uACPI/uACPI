@@ -250,7 +250,7 @@ This API is declared in [kernel_api.h](include/uacpi/kernel_api.h) and is implem
 That's it, uACPI is now integrated into your project.
 
 You should proceed to initialization.  
-Refer to the [uACPI page](https://wiki.osdev.org/uACPI) on osdev wiki to see a
+Refer to the [uACPI page](https://osdev.wiki/uACPI) on osdev wiki to see a
 snippet for basic initialization, as well as some code examples of how you may 
 want to use certain APIs.
 
