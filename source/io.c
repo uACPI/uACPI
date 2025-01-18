@@ -697,10 +697,11 @@ static uacpi_u8 gas_get_access_bit_width(const struct acpi_gas *gas)
 }
 
 static uacpi_status gas_validate(
-    const struct acpi_gas *gas, uacpi_u8 *access_bit_width
+    const struct acpi_gas *gas, uacpi_u8 *access_bit_width,
+    uacpi_u8 *bit_width
 )
 {
-    uacpi_size total_width;
+    uacpi_size total_width, aligned_width;
 
     if (uacpi_unlikely(gas == UACPI_NULL))
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -724,17 +725,17 @@ static uacpi_status gas_validate(
 
     *access_bit_width = gas_get_access_bit_width(gas);
 
-    total_width = UACPI_ALIGN_UP(
-        gas->register_bit_offset + gas->register_bit_width,
-        *access_bit_width, uacpi_size
-    );
-    if (total_width > 64) {
+    total_width = gas->register_bit_offset + gas->register_bit_width;
+    aligned_width = UACPI_ALIGN_UP(total_width, *access_bit_width, uacpi_size);
+
+    if (uacpi_unlikely(aligned_width > 64)) {
         uacpi_warn(
             "GAS register total width is too large: %zu\n", total_width
         );
         return UACPI_STATUS_UNIMPLEMENTED;
     }
 
+    *bit_width = total_width;
     return UACPI_STATUS_OK;
 }
 
@@ -745,106 +746,183 @@ static uacpi_status gas_validate(
  * Let's follow ACPICA's approach here so that we don't accidentally
  * break any quirky hardware.
  */
-
-uacpi_status uacpi_gas_read(const struct acpi_gas *gas, uacpi_u64 *out_value)
+uacpi_status uacpi_gas_read_mapped(
+    const uacpi_mapped_gas *gas, uacpi_u64 *out_value
+)
 {
     uacpi_status ret;
-    uacpi_u8 access_bit_width, access_byte_width;
+    uacpi_u8 access_byte_width;
     uacpi_u8 bit_offset, bits_left, index = 0;
     uacpi_u64 data, mask = 0xFFFFFFFFFFFFFFFF;
+    uacpi_size offset = 0;
 
-    ret = gas_validate(gas, &access_bit_width);
-    if (ret != UACPI_STATUS_OK)
-        return ret;
+    bit_offset = gas->bit_offset;
+    bits_left = gas->total_bit_width;
 
-    bit_offset = gas->register_bit_offset;
-    bits_left = bit_offset + gas->register_bit_width;
-
-    access_byte_width = access_bit_width / 8;
+    access_byte_width = gas->access_bit_width / 8;
 
     if (access_byte_width < 8)
-        mask = ~(mask << access_bit_width);
+        mask = ~(mask << gas->access_bit_width);
 
     *out_value = 0;
 
     while (bits_left) {
-        if (bit_offset >= access_bit_width) {
+        if (bit_offset >= gas->access_bit_width) {
             data = 0;
-            bit_offset -= access_bit_width;
+            bit_offset -= gas->access_bit_width;
         } else {
-            uacpi_u64 address = gas->address + (index * access_byte_width);
-
-            if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO) {
-                ret = uacpi_system_io_read(address, access_byte_width, &data);
-            } else {
-                void *virt;
-
-                virt = uacpi_kernel_map(address, access_byte_width);
-                if (uacpi_unlikely(virt == UACPI_NULL))
-                    return UACPI_STATUS_MAPPING_FAILED;
-
-                ret = uacpi_system_memory_read(virt, access_byte_width, &data);
-                uacpi_kernel_unmap(virt, access_bit_width);
-            }
+            ret = gas->read(gas->mapping, offset, access_byte_width, &data);
             if (uacpi_unlikely_error(ret))
                 return ret;
         }
 
-        *out_value |= (data & mask) << (index * access_bit_width);
-        bits_left -= UACPI_MIN(bits_left, access_bit_width);
+        *out_value |= (data & mask) << (index * gas->access_bit_width);
+        bits_left -= UACPI_MIN(bits_left, gas->access_bit_width);
         ++index;
+        offset += access_byte_width;
     }
 
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_gas_write(const struct acpi_gas *gas, uacpi_u64 in_value)
+uacpi_status uacpi_gas_write_mapped(
+    const uacpi_mapped_gas *gas, uacpi_u64 in_value
+)
 {
     uacpi_status ret;
-    uacpi_u8 access_bit_width, access_byte_width;
+    uacpi_u8 access_byte_width;
     uacpi_u8 bit_offset, bits_left, index = 0;
     uacpi_u64 data, mask = 0xFFFFFFFFFFFFFFFF;
+    uacpi_size offset = 0;
 
-    ret = gas_validate(gas, &access_bit_width);
-    if (ret != UACPI_STATUS_OK)
-        return ret;
-
-    bit_offset = gas->register_bit_offset;
-    bits_left = bit_offset + gas->register_bit_width;
-    access_byte_width = access_bit_width / 8;
+    bit_offset = gas->bit_offset;
+    bits_left = gas->total_bit_width;
+    access_byte_width = gas->access_bit_width / 8;
 
     if (access_byte_width < 8)
-        mask = ~(mask << access_bit_width);
+        mask = ~(mask << gas->access_bit_width);
 
     while (bits_left) {
-        data = (in_value >> (index * access_bit_width)) & mask;
+        data = (in_value >> (index * gas->access_bit_width)) & mask;
 
-        if (bit_offset >= access_bit_width) {
-            bit_offset -= access_bit_width;
+        if (bit_offset >= gas->access_bit_width) {
+            bit_offset -= gas->access_bit_width;
         } else {
-            uacpi_u64 address = gas->address + (index * access_byte_width);
-
-            if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO) {
-                ret = uacpi_system_io_write(address, access_byte_width, data);
-            } else {
-                void *virt;
-
-                virt = uacpi_kernel_map(address, access_byte_width);
-                if (uacpi_unlikely(virt == UACPI_NULL))
-                    return UACPI_STATUS_MAPPING_FAILED;
-
-                ret = uacpi_system_memory_write(virt, access_byte_width, data);
-                uacpi_kernel_unmap(virt, access_bit_width);
-            }
+            ret = gas->write(gas->mapping, offset, access_byte_width, data);
             if (uacpi_unlikely_error(ret))
                 return ret;
         }
 
-        bits_left -= UACPI_MIN(bits_left, access_bit_width);
+        bits_left -= UACPI_MIN(bits_left, gas->access_bit_width);
         ++index;
+        offset += access_byte_width;
     }
 
     return UACPI_STATUS_OK;
+}
+
+static void unmap_gas_io(uacpi_handle io_handle, uacpi_size size)
+{
+    UACPI_UNUSED(size);
+    uacpi_kernel_io_unmap(io_handle);
+}
+
+uacpi_status uacpi_map_gas_noalloc(
+    const struct acpi_gas *gas, uacpi_mapped_gas *out_mapped
+)
+{
+    uacpi_status ret;
+    uacpi_u8 access_bit_width, total_width;
+
+    ret = gas_validate(gas, &access_bit_width, &total_width);
+    if (ret != UACPI_STATUS_OK)
+        return ret;
+
+    out_mapped->access_bit_width = access_bit_width;
+    out_mapped->total_bit_width = total_width;
+    out_mapped->bit_offset = gas->register_bit_offset;
+
+    if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_MEMORY) {
+        out_mapped->mapping = uacpi_kernel_map(gas->address, total_width / 8);
+        if (uacpi_unlikely(out_mapped->mapping == UACPI_NULL))
+            return UACPI_STATUS_MAPPING_FAILED;
+
+        out_mapped->read = uacpi_system_memory_read;
+        out_mapped->write = uacpi_system_memory_write;
+        out_mapped->unmap = uacpi_kernel_unmap;
+    } else { // IO, validated by gas_validate above
+        ret = uacpi_kernel_io_map(gas->address, total_width / 8, &out_mapped->mapping);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+
+        out_mapped->read = uacpi_kernel_io_read;
+        out_mapped->write = uacpi_kernel_io_write;
+        out_mapped->unmap = unmap_gas_io;
+    }
+
+    return UACPI_STATUS_OK;
+}
+
+uacpi_status uacpi_map_gas(
+    const struct acpi_gas *gas, uacpi_mapped_gas **out_mapped
+)
+{
+    uacpi_status ret;
+    uacpi_mapped_gas *mapping;
+
+    mapping = uacpi_kernel_alloc(sizeof(*mapping));
+    if (uacpi_unlikely(mapping == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    ret = uacpi_map_gas_noalloc(gas, mapping);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_free(mapping, sizeof(*mapping));
+        return ret;
+    }
+
+    *out_mapped = mapping;
+    return ret;
+}
+
+void uacpi_unmap_gas_nofree(uacpi_mapped_gas *gas)
+{
+    gas->unmap(gas->mapping, gas->access_bit_width / 8);
+}
+
+void uacpi_unmap_gas(uacpi_mapped_gas *gas)
+{
+    uacpi_unmap_gas_nofree(gas);
+    uacpi_free(gas, sizeof(*gas));
+}
+
+uacpi_status uacpi_gas_read(const struct acpi_gas *gas, uacpi_u64 *out_value)
+{
+    uacpi_status ret;
+    uacpi_mapped_gas mapping;
+
+    ret = uacpi_map_gas_noalloc(gas, &mapping);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    ret = uacpi_gas_read_mapped(&mapping, out_value);
+    uacpi_unmap_gas_nofree(&mapping);
+
+    return ret;
+}
+
+uacpi_status uacpi_gas_write(const struct acpi_gas *gas, uacpi_u64 in_value)
+{
+    uacpi_status ret;
+    uacpi_mapped_gas mapping;
+
+    ret = uacpi_map_gas_noalloc(gas, &mapping);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    ret = uacpi_gas_write_mapped(&mapping, in_value);
+    uacpi_unmap_gas_nofree(&mapping);
+
+    return ret;
 }
 
 uacpi_status uacpi_system_io_read(
