@@ -855,8 +855,8 @@ uacpi_status uacpi_map_gas_noalloc(
         if (uacpi_unlikely_error(ret))
             return ret;
 
-        out_mapped->read = uacpi_kernel_io_read;
-        out_mapped->write = uacpi_kernel_io_write;
+        out_mapped->read = uacpi_system_io_read;
+        out_mapped->write = uacpi_system_io_write;
         out_mapped->unmap = unmap_gas_io;
     }
 
@@ -975,4 +975,129 @@ uacpi_status uacpi_system_memory_write(
     }
 
     return UACPI_STATUS_OK;
+}
+
+union integer_data {
+    uacpi_u8 byte;
+    uacpi_u16 word;
+    uacpi_u32 dword;
+    uacpi_u64 qword;
+};
+
+uacpi_status uacpi_system_io_read(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
+)
+{
+    uacpi_status ret;
+    union integer_data data = {
+        .qword = 0,
+    };
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_io_read8(handle, offset, &data.byte);
+        break;
+    case 2:
+        ret = uacpi_kernel_io_read16(handle, offset, &data.word);
+        break;
+    case 4:
+        ret = uacpi_kernel_io_read32(handle, offset, &data.dword);
+        break;
+    default:
+        uacpi_error(
+            "invalid SystemIO read %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (uacpi_likely_success(ret))
+        *out = data.qword;
+    return ret;
+}
+
+uacpi_status uacpi_system_io_write(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
+)
+{
+    uacpi_status ret;
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_io_write8(handle, offset, in);
+        break;
+    case 2:
+        ret = uacpi_kernel_io_write16(handle, offset, in);
+        break;
+    case 4:
+        ret = uacpi_kernel_io_write32(handle, offset, in);
+        break;
+    default:
+        uacpi_error(
+            "invalid SystemIO write %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    return ret;
+}
+
+uacpi_status uacpi_pci_read(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
+)
+{
+    uacpi_status ret;
+    union integer_data data = {
+        .qword = 0,
+    };
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_pci_read8(handle, offset, &data.byte);
+        break;
+    case 2:
+        ret = uacpi_kernel_pci_read16(handle, offset, &data.word);
+        break;
+    case 4:
+        ret = uacpi_kernel_pci_read32(handle, offset, &data.dword);
+        break;
+    default:
+        uacpi_error(
+            "invalid PCI_Config read %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (uacpi_likely_success(ret))
+        *out = data.qword;
+    return ret;
+}
+
+uacpi_status uacpi_pci_write(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
+)
+{
+    uacpi_status ret;
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_pci_write8(handle, offset, in);
+        break;
+    case 2:
+        ret = uacpi_kernel_pci_write16(handle, offset, in);
+        break;
+    case 4:
+        ret = uacpi_kernel_pci_write32(handle, offset, in);
+        break;
+    default:
+        uacpi_error(
+            "invalid PCI_Config write %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    return ret;
 }
