@@ -464,6 +464,9 @@ uacpi_i32 uacpi_vsnprintf(
             const uacpi_char *string = uacpi_va_arg(vlist, uacpi_char*);
             uacpi_size i;
 
+            if (uacpi_unlikely(string == UACPI_NULL))
+                string = "<null>";
+
             for (i = 0; (!fm.has_precision || i < fm.precision) && string[i]; ++i)
                 write_one(&fb_state, string[i]);
             while (fm.has_precision && (i++ < fm.precision))
