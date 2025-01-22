@@ -277,7 +277,6 @@ static uacpi_interrupt_ret handle_gpe(
     uacpi_handle, uacpi_namespace_node *, uacpi_u16
 )
 {
-    std::cout << "got a GPE" << std::endl;
     return UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
 }
 
