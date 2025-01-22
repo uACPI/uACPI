@@ -115,8 +115,8 @@ static uacpi_status pci_region_do_rw(
     width = data->byte_width;
 
     return op == UACPI_REGION_OP_READ ?
-        uacpi_kernel_pci_read(dev, offset, width, &data->value) :
-        uacpi_kernel_pci_write(dev, offset, width, data->value);
+        uacpi_pci_read(dev, offset, width, &data->value) :
+        uacpi_pci_write(dev, offset, width, data->value);
 }
 
 static uacpi_status handle_pci_region(uacpi_region_op op, uacpi_handle op_data)
@@ -281,8 +281,8 @@ static uacpi_status io_region_do_rw(
     width = data->byte_width;
 
     return op == UACPI_REGION_OP_READ ?
-        uacpi_kernel_io_read(ctx->handle, offset, width, &data->value) :
-        uacpi_kernel_io_write(ctx->handle, offset, width, data->value);
+        uacpi_system_io_read(ctx->handle, offset, width, &data->value) :
+        uacpi_system_io_write(ctx->handle, offset, width, data->value);
 }
 
 static uacpi_status handle_io_region(uacpi_region_op op, uacpi_handle op_data)

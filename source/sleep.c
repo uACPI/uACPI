@@ -555,7 +555,7 @@ uacpi_status uacpi_reboot(void)
         if (uacpi_unlikely_error(ret))
             return ret;
 
-        ret = uacpi_kernel_io_write(io_handle, 0, 1, fadt->reset_value);
+        ret = uacpi_kernel_io_write8(io_handle, 0, fadt->reset_value);
         break;
     case UACPI_ADDRESS_SPACE_SYSTEM_MEMORY:
         ret = uacpi_write_register(UACPI_REGISTER_RESET, fadt->reset_value);
@@ -573,8 +573,8 @@ uacpi_status uacpi_reboot(void)
         if (uacpi_unlikely_error(ret))
             break;
 
-        ret = uacpi_kernel_pci_write(
-            pci_dev, reset_reg->address & 0xFFFF, 1, fadt->reset_value
+        ret = uacpi_kernel_pci_write8(
+            pci_dev, reset_reg->address & 0xFFFF, fadt->reset_value
         );
         break;
     }
