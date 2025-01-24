@@ -132,16 +132,22 @@ static uacpi_size extra_size_for_native_irq_or_dma(
 {
     UACPI_UNUSED(size);
     uacpi_u16 mask;
+    uacpi_u8 i, total_bits, num_bits = 0;
 
     if (spec->type == UACPI_AML_RESOURCE_IRQ) {
         struct acpi_resource_irq *irq = data;
         mask = irq->irq_mask;
+        total_bits = 16;
     } else {
         struct acpi_resource_dma *dma = data;
         mask = dma->channel_mask;
+        total_bits = 8;
     }
 
-    return uacpi_popcount(mask);
+    for (i = 0; i < total_bits; ++i)
+        num_bits += !!(mask & (1 << i));
+
+    return num_bits;
 }
 
 static uacpi_size size_for_aml_irq(
