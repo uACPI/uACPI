@@ -652,21 +652,6 @@ uacpi_u8 uacpi_bit_scan_backward(uacpi_u64 value)
 #endif
 }
 
-uacpi_u8 uacpi_popcount(uacpi_u64 value)
-{
-#ifdef _MSC_VER
-
-#ifdef _WIN64
-    return __popcnt64(value);
-#else
-    return __popcnt(value) + __popcnt(value >> 32);
-#endif
-
-#else
-    return __builtin_popcountll(value);
-#endif
-}
-
 #ifndef UACPI_FORMATTED_LOGGING
 
 void uacpi_log(uacpi_log_level lvl, const uacpi_char *str, ...)
