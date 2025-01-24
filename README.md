@@ -4,11 +4,6 @@ A portable and easy-to-integrate implementation of the Advanced Configuration an
 
 [![CI](https://github.com/UltraOS/uACPI/actions/workflows/main.yml/badge.svg)](https://github.com/UltraOS/uACPI/actions/workflows/main.yml)
 
-> [!WARNING]
-> Not yet ready for production use! While the project is mostly feature-complete,
-> it is still under active development. Public API may change, get added or
-> removed without notice. 
-
 ## Features
 
 - A fast and well-tested AML interpreter optimized to use very little stack space
@@ -17,7 +12,7 @@ A portable and easy-to-integrate implementation of the Advanced Configuration an
 - Highly flexible and configurable (optional sized frees, reduced-hw-only mode, etc.)
 - A fairly advanced event subsystem (GPE/fixed, wake, implicit notify, AML handlers)
 - Table management API (search, dynamic installation/loading, overrides, etc.)
-- Operation region subsystem (user handlers, builtins for common types)
+- Operation region subsystem (user handlers, support for BufferAcc opregions, builtins for common types)
 - Sleep state management (transition to any S state, wake vector programming)
 - PCI routing table retrieval & interrupt model API
 - Device search API
@@ -287,13 +282,14 @@ If you want to contribute:
 
 |  Project | Description | (qemu w/ Q35 + KVM) ops/s  | CPU |
 |---  |--- |--- |--- |
-| [proxima](https://github.com/proxima-os/proxima) | A monolithic Unix-like operating system | 6,406,643 | AMD Ryzen 7 5800X |
+| [proxima](https://github.com/proxima-os/proxima) | A monolithic Unix-like operating system | 7,633,451 | AMD Ryzen 7 5800X |
+| [Managarm](https://github.com/managarm/managarm)  | Pragmatic microkernel-based OS with fully asynchronous I/O | 4,644,312 | Intel Core i7-14700K |
 | [menix](https://github.com/menix-os/menix) | A minimal and expandable Unix-like operating system | 3,923,771 | AMD Ryzen 7 7700X |
 | [pmOS](https://gitlab.com/mishakov/pmos) | Microkernel-based operating system written from scratch with uACPI running in userspace | 3,317,269 | Intel Core i7-13700K |
 | [Astral](https://github.com/mathewnd/astral) | Operating system written in C which aims be POSIX-compliant | 3,247,619 | Intel Core i5-13600K |
-| [Managarm](https://github.com/managarm/managarm)  | Pragmatic microkernel-based OS with fully asynchronous I/O | 3,200,618 | Intel Core i7-14700K |
 | [ilobilix](https://github.com/ilobilo/ilobilix) | Yet another monolithic Linux clone wannabe. Currently under a rewrite | 2,751,309 | Intel Core i7-13700K |
 | [imaginarium](https://github.com/Khitiara/imaginarium) | Ziggy osdev experiments inspired by the NT kernel (using the zig general purpose allocator) | 2,388,082 | AMD Ryzen 7 3700X |
+| [davix](https://github.com/dbstream/davix) | Yet another unix-like by some bored nerd | 1,888,391 | AMD Ryzen 9 7950X3D |
 | [OBOS](https://github.com/OBOS-dev/obos) | Hybrid Kernel with advanced driver loading | 1,371,085 | Intel Core i7-13700K |
 | [NyauxKC](https://github.com/rayanmargham/NyauxKC) | Monolithic UNIX-like multi-architecture kernel | 985,988 | Intel Core Ultra 7 265K |
 
