@@ -3,7 +3,7 @@
 #include <uacpi/platform/config.h>
 
 #ifndef uacpi_memcpy
-void *uacpi_memcpy(void *dest, const void *src, size_t count)
+void *uacpi_memcpy(void *dest, const void *src, uacpi_size count)
 {
     uacpi_char *cd = dest;
     const uacpi_char *cs = src;
@@ -464,6 +464,9 @@ uacpi_i32 uacpi_vsnprintf(
             const uacpi_char *string = uacpi_va_arg(vlist, uacpi_char*);
             uacpi_size i;
 
+            if (uacpi_unlikely(string == UACPI_NULL))
+                string = "<null>";
+
             for (i = 0; (!fm.has_precision || i < fm.precision) && string[i]; ++i)
                 write_one(&fb_state, string[i]);
             while (fm.has_precision && (i++ < fm.precision))
@@ -646,21 +649,6 @@ uacpi_u8 uacpi_bit_scan_backward(uacpi_u64 value)
         return 0;
 
     return 64 - __builtin_clzll(value);
-#endif
-}
-
-uacpi_u8 uacpi_popcount(uacpi_u64 value)
-{
-#ifdef _MSC_VER
-
-#ifdef _WIN64
-    return __popcnt64(value);
-#else
-    return __popcnt(value) + __popcnt(value >> 32);
-#endif
-
-#else
-    return __builtin_popcountll(value);
 #endif
 }
 

@@ -176,11 +176,10 @@ void uacpi_write_buffer_field(
 
 static uacpi_status access_field_unit(
     uacpi_field_unit *field, uacpi_u32 offset, uacpi_region_op op,
-    uacpi_u64 *in_out
+    union uacpi_opregion_io_data data
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
-    uacpi_namespace_node *region_node;
 
     if (field->lock_rule) {
         ret = uacpi_acquire_aml_mutex(
@@ -193,16 +192,16 @@ static uacpi_status access_field_unit(
     switch (field->kind) {
     case UACPI_FIELD_UNIT_KIND_BANK:
         ret = uacpi_write_field_unit(
-            field->bank_selection, &field->bank_value, sizeof(field->bank_value)
+            field->bank_selection, &field->bank_value, sizeof(field->bank_value),
+            UACPI_NULL
         );
-        region_node = field->bank_region;
         break;
     case UACPI_FIELD_UNIT_KIND_NORMAL:
-        region_node = field->region;
         break;
     case UACPI_FIELD_UNIT_KIND_INDEX:
         ret = uacpi_write_field_unit(
-            field->index, &offset, sizeof(offset)
+            field->index, &offset, sizeof(offset),
+            UACPI_NULL
         );
         if (uacpi_unlikely_error(ret))
             goto out;
@@ -210,12 +209,14 @@ static uacpi_status access_field_unit(
         switch (op) {
         case UACPI_REGION_OP_READ:
             ret = uacpi_read_field_unit(
-                field->data, in_out, field->access_width_bytes
+                field->data, data.integer, field->access_width_bytes,
+                UACPI_NULL
             );
             break;
         case UACPI_REGION_OP_WRITE:
             ret = uacpi_write_field_unit(
-                field->data, in_out, field->access_width_bytes
+                field->data, data.integer, field->access_width_bytes,
+                UACPI_NULL
             );
             break;
         default:
@@ -233,13 +234,172 @@ static uacpi_status access_field_unit(
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    ret = uacpi_dispatch_opregion_io(
-        region_node, offset, field->access_width_bytes, op, in_out
-    );
+    ret = uacpi_dispatch_opregion_io(field, offset, op, data);
 
 out:
     if (field->lock_rule)
         uacpi_release_aml_mutex(g_uacpi_rt_ctx.global_lock_mutex);
+    return ret;
+}
+
+#define OPREGION_IO_U64(x) (union uacpi_opregion_io_data) { .integer = x }
+
+#define SERIAL_HEADER_SIZE 2
+#define IPMI_DATA_SIZE 64
+
+static uacpi_status wtr_buffer_size(
+    uacpi_field_unit *field, uacpi_address_space space,
+    uacpi_size *out_size
+)
+{
+    switch (space) {
+    case UACPI_ADDRESS_SPACE_IPMI:
+        *out_size = SERIAL_HEADER_SIZE + IPMI_DATA_SIZE;
+        break;
+    case UACPI_ADDRESS_SPACE_PRM:
+        *out_size = 26;
+        break;
+    case UACPI_ADDRESS_SPACE_FFIXEDHW:
+        *out_size = 256;
+        break;
+    case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
+    case UACPI_ADDRESS_SPACE_SMBUS: {
+        uacpi_size size_for_protocol = SERIAL_HEADER_SIZE;
+
+        switch (field->attributes) {
+        case UACPI_ACCESS_ATTRIBUTE_QUICK:
+            break; // + 0
+        case UACPI_ACCESS_ATTRIBUTE_SEND_RECEIVE:
+        case UACPI_ACCESS_ATTRIBUTE_BYTE:
+            size_for_protocol += 1;
+            break;
+
+        case UACPI_ACCESS_ATTRIBUTE_WORD:
+        case UACPI_ACCESS_ATTRIBUTE_PROCESS_CALL:
+            size_for_protocol += 2;
+            break;
+
+        case UACPI_ACCESS_ATTRIBUTE_BYTES:
+            size_for_protocol += field->access_length;
+            break;
+
+        case UACPI_ACCESS_ATTRIBUTE_BLOCK:
+        case UACPI_ACCESS_ATTRIBUTE_BLOCK_PROCESS_CALL:
+        case UACPI_ACCESS_ATTRIBUTE_RAW_BYTES:
+        case UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES:
+            size_for_protocol += 255;
+            break;
+
+        default:
+            uacpi_error(
+                "unsupported field@%p access attribute %d\n",
+                field, field->attributes
+            );
+            return UACPI_STATUS_UNIMPLEMENTED;
+        }
+
+        *out_size = size_for_protocol;
+        break;
+    }
+    default:
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    return UACPI_STATUS_OK;
+}
+
+static uacpi_status handle_special_field(
+    uacpi_field_unit *field, uacpi_data_view buf,
+    uacpi_region_op op, uacpi_data_view *wtr_response,
+    uacpi_bool *did_handle
+)
+{
+    uacpi_status ret = UACPI_STATUS_OK;
+    uacpi_object *obj;
+    uacpi_operation_region *region;
+    uacpi_u64 in_out;
+    uacpi_data_view wtr_buffer;
+
+    *did_handle = UACPI_FALSE;
+
+    if (field->kind == UACPI_FIELD_UNIT_KIND_INDEX)
+        return ret;
+
+    obj = uacpi_namespace_node_get_object_typed(
+        field->region, UACPI_OBJECT_OPERATION_REGION_BIT
+    );
+    if (uacpi_unlikely(obj == UACPI_NULL)) {
+        ret = UACPI_STATUS_INVALID_ARGUMENT;
+        uacpi_trace_region_error(
+            field->region, "attempted access to deleted", ret
+        );
+        goto out_handled;
+    }
+    region = obj->op_region;
+
+    switch (region->space) {
+    case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
+        if (op == UACPI_REGION_OP_WRITE) {
+            uacpi_memcpy_zerout(
+                &in_out, buf.const_data, sizeof(in_out), buf.length
+            );
+        }
+
+        ret = access_field_unit(field, 0, op, OPREGION_IO_U64(&in_out));
+        if (uacpi_unlikely_error(ret))
+            goto out_handled;
+
+        if (op == UACPI_REGION_OP_READ)
+            uacpi_memcpy_zerout(buf.data, &in_out, buf.length, sizeof(in_out));
+        goto out_handled;
+    case UACPI_ADDRESS_SPACE_IPMI:
+    case UACPI_ADDRESS_SPACE_PRM:
+        if (uacpi_unlikely(op == UACPI_REGION_OP_READ)) {
+            ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
+            uacpi_trace_region_error(
+                field->region, "attempted to read from a write-only", ret
+            );
+            goto out_handled;
+        }
+        UACPI_FALLTHROUGH;
+    case UACPI_ADDRESS_SPACE_FFIXEDHW:
+    case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
+    case UACPI_ADDRESS_SPACE_SMBUS:
+        goto do_wtr;
+    default:
+        return ret;
+    }
+
+do_wtr:
+    ret = wtr_buffer_size(field, region->space, &wtr_buffer.length);
+    if (uacpi_unlikely_error(ret))
+        goto out_handled;
+
+    wtr_buffer.data = uacpi_kernel_alloc(wtr_buffer.length);
+    if (uacpi_unlikely(wtr_buffer.data == UACPI_NULL)) {
+        ret = UACPI_STATUS_OUT_OF_MEMORY;
+        goto out_handled;
+    }
+
+    uacpi_memcpy_zerout(
+        wtr_buffer.data, buf.const_data, wtr_buffer.length, buf.length
+    );
+    ret = access_field_unit(
+        field, field->byte_offset,
+        op, (union uacpi_opregion_io_data) {
+            .buffer = wtr_buffer,
+        }
+    );
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_free(wtr_buffer.data, wtr_buffer.length);
+        goto out_handled;
+    }
+
+    if (wtr_response != UACPI_NULL)
+        *wtr_response = wtr_buffer;
+
+out_handled:
+    *did_handle = UACPI_TRUE;
     return ret;
 }
 
@@ -278,7 +438,7 @@ static uacpi_status do_read_misaligned_field_unit(
 
         ret = access_field_unit(
             field, byte_offset, UACPI_REGION_OP_READ,
-            &out
+            OPREGION_IO_U64(&out)
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -295,11 +455,23 @@ static uacpi_status do_read_misaligned_field_unit(
 }
 
 uacpi_status uacpi_read_field_unit(
-    uacpi_field_unit *field, void *dst, uacpi_size size
+    uacpi_field_unit *field, void *dst, uacpi_size size,
+    uacpi_data_view *wtr_response
 )
 {
     uacpi_status ret;
     uacpi_u32 field_byte_length;
+    uacpi_bool did_handle;
+
+    ret = handle_special_field(
+        field, (uacpi_data_view) {
+            .data = dst,
+            .length = size,
+        }, UACPI_REGION_OP_READ,
+        wtr_response, &did_handle
+    );
+    if (did_handle)
+        return ret;
 
     field_byte_length = uacpi_round_up_bits_to_bytes(field->bit_length);
 
@@ -315,7 +487,8 @@ uacpi_status uacpi_read_field_unit(
         uacpi_u64 out;
 
         ret = access_field_unit(
-            field, field->byte_offset, UACPI_REGION_OP_READ, &out
+            field, field->byte_offset, UACPI_REGION_OP_READ,
+            OPREGION_IO_U64(&out)
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -331,7 +504,7 @@ uacpi_status uacpi_read_field_unit(
     return do_read_misaligned_field_unit(field, dst, size);
 }
 
-uacpi_status uacpi_write_field_unit(
+static uacpi_status write_generic_field_unit(
     uacpi_field_unit *field, const void *src, uacpi_size size
 )
 {
@@ -362,7 +535,8 @@ uacpi_status uacpi_write_field_unit(
             switch (field->update_rule) {
             case UACPI_UPDATE_RULE_PRESERVE:
                 ret = access_field_unit(
-                    field, byte_offset, UACPI_REGION_OP_READ, &in
+                    field, byte_offset, UACPI_REGION_OP_READ,
+                    OPREGION_IO_U64(&in)
                 );
                 if (uacpi_unlikely_error(ret))
                     return ret;
@@ -383,7 +557,8 @@ uacpi_status uacpi_write_field_unit(
         bit_span_offset(&src_span, dst_span.length);
 
         ret = access_field_unit(
-            field, byte_offset, UACPI_REGION_OP_WRITE, &in
+            field, byte_offset, UACPI_REGION_OP_WRITE,
+            OPREGION_IO_U64(&in)
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -393,6 +568,85 @@ uacpi_status uacpi_write_field_unit(
         byte_offset += field->access_width_bytes;
     }
 
+    return UACPI_STATUS_OK;
+}
+
+uacpi_status uacpi_write_field_unit(
+    uacpi_field_unit *field, const void *src, uacpi_size size,
+    uacpi_data_view *wtr_response
+)
+{
+    uacpi_status ret;
+    uacpi_bool did_handle;
+
+    ret = handle_special_field(
+        field, (uacpi_data_view) {
+            .const_data = src,
+            .length = size,
+        }, UACPI_REGION_OP_WRITE,
+        wtr_response, &did_handle
+    );
+    if (did_handle)
+        return ret;
+
+    return write_generic_field_unit(field, src, size);
+}
+
+uacpi_status uacpi_field_unit_get_read_type(
+    struct uacpi_field_unit *field, uacpi_object_type *out_type
+)
+{
+    uacpi_object *obj;
+
+    if (field->kind == UACPI_FIELD_UNIT_KIND_INDEX)
+        goto out_basic_field;
+
+    obj = uacpi_namespace_node_get_object_typed(
+        field->region, UACPI_OBJECT_OPERATION_REGION_BIT
+    );
+    if (uacpi_unlikely(obj == UACPI_NULL))
+        return UACPI_STATUS_INVALID_ARGUMENT;
+
+    if (uacpi_is_buffer_access_address_space(obj->op_region->space)) {
+        *out_type = UACPI_OBJECT_BUFFER;
+        return UACPI_STATUS_OK;
+    }
+
+out_basic_field:
+    if (field->bit_length > (g_uacpi_rt_ctx.is_rev1 ? 32u : 64u))
+        *out_type = UACPI_OBJECT_BUFFER;
+    else
+        *out_type = UACPI_OBJECT_INTEGER;
+
+    return UACPI_STATUS_OK;
+}
+
+uacpi_status uacpi_field_unit_get_bit_length(
+    struct uacpi_field_unit *field, uacpi_size *out_length
+)
+{
+    uacpi_object *obj;
+
+    if (field->kind == UACPI_FIELD_UNIT_KIND_INDEX)
+        goto out_basic_field;
+
+    obj = uacpi_namespace_node_get_object_typed(
+        field->region, UACPI_OBJECT_OPERATION_REGION_BIT
+    );
+    if (uacpi_unlikely(obj == UACPI_NULL))
+        return UACPI_STATUS_INVALID_ARGUMENT;
+
+    if (uacpi_is_buffer_access_address_space(obj->op_region->space)) {
+        /*
+         * Bit length is protocol specific, the data will be returned
+         * via the write-then-read response buffer.
+         */
+        *out_length = 0;
+        return UACPI_STATUS_OK;
+    }
+
+out_basic_field:
+    *out_length = field->bit_length;
     return UACPI_STATUS_OK;
 }
 
@@ -443,10 +697,11 @@ static uacpi_u8 gas_get_access_bit_width(const struct acpi_gas *gas)
 }
 
 static uacpi_status gas_validate(
-    const struct acpi_gas *gas, uacpi_u8 *access_bit_width
+    const struct acpi_gas *gas, uacpi_u8 *access_bit_width,
+    uacpi_u8 *bit_width
 )
 {
-    uacpi_size total_width;
+    uacpi_size total_width, aligned_width;
 
     if (uacpi_unlikely(gas == UACPI_NULL))
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -470,17 +725,17 @@ static uacpi_status gas_validate(
 
     *access_bit_width = gas_get_access_bit_width(gas);
 
-    total_width = UACPI_ALIGN_UP(
-        gas->register_bit_offset + gas->register_bit_width,
-        *access_bit_width, uacpi_size
-    );
-    if (total_width > 64) {
+    total_width = gas->register_bit_offset + gas->register_bit_width;
+    aligned_width = UACPI_ALIGN_UP(total_width, *access_bit_width, uacpi_size);
+
+    if (uacpi_unlikely(aligned_width > 64)) {
         uacpi_warn(
             "GAS register total width is too large: %zu\n", total_width
         );
         return UACPI_STATUS_UNIMPLEMENTED;
     }
 
+    *bit_width = total_width;
     return UACPI_STATUS_OK;
 }
 
@@ -491,144 +746,191 @@ static uacpi_status gas_validate(
  * Let's follow ACPICA's approach here so that we don't accidentally
  * break any quirky hardware.
  */
-
-uacpi_status uacpi_gas_read(const struct acpi_gas *gas, uacpi_u64 *out_value)
+uacpi_status uacpi_gas_read_mapped(
+    const uacpi_mapped_gas *gas, uacpi_u64 *out_value
+)
 {
     uacpi_status ret;
-    uacpi_u8 access_bit_width, access_byte_width;
+    uacpi_u8 access_byte_width;
     uacpi_u8 bit_offset, bits_left, index = 0;
     uacpi_u64 data, mask = 0xFFFFFFFFFFFFFFFF;
+    uacpi_size offset = 0;
 
-    ret = gas_validate(gas, &access_bit_width);
-    if (ret != UACPI_STATUS_OK)
-        return ret;
+    bit_offset = gas->bit_offset;
+    bits_left = gas->total_bit_width;
 
-    bit_offset = gas->register_bit_offset;
-    bits_left = bit_offset + gas->register_bit_width;
-
-    access_byte_width = access_bit_width / 8;
+    access_byte_width = gas->access_bit_width / 8;
 
     if (access_byte_width < 8)
-        mask = ~(mask << access_bit_width);
+        mask = ~(mask << gas->access_bit_width);
 
     *out_value = 0;
 
     while (bits_left) {
-        if (bit_offset >= access_bit_width) {
+        if (bit_offset >= gas->access_bit_width) {
             data = 0;
-            bit_offset -= access_bit_width;
+            bit_offset -= gas->access_bit_width;
         } else {
-            uacpi_u64 address = gas->address + (index * access_byte_width);
-
-            if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO) {
-                ret = uacpi_system_io_read(address, access_byte_width, &data);
-            } else {
-                void *virt;
-
-                virt = uacpi_kernel_map(address, access_byte_width);
-                if (uacpi_unlikely(virt == UACPI_NULL))
-                    return UACPI_STATUS_MAPPING_FAILED;
-
-                ret = uacpi_system_memory_read(virt, access_byte_width, &data);
-                uacpi_kernel_unmap(virt, access_bit_width);
-            }
+            ret = gas->read(gas->mapping, offset, access_byte_width, &data);
             if (uacpi_unlikely_error(ret))
                 return ret;
         }
 
-        *out_value |= (data & mask) << (index * access_bit_width);
-        bits_left -= UACPI_MIN(bits_left, access_bit_width);
+        *out_value |= (data & mask) << (index * gas->access_bit_width);
+        bits_left -= UACPI_MIN(bits_left, gas->access_bit_width);
         ++index;
+        offset += access_byte_width;
     }
 
     return UACPI_STATUS_OK;
+}
+
+uacpi_status uacpi_gas_write_mapped(
+    const uacpi_mapped_gas *gas, uacpi_u64 in_value
+)
+{
+    uacpi_status ret;
+    uacpi_u8 access_byte_width;
+    uacpi_u8 bit_offset, bits_left, index = 0;
+    uacpi_u64 data, mask = 0xFFFFFFFFFFFFFFFF;
+    uacpi_size offset = 0;
+
+    bit_offset = gas->bit_offset;
+    bits_left = gas->total_bit_width;
+    access_byte_width = gas->access_bit_width / 8;
+
+    if (access_byte_width < 8)
+        mask = ~(mask << gas->access_bit_width);
+
+    while (bits_left) {
+        data = (in_value >> (index * gas->access_bit_width)) & mask;
+
+        if (bit_offset >= gas->access_bit_width) {
+            bit_offset -= gas->access_bit_width;
+        } else {
+            ret = gas->write(gas->mapping, offset, access_byte_width, data);
+            if (uacpi_unlikely_error(ret))
+                return ret;
+        }
+
+        bits_left -= UACPI_MIN(bits_left, gas->access_bit_width);
+        ++index;
+        offset += access_byte_width;
+    }
+
+    return UACPI_STATUS_OK;
+}
+
+static void unmap_gas_io(uacpi_handle io_handle, uacpi_size size)
+{
+    UACPI_UNUSED(size);
+    uacpi_kernel_io_unmap(io_handle);
+}
+
+uacpi_status uacpi_map_gas_noalloc(
+    const struct acpi_gas *gas, uacpi_mapped_gas *out_mapped
+)
+{
+    uacpi_status ret;
+    uacpi_u8 access_bit_width, total_width;
+
+    ret = gas_validate(gas, &access_bit_width, &total_width);
+    if (ret != UACPI_STATUS_OK)
+        return ret;
+
+    out_mapped->access_bit_width = access_bit_width;
+    out_mapped->total_bit_width = total_width;
+    out_mapped->bit_offset = gas->register_bit_offset;
+
+    if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_MEMORY) {
+        out_mapped->mapping = uacpi_kernel_map(gas->address, total_width / 8);
+        if (uacpi_unlikely(out_mapped->mapping == UACPI_NULL))
+            return UACPI_STATUS_MAPPING_FAILED;
+
+        out_mapped->read = uacpi_system_memory_read;
+        out_mapped->write = uacpi_system_memory_write;
+        out_mapped->unmap = uacpi_kernel_unmap;
+    } else { // IO, validated by gas_validate above
+        ret = uacpi_kernel_io_map(gas->address, total_width / 8, &out_mapped->mapping);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+
+        out_mapped->read = uacpi_system_io_read;
+        out_mapped->write = uacpi_system_io_write;
+        out_mapped->unmap = unmap_gas_io;
+    }
+
+    return UACPI_STATUS_OK;
+}
+
+uacpi_status uacpi_map_gas(
+    const struct acpi_gas *gas, uacpi_mapped_gas **out_mapped
+)
+{
+    uacpi_status ret;
+    uacpi_mapped_gas *mapping;
+
+    mapping = uacpi_kernel_alloc(sizeof(*mapping));
+    if (uacpi_unlikely(mapping == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    ret = uacpi_map_gas_noalloc(gas, mapping);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_free(mapping, sizeof(*mapping));
+        return ret;
+    }
+
+    *out_mapped = mapping;
+    return ret;
+}
+
+void uacpi_unmap_gas_nofree(uacpi_mapped_gas *gas)
+{
+    gas->unmap(gas->mapping, gas->access_bit_width / 8);
+}
+
+void uacpi_unmap_gas(uacpi_mapped_gas *gas)
+{
+    uacpi_unmap_gas_nofree(gas);
+    uacpi_free(gas, sizeof(*gas));
+}
+
+uacpi_status uacpi_gas_read(const struct acpi_gas *gas, uacpi_u64 *out_value)
+{
+    uacpi_status ret;
+    uacpi_mapped_gas mapping;
+
+    ret = uacpi_map_gas_noalloc(gas, &mapping);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    ret = uacpi_gas_read_mapped(&mapping, out_value);
+    uacpi_unmap_gas_nofree(&mapping);
+
+    return ret;
 }
 
 uacpi_status uacpi_gas_write(const struct acpi_gas *gas, uacpi_u64 in_value)
 {
     uacpi_status ret;
-    uacpi_u8 access_bit_width, access_byte_width;
-    uacpi_u8 bit_offset, bits_left, index = 0;
-    uacpi_u64 data, mask = 0xFFFFFFFFFFFFFFFF;
+    uacpi_mapped_gas mapping;
 
-    ret = gas_validate(gas, &access_bit_width);
-    if (ret != UACPI_STATUS_OK)
-        return ret;
-
-    bit_offset = gas->register_bit_offset;
-    bits_left = bit_offset + gas->register_bit_width;
-    access_byte_width = access_bit_width / 8;
-
-    if (access_byte_width < 8)
-        mask = ~(mask << access_bit_width);
-
-    while (bits_left) {
-        data = (in_value >> (index * access_bit_width)) & mask;
-
-        if (bit_offset >= access_bit_width) {
-            bit_offset -= access_bit_width;
-        } else {
-            uacpi_u64 address = gas->address + (index * access_byte_width);
-
-            if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO) {
-                ret = uacpi_system_io_write(address, access_byte_width, data);
-            } else {
-                void *virt;
-
-                virt = uacpi_kernel_map(address, access_byte_width);
-                if (uacpi_unlikely(virt == UACPI_NULL))
-                    return UACPI_STATUS_MAPPING_FAILED;
-
-                ret = uacpi_system_memory_write(virt, access_byte_width, data);
-                uacpi_kernel_unmap(virt, access_bit_width);
-            }
-            if (uacpi_unlikely_error(ret))
-                return ret;
-        }
-
-        bits_left -= UACPI_MIN(bits_left, access_bit_width);
-        ++index;
-    }
-
-    return UACPI_STATUS_OK;
-}
-
-uacpi_status uacpi_system_io_read(
-    uacpi_io_addr address, uacpi_u8 width, uacpi_u64 *out
-)
-{
-    uacpi_status ret;
-    uacpi_handle handle;
-
-    ret = uacpi_kernel_io_map(address, width, &handle);
+    ret = uacpi_map_gas_noalloc(gas, &mapping);
     if (uacpi_unlikely_error(ret))
         return ret;
 
-    ret = uacpi_kernel_io_read(handle, 0, width, out);
-    uacpi_kernel_io_unmap(handle);
+    ret = uacpi_gas_write_mapped(&mapping, in_value);
+    uacpi_unmap_gas_nofree(&mapping);
 
     return ret;
 }
 
-uacpi_status uacpi_system_io_write(
-    uacpi_io_addr address, uacpi_u8 width, uacpi_u64 in
+uacpi_status uacpi_system_memory_read(
+    void *ptr, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
 )
 {
-    uacpi_status ret;
-    uacpi_handle handle;
+    ptr = UACPI_PTR_ADD(ptr, offset);
 
-    ret = uacpi_kernel_io_map(address, width, &handle);
-    if (uacpi_unlikely_error(ret))
-        return ret;
-
-    ret = uacpi_kernel_io_write(handle, 0, width, in);
-    uacpi_kernel_io_unmap(handle);
-
-    return ret;
-}
-
-uacpi_status uacpi_system_memory_read(void *ptr, uacpi_u8 width, uacpi_u64 *out)
-{
     switch (width) {
     case 1:
         *out = *(volatile uacpi_u8*)ptr;
@@ -649,8 +951,12 @@ uacpi_status uacpi_system_memory_read(void *ptr, uacpi_u8 width, uacpi_u64 *out)
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_system_memory_write(void *ptr, uacpi_u8 width, uacpi_u64 in)
+uacpi_status uacpi_system_memory_write(
+    void *ptr, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
+)
 {
+    ptr = UACPI_PTR_ADD(ptr, offset);
+
     switch (width) {
     case 1:
         *(volatile uacpi_u8*)ptr = in;
@@ -669,4 +975,129 @@ uacpi_status uacpi_system_memory_write(void *ptr, uacpi_u8 width, uacpi_u64 in)
     }
 
     return UACPI_STATUS_OK;
+}
+
+union integer_data {
+    uacpi_u8 byte;
+    uacpi_u16 word;
+    uacpi_u32 dword;
+    uacpi_u64 qword;
+};
+
+uacpi_status uacpi_system_io_read(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
+)
+{
+    uacpi_status ret;
+    union integer_data data = {
+        .qword = 0,
+    };
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_io_read8(handle, offset, &data.byte);
+        break;
+    case 2:
+        ret = uacpi_kernel_io_read16(handle, offset, &data.word);
+        break;
+    case 4:
+        ret = uacpi_kernel_io_read32(handle, offset, &data.dword);
+        break;
+    default:
+        uacpi_error(
+            "invalid SystemIO read %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (uacpi_likely_success(ret))
+        *out = data.qword;
+    return ret;
+}
+
+uacpi_status uacpi_system_io_write(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
+)
+{
+    uacpi_status ret;
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_io_write8(handle, offset, in);
+        break;
+    case 2:
+        ret = uacpi_kernel_io_write16(handle, offset, in);
+        break;
+    case 4:
+        ret = uacpi_kernel_io_write32(handle, offset, in);
+        break;
+    default:
+        uacpi_error(
+            "invalid SystemIO write %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    return ret;
+}
+
+uacpi_status uacpi_pci_read(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 *out
+)
+{
+    uacpi_status ret;
+    union integer_data data = {
+        .qword = 0,
+    };
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_pci_read8(handle, offset, &data.byte);
+        break;
+    case 2:
+        ret = uacpi_kernel_pci_read16(handle, offset, &data.word);
+        break;
+    case 4:
+        ret = uacpi_kernel_pci_read32(handle, offset, &data.dword);
+        break;
+    default:
+        uacpi_error(
+            "invalid PCI_Config read %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (uacpi_likely_success(ret))
+        *out = data.qword;
+    return ret;
+}
+
+uacpi_status uacpi_pci_write(
+    uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
+)
+{
+    uacpi_status ret;
+
+    switch (width) {
+    case 1:
+        ret = uacpi_kernel_pci_write8(handle, offset, in);
+        break;
+    case 2:
+        ret = uacpi_kernel_pci_write16(handle, offset, in);
+        break;
+    case 4:
+        ret = uacpi_kernel_pci_write32(handle, offset, in);
+        break;
+    default:
+        uacpi_error(
+            "invalid PCI_Config write %p@%zu width=%d\n",
+            handle, offset, width
+        );
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    return ret;
 }

@@ -57,6 +57,8 @@ struct op_context {
      */
     uacpi_u8 tracked_pkg_idx;
 
+    uacpi_aml_op switched_from;
+
     const struct uacpi_op_spec *op;
     struct item_array items;
 };
@@ -327,7 +329,6 @@ struct execution_context {
     struct op_context *prev_op_ctx;
     struct op_context *cur_op_ctx;
 
-    uacpi_bool skip_else;
     uacpi_u8 sync_level;
 };
 
@@ -644,25 +645,44 @@ static uacpi_status do_install_node_item(struct call_frame *frame,
     return ret;
 }
 
+static uacpi_u8 peek_next_op(struct call_frame *frame, uacpi_aml_op *out_op)
+{
+    uacpi_aml_op op;
+    uacpi_size bytes_left;
+    uacpi_u8 length = 0;
+    uacpi_u8 *cursor;
+    struct code_block *block;
+
+    block = code_block_array_last(&frame->code_blocks);
+    bytes_left = block->end - frame->code_offset;
+    if (bytes_left == 0)
+        return 0;
+
+    cursor = call_frame_cursor(frame);
+
+    op = AML_READ(cursor, length++);
+    if (op == UACPI_EXT_PREFIX) {
+        if (uacpi_unlikely(bytes_left < 2))
+            return 0;
+
+        op <<= 8;
+        op |= AML_READ(cursor, length++);
+    }
+
+    *out_op = op;
+    return length;
+}
+
 static uacpi_status get_op(struct execution_context *ctx)
 {
     uacpi_aml_op op;
-    struct call_frame *frame = ctx->cur_frame;
-    void *code = frame->method->code;
-    uacpi_size size = frame->method->size;
+    uacpi_u8 length;
 
-    if (uacpi_unlikely(frame->code_offset >= size))
+    length = peek_next_op(ctx->cur_frame, &op);
+    if (uacpi_unlikely(length == 0))
         return UACPI_STATUS_AML_BAD_ENCODING;
 
-    op = AML_READ(code, frame->code_offset++);
-    if (op == UACPI_EXT_PREFIX) {
-        if (uacpi_unlikely(frame->code_offset >= size))
-            return UACPI_STATUS_AML_BAD_ENCODING;
-
-        op <<= 8;
-        op |= AML_READ(code, frame->code_offset++);
-    }
-
+    ctx->cur_frame->code_offset += length;
     g_uacpi_rt_ctx.opcodes_executed++;
 
     ctx->cur_op = uacpi_get_op_spec(op);
@@ -867,53 +887,36 @@ static uacpi_status handle_package(struct execution_context *ctx)
     return UACPI_STATUS_OK;
 }
 
-static uacpi_size field_byte_size(uacpi_object *obj)
-{
-    uacpi_size bit_length;
-
-    if (obj->type == UACPI_OBJECT_BUFFER_FIELD)
-        bit_length = obj->buffer_field.bit_length;
-    else
-        bit_length = obj->field_unit->bit_length;
-
-    return uacpi_round_up_bits_to_bytes(bit_length);
-}
-
 static uacpi_size sizeof_int(void)
 {
     return g_uacpi_rt_ctx.is_rev1 ? 4 : 8;
 }
 
-struct object_storage_as_buffer {
-    void *ptr;
-    uacpi_size len;
-};
-
-static uacpi_status get_object_storage(uacpi_object *obj,
-                                       struct object_storage_as_buffer *out_buf,
-                                       uacpi_bool include_null)
+static uacpi_status get_object_storage(
+    uacpi_object *obj, uacpi_data_view *out_buf, uacpi_bool include_null
+)
 {
     switch (obj->type) {
     case UACPI_OBJECT_INTEGER:
-        out_buf->len = sizeof_int();
-        out_buf->ptr = &obj->integer;
+        out_buf->length = sizeof_int();
+        out_buf->data = &obj->integer;
         break;
     case UACPI_OBJECT_STRING:
-        out_buf->len = obj->buffer->size;
-        if (out_buf->len && !include_null)
-            out_buf->len--;
+        out_buf->length = obj->buffer->size;
+        if (out_buf->length && !include_null)
+            out_buf->length--;
 
-        out_buf->ptr = obj->buffer->text;
+        out_buf->text = obj->buffer->text;
         break;
     case UACPI_OBJECT_BUFFER:
         if (obj->buffer->size == 0) {
-            out_buf->ptr = UACPI_NULL;
-            out_buf->len = 0;
+            out_buf->bytes = UACPI_NULL;
+            out_buf->length = 0;
             break;
         }
 
-        out_buf->len = obj->buffer->size;
-        out_buf->ptr = obj->buffer->data;
+        out_buf->length = obj->buffer->size;
+        out_buf->bytes = obj->buffer->data;
         break;
     case UACPI_OBJECT_REFERENCE:
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -935,10 +938,10 @@ static uacpi_u8 *buffer_index_cursor(uacpi_buffer_index *buf_idx)
 }
 
 static void write_buffer_index(uacpi_buffer_index *buf_idx,
-                               struct object_storage_as_buffer *src_buf)
+                               uacpi_data_view *src_buf)
 {
-    uacpi_memcpy_zerout(buffer_index_cursor(buf_idx), src_buf->ptr,
-                        1, src_buf->len);
+    uacpi_memcpy_zerout(buffer_index_cursor(buf_idx), src_buf->bytes,
+                        1, src_buf->length);
 }
 
 /*
@@ -946,11 +949,12 @@ static void write_buffer_index(uacpi_buffer_index *buf_idx,
  * the specification. In reality, we just copy one buffer to another
  * because that's what NT does.
  */
-static uacpi_status object_assign_with_implicit_cast(uacpi_object *dst,
-                                                     uacpi_object *src)
+static uacpi_status object_assign_with_implicit_cast(
+    uacpi_object *dst, uacpi_object *src, uacpi_data_view *wtr_response
+)
 {
     uacpi_status ret;
-    struct object_storage_as_buffer src_buf;
+    uacpi_data_view src_buf;
 
     ret = get_object_storage(src, &src_buf, UACPI_FALSE);
     if (uacpi_unlikely_error(ret))
@@ -960,23 +964,28 @@ static uacpi_status object_assign_with_implicit_cast(uacpi_object *dst,
     case UACPI_OBJECT_INTEGER:
     case UACPI_OBJECT_STRING:
     case UACPI_OBJECT_BUFFER: {
-        struct object_storage_as_buffer dst_buf;
+        uacpi_data_view dst_buf;
 
         ret = get_object_storage(dst, &dst_buf, UACPI_FALSE);
         if (uacpi_unlikely_error(ret))
             goto out_bad_cast;
 
-        uacpi_memcpy_zerout(dst_buf.ptr, src_buf.ptr, dst_buf.len, src_buf.len);
+        uacpi_memcpy_zerout(
+            dst_buf.bytes, src_buf.bytes, dst_buf.length, src_buf.length
+        );
         break;
     }
 
     case UACPI_OBJECT_BUFFER_FIELD:
-        uacpi_write_buffer_field(&dst->buffer_field, src_buf.ptr, src_buf.len);
+        uacpi_write_buffer_field(
+            &dst->buffer_field, src_buf.bytes, src_buf.length
+        );
         break;
 
     case UACPI_OBJECT_FIELD_UNIT:
         return uacpi_write_field_unit(
-            dst->field_unit, src_buf.ptr, src_buf.len
+            dst->field_unit, src_buf.bytes, src_buf.length,
+            wtr_response
         );
 
     case UACPI_OBJECT_BUFFER_INDEX:
@@ -1116,6 +1125,13 @@ static uacpi_status handle_create_op_region(struct execution_context *ctx)
             UACPI_FMT64(op_region->offset), UACPI_FMT64(op_region->length)
         );
         return UACPI_STATUS_AML_BAD_ENCODING;
+    }
+
+    if (op_region->space == UACPI_ADDRESS_SPACE_PCC && op_region->offset > 255) {
+        uacpi_warn(
+            "invalid PCC operation region %.4s subspace %"UACPI_PRIX64"\n",
+            node->name.text, UACPI_FMT64(op_region->offset)
+        );
     }
 
     node->object = uacpi_create_internal_reference(
@@ -1594,6 +1610,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
     uacpi_object *obj, *connection_obj = UACPI_NULL;
     struct field_specific_data field_data = { 0 };
     uacpi_size i = 1, bit_offset = 0;
+    uacpi_u32 length, pin_offset = 0;
 
     uacpi_u8 raw_value, access_type, lock_rule, update_rule;
     uacpi_u8 access_attrib = 0, access_length = 0;
@@ -1667,7 +1684,6 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
 
         // An actual field object
         if (item->type == ITEM_NAMESPACE_NODE) {
-            uacpi_u32 length;
             uacpi_field_unit *field;
 
             length = get_field_length(item_array_at(&op_ctx->items, i++));
@@ -1715,6 +1731,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
             }
 
             field->bit_length = length;
+            field->pin_offset = pin_offset;
 
             // FIXME: overflow, OOB, etc checks
             field->byte_offset = UACPI_ALIGN_DOWN(
@@ -1775,6 +1792,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
                 return ret;
 
             bit_offset += length;
+            pin_offset += length;
             continue;
         }
 
@@ -1782,7 +1800,9 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
         switch (item->immediate) {
         // ReservedField := 0x00 PkgLength
         case 0x00:
-            bit_offset += get_field_length(item_array_at(&op_ctx->items, i++));
+            length = get_field_length(item_array_at(&op_ctx->items, i++));
+            bit_offset += length;
+            pin_offset += length;
             break;
 
         // AccessField := 0x01 AccessType AccessAttrib
@@ -1829,6 +1849,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
         // ConnectField := <0x02 NameString> | <0x02 BufferData>
         case 0x02:
             connection_obj = item_array_at(&op_ctx->items, i++)->obj;
+            pin_offset = 0;
             break;
 
         default:
@@ -1952,6 +1973,9 @@ static uacpi_status begin_block_execution(struct execution_context *ctx)
 
     pkg = &item_array_at(&op_ctx->items, 0)->pkg;
 
+    // Disarm the tracked package so that we don't skip the Scope
+    op_ctx->tracked_pkg_idx = 0;
+
     switch (op_ctx->op->code) {
     case UACPI_AML_OP_IfOp:
         block->type = CODE_BLOCK_IF;
@@ -1990,9 +2014,6 @@ static uacpi_status begin_block_execution(struct execution_context *ctx)
     case UACPI_AML_OP_ProcessorOp:
     case UACPI_AML_OP_PowerResOp:
     case UACPI_AML_OP_ThermalZoneOp:
-        // Disarm the tracked package so that we don't skip the Scope
-        op_ctx->tracked_pkg_idx = 0;
-
         block->type = CODE_BLOCK_SCOPE;
         block->node = item_array_at(&op_ctx->items, 1)->node;
         break;
@@ -2268,8 +2289,9 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
  * 3. NAME -> Store with implicit cast.
  * 4. RefOf -> Not allowed here.
  */
-static uacpi_status store_to_reference(uacpi_object *dst,
-                                       uacpi_object *src)
+static uacpi_status store_to_reference(
+    uacpi_object *dst, uacpi_object *src, uacpi_data_view *wtr_response
+)
 {
     uacpi_object *src_obj;
     uacpi_bool overwrite = UACPI_FALSE;
@@ -2324,7 +2346,9 @@ static uacpi_status store_to_reference(uacpi_object *dst,
         return UACPI_STATUS_OK;
     }
 
-    return object_assign_with_implicit_cast(dst->inner_object, src_obj);
+    return object_assign_with_implicit_cast(
+        dst->inner_object, src_obj, wtr_response
+    );
 }
 
 static uacpi_status handle_ref_or_deref_of(struct execution_context *ctx)
@@ -2535,10 +2559,10 @@ static uacpi_status handle_index(struct execution_context *ctx)
     case UACPI_OBJECT_BUFFER:
     case UACPI_OBJECT_STRING: {
         uacpi_buffer_index *buf_idx;
-        struct object_storage_as_buffer buf;
+        uacpi_data_view buf;
         get_object_storage(src, &buf, UACPI_FALSE);
 
-        ret = ensure_valid_idx(src, idx, buf.len);
+        ret = ensure_valid_idx(src, idx, buf.length);
         if (uacpi_unlikely_error(ret))
             return ret;
 
@@ -2786,23 +2810,23 @@ static uacpi_status handle_to(struct execution_context *ctx)
         UACPI_FALLTHROUGH;
     }
     case UACPI_AML_OP_ToBufferOp: {
-        struct object_storage_as_buffer buf;
+        uacpi_data_view buf;
         uacpi_u8 *dst_buf;
 
         ret = get_object_storage(src, &buf, UACPI_TRUE);
         if (uacpi_unlikely_error(ret))
             return ret;
 
-        if (uacpi_unlikely(buf.len == 0))
+        if (uacpi_unlikely(buf.length == 0))
             return make_null_buffer(dst->buffer);
 
-        dst_buf = uacpi_kernel_alloc(buf.len);
+        dst_buf = uacpi_kernel_alloc(buf.length);
         if (uacpi_unlikely(dst_buf == UACPI_NULL))
             return UACPI_STATUS_OUT_OF_MEMORY;
 
-        uacpi_memcpy(dst_buf, buf.ptr, buf.len);
+        uacpi_memcpy(dst_buf, buf.bytes, buf.length);
         dst->buffer->data = dst_buf;
-        dst->buffer->size = buf.len;
+        dst->buffer->size = buf.length;
         break;
     }
 
@@ -2844,7 +2868,7 @@ static uacpi_status handle_mid(struct execution_context *ctx)
 {
     struct op_context *op_ctx = ctx->cur_op_ctx;
     uacpi_object *src, *dst;
-    struct object_storage_as_buffer src_buf;
+    uacpi_data_view src_buf;
     uacpi_buffer *dst_buf;
     uacpi_size idx, len;
     uacpi_bool is_string;
@@ -2867,7 +2891,8 @@ static uacpi_status handle_mid(struct execution_context *ctx)
     is_string = src->type == UACPI_OBJECT_STRING;
     get_object_storage(src, &src_buf, UACPI_FALSE);
 
-    if (uacpi_unlikely(src_buf.len == 0 || idx >= src_buf.len || len == 0)) {
+    if (uacpi_unlikely(src_buf.length == 0 || idx >= src_buf.length ||
+                       len == 0)) {
         if (src->type == UACPI_OBJECT_STRING) {
             dst->type = UACPI_OBJECT_STRING;
             return make_null_string(dst_buf);
@@ -2877,13 +2902,13 @@ static uacpi_status handle_mid(struct execution_context *ctx)
     }
 
     // Guaranteed to be at least 1 here
-    len = UACPI_MIN(len, src_buf.len - idx);
+    len = UACPI_MIN(len, src_buf.length - idx);
 
     dst_buf->data = uacpi_kernel_alloc(len + is_string);
     if (uacpi_unlikely(dst_buf->data == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
-    uacpi_memcpy(dst_buf->data, (uacpi_u8*)src_buf.ptr + idx, len);
+    uacpi_memcpy(dst_buf->data, (uacpi_u8*)src_buf.bytes + idx, len);
     dst_buf->size = len;
 
     if (is_string) {
@@ -2926,17 +2951,17 @@ static uacpi_status handle_concatenate(struct execution_context *ctx)
     }
     case UACPI_OBJECT_BUFFER: {
         uacpi_buffer *arg0_buf = arg0->buffer;
-        struct object_storage_as_buffer arg1_buf;
+        uacpi_data_view arg1_buf = { 0 };
 
         get_object_storage(arg1, &arg1_buf, UACPI_TRUE);
-        buf_size = arg0_buf->size + arg1_buf.len;
+        buf_size = arg0_buf->size + arg1_buf.length;
 
         dst_buf = uacpi_kernel_alloc(buf_size);
         if (uacpi_unlikely(dst_buf == UACPI_NULL))
             return UACPI_STATUS_OUT_OF_MEMORY;
 
         uacpi_memcpy(dst_buf, arg0_buf->data, arg0_buf->size);
-        uacpi_memcpy(dst_buf + arg0_buf->size, arg1_buf.ptr, arg1_buf.len);
+        uacpi_memcpy(dst_buf + arg0_buf->size, arg1_buf.bytes, arg1_buf.length);
         break;
     }
     case UACPI_OBJECT_STRING: {
@@ -3009,6 +3034,7 @@ static uacpi_status handle_concatenate_res(struct execution_context *ctx)
 {
     uacpi_status ret;
     struct op_context *op_ctx = ctx->cur_op_ctx;
+    uacpi_data_view buffer;
     uacpi_object *arg0, *arg1, *dst;
     uacpi_u8 *dst_buf;
     uacpi_size dst_size, arg0_size, arg1_size;
@@ -3017,11 +3043,13 @@ static uacpi_status handle_concatenate_res(struct execution_context *ctx)
     arg1 = item_array_at(&op_ctx->items, 1)->obj;
     dst = item_array_at(&op_ctx->items, 3)->obj;
 
-    ret = uacpi_find_aml_resource_end_tag(arg0->buffer, &arg0_size);
+    uacpi_buffer_to_view(arg0->buffer, &buffer);
+    ret = uacpi_find_aml_resource_end_tag(buffer, &arg0_size);
     if (uacpi_unlikely_error(ret))
         return ret;
 
-    ret = uacpi_find_aml_resource_end_tag(arg1->buffer, &arg1_size);
+    uacpi_buffer_to_view(arg1->buffer, &buffer);
+    ret = uacpi_find_aml_resource_end_tag(buffer, &arg1_size);
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -3063,10 +3091,10 @@ static uacpi_status handle_sizeof(struct execution_context *ctx)
     switch (src->type) {
     case UACPI_OBJECT_STRING:
     case UACPI_OBJECT_BUFFER: {
-        struct object_storage_as_buffer buf;
+        uacpi_data_view buf;
         get_object_storage(src, &buf, UACPI_FALSE);
 
-        dst->integer = buf.len;
+        dst->integer = buf.length;
         break;
     }
 
@@ -3754,48 +3782,69 @@ static uacpi_object_type buffer_field_get_read_type(
     return UACPI_OBJECT_INTEGER;
 }
 
-static uacpi_object_type field_unit_get_read_type(
-    struct uacpi_field_unit *field
+static uacpi_status field_get_read_type(
+    uacpi_object *obj, uacpi_object_type *out_type
 )
 {
-    if (field->bit_length > (g_uacpi_rt_ctx.is_rev1 ? 32u : 64u))
-        return UACPI_OBJECT_BUFFER;
+    if (obj->type == UACPI_OBJECT_BUFFER_FIELD) {
+        *out_type = buffer_field_get_read_type(&obj->buffer_field);
+        return UACPI_STATUS_OK;
+    }
 
-    return UACPI_OBJECT_INTEGER;
+    return uacpi_field_unit_get_read_type(obj->field_unit, out_type);
 }
 
-static uacpi_object_type field_get_read_type(uacpi_object *obj)
+static uacpi_status field_byte_size(
+    uacpi_object *obj, uacpi_size *out_size
+)
 {
-    if (obj->type == UACPI_OBJECT_BUFFER_FIELD)
-        return buffer_field_get_read_type(&obj->buffer_field);
+    uacpi_size bit_length;
 
-    return field_unit_get_read_type(obj->field_unit);
+    if (obj->type == UACPI_OBJECT_BUFFER_FIELD) {
+        bit_length = obj->buffer_field.bit_length;
+    } else {
+        uacpi_status ret;
+
+        ret = uacpi_field_unit_get_bit_length(obj->field_unit, &bit_length);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+    }
+
+    *out_size = uacpi_round_up_bits_to_bytes(bit_length);
+    return UACPI_STATUS_OK;
 }
 
 static uacpi_status handle_field_read(struct execution_context *ctx)
 {
+    uacpi_status ret;
     struct op_context *op_ctx = ctx->cur_op_ctx;
     struct uacpi_namespace_node *node;
     uacpi_object *src_obj, *dst_obj;
     uacpi_size dst_size;
-    void *dst;
+    void *dst = UACPI_NULL;
+    uacpi_data_view wtr_response = { 0 };
 
     node = item_array_at(&op_ctx->items, 0)->node;
     src_obj = uacpi_namespace_node_get_object(node);
     dst_obj = item_array_at(&op_ctx->items, 1)->obj;
 
-    if (field_get_read_type(src_obj) == UACPI_OBJECT_BUFFER) {
+    if (op_ctx->op->code == UACPI_AML_OP_InternalOpReadFieldAsBuffer) {
         uacpi_buffer *buf;
 
-        buf = dst_obj->buffer;
-        dst_size = field_byte_size(src_obj);
+        ret = field_byte_size(src_obj, &dst_size);
+        if (uacpi_unlikely_error(ret))
+            return ret;
 
-        dst = uacpi_kernel_alloc_zeroed(dst_size);
-        if (dst == UACPI_NULL)
-            return UACPI_STATUS_OUT_OF_MEMORY;
+        if (dst_size != 0) {
+            buf = dst_obj->buffer;
 
-        buf->data = dst;
-        buf->size = dst_size;
+            dst = uacpi_kernel_alloc_zeroed(dst_size);
+            if (dst == UACPI_NULL)
+                return UACPI_STATUS_OUT_OF_MEMORY;
+
+            buf->data = dst;
+            buf->size = dst_size;
+        }
     } else {
         dst = &dst_obj->integer;
         dst_size = sizeof(uacpi_u64);
@@ -3806,7 +3855,21 @@ static uacpi_status handle_field_read(struct execution_context *ctx)
         return UACPI_STATUS_OK;
     }
 
-    return uacpi_read_field_unit(src_obj->field_unit, dst, dst_size);
+    ret = uacpi_read_field_unit(
+        src_obj->field_unit, dst, dst_size, &wtr_response
+    );
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    if (wtr_response.data != UACPI_NULL) {
+        uacpi_buffer *buf;
+
+        buf = dst_obj->buffer;
+        buf->data = wtr_response.data;
+        buf->size = wtr_response.length;
+    }
+
+    return ret;
 }
 
 static uacpi_status handle_create_buffer_field(struct execution_context *ctx)
@@ -3968,15 +4031,8 @@ static uacpi_status create_named_scope(struct op_context *op_ctx)
 static uacpi_status handle_code_block(struct execution_context *ctx)
 {
     struct op_context *op_ctx = ctx->cur_op_ctx;
-    struct package_length *pkg;
-    uacpi_bool skip_block;
-
-    pkg = &item_array_at(&op_ctx->items, 0)->pkg;
 
     switch (op_ctx->op->code) {
-    case UACPI_AML_OP_ElseOp:
-        skip_block = ctx->skip_else;
-        break;
     case UACPI_AML_OP_ProcessorOp:
     case UACPI_AML_OP_PowerResOp:
     case UACPI_AML_OP_ThermalZoneOp:
@@ -3990,23 +4046,13 @@ static uacpi_status handle_code_block(struct execution_context *ctx)
         UACPI_FALLTHROUGH;
     }
     case UACPI_AML_OP_ScopeOp:
-        skip_block = UACPI_FALSE;
-        break;
     case UACPI_AML_OP_IfOp:
+    case UACPI_AML_OP_ElseOp:
     case UACPI_AML_OP_WhileOp: {
-        uacpi_object *operand;
-
-        operand = item_array_at(&op_ctx->items, 1)->obj;
-        skip_block = operand->integer == 0;
         break;
     }
     default:
         return UACPI_STATUS_INVALID_ARGUMENT;
-    }
-
-    if (skip_block) {
-        ctx->cur_frame->code_offset = pkg->end;
-        return UACPI_STATUS_OK;
     }
 
     return begin_block_execution(ctx);
@@ -4165,19 +4211,16 @@ static uacpi_bool maybe_end_block(struct execution_context *ctx)
     if (cur_frame->code_offset != block->end)
         return UACPI_FALSE;
 
-    ctx->skip_else = UACPI_FALSE;
-
-    if (block->type == CODE_BLOCK_WHILE) {
+    if (block->type == CODE_BLOCK_WHILE)
         cur_frame->code_offset = block->begin;
-    } else if (block->type == CODE_BLOCK_IF) {
-        ctx->skip_else = UACPI_TRUE;
-    }
 
     frame_reset_post_end_block(ctx, block->type);
     return UACPI_TRUE;
 }
 
-static uacpi_status store_to_target(uacpi_object *dst, uacpi_object *src)
+static uacpi_status store_to_target(
+    uacpi_object *dst, uacpi_object *src, uacpi_data_view *wtr_response
+)
 {
     uacpi_status ret;
 
@@ -4186,12 +4229,12 @@ static uacpi_status store_to_target(uacpi_object *dst, uacpi_object *src)
         ret = debug_store(src);
         break;
     case UACPI_OBJECT_REFERENCE:
-        ret = store_to_reference(dst, src);
+        ret = store_to_reference(dst, src, wtr_response);
         break;
 
     case UACPI_OBJECT_BUFFER_INDEX:
         src = uacpi_unwrap_internal_reference(src);
-        ret = object_assign_with_implicit_cast(dst, src);
+        ret = object_assign_with_implicit_cast(dst, src, wtr_response);
         break;
 
     case UACPI_OBJECT_INTEGER:
@@ -4218,8 +4261,38 @@ static uacpi_status handle_copy_object_or_store(struct execution_context *ctx)
     src = item_array_at(&op_ctx->items, 0)->obj;
     dst = item_array_at(&op_ctx->items, 1)->obj;
 
-    if (op_ctx->op->code == UACPI_AML_OP_StoreOp)
-        return store_to_target(dst, src);
+    if (op_ctx->op->code == UACPI_AML_OP_StoreOp) {
+        uacpi_status ret;
+        uacpi_data_view wtr_response = { 0 };
+
+        ret = store_to_target(dst, src, &wtr_response);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+
+        /*
+         * This was a write-then-read field access since we got a response
+         * buffer back from this store. Now we have to return this buffer
+         * as a prvalue from the StoreOp so that it can be used by AML to
+         * retrieve the response.
+         */
+        if (wtr_response.data != UACPI_NULL) {
+            uacpi_object *wtr_response_obj;
+
+            wtr_response_obj = uacpi_create_object(UACPI_OBJECT_BUFFER);
+            if (uacpi_unlikely(wtr_response_obj == UACPI_NULL)) {
+                uacpi_free(wtr_response.data, wtr_response.length);
+                return UACPI_STATUS_OUT_OF_MEMORY;
+            }
+
+            wtr_response_obj->buffer->data = wtr_response.data;
+            wtr_response_obj->buffer->size = wtr_response.length;
+
+            uacpi_object_unref(src);
+            item_array_at(&op_ctx->items, 0)->obj = wtr_response_obj;
+        }
+
+        return ret;
+    }
 
     if (dst->type != UACPI_OBJECT_REFERENCE)
         return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
@@ -4264,13 +4337,16 @@ static uacpi_status handle_inc_dec(struct execution_context *ctx)
         if (uacpi_unlikely(!field_allowed))
             goto out_bad_type;
 
-        true_src_type = field_get_read_type(src);
+        ret = field_get_read_type(src, &true_src_type);
+        if (uacpi_unlikely_error(ret))
+            goto out_bad_type;
         if (true_src_type != UACPI_OBJECT_INTEGER)
             goto out_bad_type;
 
         if (src->type == UACPI_OBJECT_FIELD_UNIT) {
             ret = uacpi_read_field_unit(
-                src->field_unit, &dst->integer, sizeof_int()
+                src->field_unit, &dst->integer, sizeof_int(),
+                UACPI_NULL
             );
             if (uacpi_unlikely_error(ret))
                 return ret;
@@ -4465,6 +4541,16 @@ static uacpi_u8 op_decode_byte(struct op_context *ctx)
     return byte;
 }
 
+static uacpi_aml_op op_decode_aml_op(struct op_context *op_ctx)
+{
+    uacpi_aml_op op = 0;
+
+    op |= op_decode_byte(op_ctx);
+    op |= op_decode_byte(op_ctx) << 8;
+
+    return op;
+}
+
 // MSVC doesn't support __VA_OPT__ so we do this weirdness
 #define EXEC_OP_DO_LVL(lvl, reason, ...)                              \
     uacpi_##lvl("Op 0x%04X ('%s'): "reason"\n",                       \
@@ -4642,6 +4728,11 @@ static uacpi_status typecheck_computational_data(
         );
         return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
     }
+}
+
+static void emit_op_skip_warn(const struct op_context *op_ctx)
+{
+    EXEC_OP_WARN("skipping due to previous errors");
 }
 
 static void trace_named_object_lookup_or_creation_failure(
@@ -5057,6 +5148,19 @@ method_dispatch_error:
     return ret;
 }
 
+static void apply_tracked_pkg(
+    struct call_frame *frame, struct op_context *op_ctx
+)
+{
+    struct item *item;
+
+    if (op_ctx->tracked_pkg_idx == 0)
+        return;
+
+    item = item_array_at(&op_ctx->items, op_ctx->tracked_pkg_idx - 1);
+    frame->code_offset = item->pkg.end;
+}
+
 static uacpi_status exec_op(struct execution_context *ctx)
 {
     uacpi_status ret = UACPI_STATUS_OK;
@@ -5136,13 +5240,10 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 if (item_array_at(&op_ctx->items, idx)->handle != UACPI_NULL)
                     break;
 
-                EXEC_OP_WARN("skipping due to previous errors");
+                emit_op_skip_warn(op_ctx);
             }
 
-            if (op_ctx->tracked_pkg_idx) {
-                item = item_array_at(&op_ctx->items, op_ctx->tracked_pkg_idx - 1);
-                frame->code_offset = item->pkg.end;
-            }
+            apply_tracked_pkg(frame, op_ctx);
 
             pop_op(ctx);
             if (ctx->cur_op_ctx) {
@@ -5152,6 +5253,10 @@ static uacpi_status exec_op(struct execution_context *ctx)
 
             return UACPI_STATUS_OK;
         }
+
+        case UACPI_PARSE_OP_EMIT_SKIP_WARN:
+            emit_op_skip_warn(op_ctx);
+            break;
 
         case UACPI_PARSE_OP_SIMPLE_NAME:
         case UACPI_PARSE_OP_SUPERNAME:
@@ -5273,6 +5378,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
 
         case UACPI_PARSE_OP_ITEM_POP:
             pop_item(op_ctx);
+            item = item_array_last(&op_ctx->items);
             break;
 
         case UACPI_PARSE_OP_IF_HAS_DATA: {
@@ -5290,15 +5396,23 @@ static uacpi_status exec_op(struct execution_context *ctx)
         }
 
         case UACPI_PARSE_OP_IF_NOT_NULL:
-        case UACPI_PARSE_OP_IF_NULL: {
+        case UACPI_PARSE_OP_IF_NULL:
+        case UACPI_PARSE_OP_IF_LAST_NULL:
+        case UACPI_PARSE_OP_IF_LAST_NOT_NULL: {
             uacpi_u8 idx, bytes_skip;
             uacpi_bool is_null, skip_if_null;
 
-            idx = op_decode_byte(op_ctx);
-            bytes_skip = op_decode_byte(op_ctx);
+            if (op == UACPI_PARSE_OP_IF_LAST_NULL ||
+                op == UACPI_PARSE_OP_IF_LAST_NOT_NULL) {
+                is_null = item->handle == UACPI_NULL;
+            } else {
+                idx = op_decode_byte(op_ctx);
+                is_null = item_array_at(&op_ctx->items, idx)->handle == UACPI_NULL;
+            }
 
-            is_null = item_array_at(&op_ctx->items, idx)->handle == UACPI_NULL;
-            skip_if_null = op == UACPI_PARSE_OP_IF_NOT_NULL;
+            bytes_skip = op_decode_byte(op_ctx);
+            skip_if_null = op == UACPI_PARSE_OP_IF_NOT_NULL ||
+                           op == UACPI_PARSE_OP_IF_LAST_NOT_NULL;
 
             if (is_null == skip_if_null)
                 op_ctx->pc += bytes_skip;
@@ -5306,13 +5420,28 @@ static uacpi_status exec_op(struct execution_context *ctx)
             break;
         }
 
-        case UACPI_PARSE_OP_IF_EQUALS: {
+        case UACPI_PARSE_OP_IF_LAST_EQUALS: {
             uacpi_u8 value, bytes_skip;
 
             value = op_decode_byte(op_ctx);
             bytes_skip = op_decode_byte(op_ctx);
 
             if (item->immediate != value)
+                op_ctx->pc += bytes_skip;
+
+            break;
+        }
+
+        case UACPI_PARSE_OP_IF_LAST_FALSE:
+        case UACPI_PARSE_OP_IF_LAST_TRUE: {
+            uacpi_u8 bytes_skip;
+            uacpi_bool is_false, skip_if_false;
+
+            bytes_skip = op_decode_byte(op_ctx);
+            is_false = item->obj->integer == 0;
+            skip_if_false = op == UACPI_PARSE_OP_IF_LAST_TRUE;
+
+            if (is_false == skip_if_false)
                 op_ctx->pc += bytes_skip;
 
             break;
@@ -5357,15 +5486,18 @@ static uacpi_status exec_op(struct execution_context *ctx)
             if (uacpi_unlikely_error(ret)) {
                 enum uacpi_log_level lvl = UACPI_LOG_ERROR;
                 uacpi_status trace_ret = ret;
+                uacpi_bool abort_whileif = UACPI_FALSE;
 
-                if (frame->method->named_objects_persist) {
-                    uacpi_bool is_ok;
+                if (frame->method->named_objects_persist &&
+                    (ret == UACPI_STATUS_AML_OBJECT_ALREADY_EXISTS ||
+                     ret == UACPI_STATUS_NOT_FOUND)) {
+                    struct op_context *first_ctx;
 
-                    is_ok = op_allows_unresolved_if_load(op);
-                    is_ok &= ret == UACPI_STATUS_AML_OBJECT_ALREADY_EXISTS ||
-                             ret == UACPI_STATUS_NOT_FOUND;
+                    first_ctx = op_context_array_at(&frame->pending_ops, 0);
+                    abort_whileif = first_ctx->op->code == UACPI_AML_OP_WhileOp ||
+                                    first_ctx->op->code == UACPI_AML_OP_IfOp;
 
-                    if (is_ok) {
+                    if (op_allows_unresolved_if_load(op) || abort_whileif) {
                         lvl = UACPI_LOG_WARN;
                         ret = UACPI_STATUS_OK;
                     }
@@ -5374,6 +5506,16 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 trace_named_object_lookup_or_creation_failure(
                     frame, offset, op, trace_ret, lvl
                 );
+
+                if (abort_whileif) {
+                    while (op_context_array_size(&frame->pending_ops) != 1)
+                        pop_op(ctx);
+
+                    op_ctx = op_context_array_at(&frame->pending_ops, 0);
+                    op_ctx->pc++;
+                    op_ctx->preempted = UACPI_FALSE;
+                    break;
+                }
 
                 if (ret == UACPI_STATUS_NOT_FOUND)
                     ret = UACPI_STATUS_AML_UNDEFINED_REFERENCE;
@@ -5481,7 +5623,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 src = item->obj;
             }
 
-            ret = store_to_target(dst, src);
+            ret = store_to_target(dst, src, UACPI_NULL);
             break;
         }
 
@@ -5573,11 +5715,28 @@ static uacpi_status exec_op(struct execution_context *ctx)
             }
 
             case UACPI_OBJECT_BUFFER_FIELD:
-            case UACPI_OBJECT_FIELD_UNIT:
+            case UACPI_OBJECT_FIELD_UNIT: {
+                uacpi_object_type type;
+
                 if (!op_wants_term_arg_or_operand(prev_op))
                     break;
 
-                switch (field_get_read_type(obj)) {
+                ret = field_get_read_type(obj, &type);
+                if (uacpi_unlikely_error(ret)) {
+                    const uacpi_char *field_path;
+
+                    field_path = uacpi_namespace_node_generate_absolute_path(
+                        item->node
+                    );
+
+                    uacpi_error(
+                        "unable to perform a read from field %s: "
+                        "parent opregion gone\n", field_path
+                    );
+                    uacpi_free_absolute_path(field_path);
+                }
+
+                switch (type) {
                 case UACPI_OBJECT_BUFFER:
                     new_op = UACPI_AML_OP_InternalOpReadFieldAsBuffer;
                     break;
@@ -5589,12 +5748,48 @@ static uacpi_status exec_op(struct execution_context *ctx)
                     continue;
                 }
                 break;
+            }
             default:
                 break;
             }
 
             op_ctx->pc = 0;
             op_ctx->op = uacpi_get_op_spec(new_op);
+            break;
+        }
+
+        case UACPI_PARSE_OP_SWITCH_TO_NEXT_IF_EQUALS: {
+            uacpi_aml_op op, target_op;
+            uacpi_u32 cur_offset;
+            uacpi_u8 op_length;
+
+            cur_offset = frame->code_offset;
+            apply_tracked_pkg(frame, op_ctx);
+            op_length = peek_next_op(frame, &op);
+
+            target_op = op_decode_aml_op(op_ctx);
+            if (op_length == 0 || op != target_op) {
+                // Revert tracked package
+                frame->code_offset = cur_offset;
+                break;
+            }
+
+            frame->code_offset += op_length;
+            op_ctx->switched_from = op_ctx->op->code;
+            op_ctx->op = uacpi_get_op_spec(target_op);
+            op_ctx->pc = 0;
+            break;
+        }
+
+        case UACPI_PARSE_OP_IF_SWITCHED_FROM: {
+            uacpi_aml_op target_op;
+            uacpi_u8 skip_bytes;
+
+            target_op = op_decode_aml_op(op_ctx);
+            skip_bytes = op_decode_byte(op_ctx);
+
+            if (op_ctx->switched_from != target_op)
+                op_ctx->pc += skip_bytes;
             break;
         }
 
@@ -5751,7 +5946,6 @@ uacpi_status uacpi_execute_control_method(
         if (uacpi_unlikely_error(ret))
             goto handle_method_abort;
 
-        ctx->skip_else = UACPI_FALSE;
         continue;
 
     handle_method_abort:

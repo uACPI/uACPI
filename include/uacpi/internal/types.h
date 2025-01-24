@@ -120,8 +120,13 @@ typedef struct uacpi_operation_region {
     uacpi_u64 offset;
     uacpi_u64 length;
 
-    // If space == TABLE_DATA
-    uacpi_u64 table_idx;
+    union {
+        // If space == TABLE_DATA
+        uacpi_u64 table_idx;
+
+        // If space == PCC
+        uacpi_u8 *internal_buffer;
+    };
 
     // Used to link regions sharing the same handler
     struct uacpi_operation_region *next;
@@ -182,19 +187,6 @@ typedef enum uacpi_access_type {
     UACPI_ACCESS_TYPE_BUFFER = 5,
 } uacpi_access_type;
 
-typedef enum uacpi_access_attributes {
-    UACPI_ACCESS_ATTRIBUTE_QUICK = 0x02,
-    UACPI_ACCESS_ATTRIBUTE_SEND_RECEIVE = 0x04,
-    UACPI_ACCESS_ATTRIBUTE_BYTE = 0x06,
-    UACPI_ACCESS_ATTRIBUTE_WORD = 0x08,
-    UACPI_ACCESS_ATTRIBUTE_BLOCK = 0x0A,
-    UACPI_ACCESS_ATTRIBUTE_BYTES = 0x0B,
-    UACPI_ACCESS_ATTRIBUTE_PROCESS_CALL = 0x0C,
-    UACPI_ACCESS_ATTRIBUTE_BLOCK_PROCESS_CALL = 0x0D,
-    UACPI_ACCESS_ATTRIBUTE_RAW_BYTES = 0x0E,
-    UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES = 0x0F,
-} uacpi_access_attributes;
-
 typedef enum uacpi_lock_rule {
     UACPI_LOCK_RULE_NO_LOCK = 0,
     UACPI_LOCK_RULE_LOCK = 1,
@@ -239,6 +231,7 @@ typedef struct uacpi_field_unit {
 
     uacpi_u32 byte_offset;
     uacpi_u32 bit_length;
+    uacpi_u32 pin_offset;
     uacpi_u8 bit_offset_within_first_byte;
     uacpi_u8 access_width_bytes;
     uacpi_u8 access_length;
@@ -309,3 +302,5 @@ void uacpi_mutex_unref(uacpi_mutex*);
 void uacpi_method_unref(uacpi_control_method*);
 
 void uacpi_address_space_handler_unref(uacpi_address_space_handler *handler);
+
+void uacpi_buffer_to_view(uacpi_buffer*, uacpi_data_view*);

@@ -182,6 +182,9 @@ class ASLSource:
             "-vw", "3141",
             "-vw", "6141",
 
+            # Field Unit extends beyond region limit
+            "-vw", "6031",
+
             # Name already exists in scope
             "-vw", "6074",
 

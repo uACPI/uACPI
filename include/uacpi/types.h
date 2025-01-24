@@ -84,6 +84,9 @@ typedef struct uacpi_data_view {
 
         uacpi_char *text;
         const uacpi_char *const_text;
+
+        void *data;
+        const void *const_data;
     };
     uacpi_size length;
 } uacpi_data_view;
@@ -355,15 +358,59 @@ uacpi_status uacpi_object_get_power_resource_info(
 );
 
 typedef enum uacpi_region_op {
-    UACPI_REGION_OP_ATTACH = 1,
-    UACPI_REGION_OP_READ = 2,
-    UACPI_REGION_OP_WRITE = 3,
-    UACPI_REGION_OP_DETACH = 4,
+    // data => uacpi_region_attach_data
+    UACPI_REGION_OP_ATTACH = 0,
+    // data => uacpi_region_detach_data
+    UACPI_REGION_OP_DETACH,
+
+    // data => uacpi_region_rw_data
+    UACPI_REGION_OP_READ,
+    UACPI_REGION_OP_WRITE,
+
+    // data => uacpi_region_pcc_send_data
+    UACPI_REGION_OP_PCC_SEND,
+
+    // data => uacpi_region_gpio_rw_data
+    UACPI_REGION_OP_GPIO_READ,
+    UACPI_REGION_OP_GPIO_WRITE,
+
+    // data => uacpi_region_ipmi_rw_data
+    UACPI_REGION_OP_IPMI_COMMAND,
+
+    // data => uacpi_region_ffixedhw_rw_data
+    UACPI_REGION_OP_FFIXEDHW_COMMAND,
+
+    // data => uacpi_region_prm_rw_data
+    UACPI_REGION_OP_PRM_COMMAND,
+
+    // data => uacpi_region_serial_rw_data
+    UACPI_REGION_OP_SERIAL_READ,
+    UACPI_REGION_OP_SERIAL_WRITE,
 } uacpi_region_op;
+
+typedef struct uacpi_generic_region_info {
+    uacpi_u64 base;
+    uacpi_u64 length;
+} uacpi_generic_region_info;
+
+typedef struct uacpi_pcc_region_info {
+    uacpi_data_view buffer;
+    uacpi_u8 subspace_id;
+} uacpi_pcc_region_info;
+
+typedef struct uacpi_gpio_region_info
+{
+    uacpi_u64 num_pins;
+} uacpi_gpio_region_info;
 
 typedef struct uacpi_region_attach_data {
     void *handler_context;
     uacpi_namespace_node *region_node;
+    union {
+        uacpi_generic_region_info generic_info;
+        uacpi_pcc_region_info pcc_info;
+        uacpi_gpio_region_info gpio_info;
+    };
     void *out_region_context;
 } uacpi_region_attach_data;
 
@@ -377,6 +424,69 @@ typedef struct uacpi_region_rw_data {
     uacpi_u64 value;
     uacpi_u8 byte_width;
 } uacpi_region_rw_data;
+
+typedef struct uacpi_region_pcc_send_data {
+    void *handler_context;
+    void *region_context;
+    uacpi_data_view buffer;
+} uacpi_region_pcc_send_data;
+
+typedef struct uacpi_region_gpio_rw_data
+{
+    void *handler_context;
+    void *region_context;
+    uacpi_data_view connection;
+    uacpi_u32 pin_offset;
+    uacpi_u32 num_pins;
+    uacpi_u64 value;
+} uacpi_region_gpio_rw_data;
+
+typedef struct uacpi_region_ipmi_rw_data
+{
+    void *handler_context;
+    void *region_context;
+    uacpi_data_view in_out_message;
+    uacpi_u64 command;
+} uacpi_region_ipmi_rw_data;
+
+typedef uacpi_region_ipmi_rw_data uacpi_region_ffixedhw_rw_data;
+
+typedef struct uacpi_region_prm_rw_data
+{
+    void *handler_context;
+    void *region_context;
+    uacpi_data_view in_out_message;
+} uacpi_region_prm_rw_data;
+
+typedef enum uacpi_access_attribute {
+    UACPI_ACCESS_ATTRIBUTE_QUICK = 0x02,
+    UACPI_ACCESS_ATTRIBUTE_SEND_RECEIVE = 0x04,
+    UACPI_ACCESS_ATTRIBUTE_BYTE = 0x06,
+    UACPI_ACCESS_ATTRIBUTE_WORD = 0x08,
+    UACPI_ACCESS_ATTRIBUTE_BLOCK = 0x0A,
+    UACPI_ACCESS_ATTRIBUTE_BYTES = 0x0B,
+    UACPI_ACCESS_ATTRIBUTE_PROCESS_CALL = 0x0C,
+    UACPI_ACCESS_ATTRIBUTE_BLOCK_PROCESS_CALL = 0x0D,
+    UACPI_ACCESS_ATTRIBUTE_RAW_BYTES = 0x0E,
+    UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES = 0x0F,
+} uacpi_access_attribute;
+
+typedef struct uacpi_region_serial_rw_data {
+    void *handler_context;
+    void *region_context;
+    uacpi_u64 command;
+    uacpi_data_view connection;
+    uacpi_data_view in_out_buffer;
+    uacpi_access_attribute access_attribute;
+
+    /*
+     * Applicable if access_attribute is one of:
+     * - UACPI_ACCESS_ATTRIBUTE_BYTES
+     * - UACPI_ACCESS_ATTRIBUTE_RAW_BYTES
+     * - UACPI_ACCESS_ATTRIBUTE_RAW_PROCESS_BYTES
+     */
+    uacpi_u8 access_length;
+} uacpi_region_serial_rw_data;
 
 typedef struct uacpi_region_detach_data {
     void *handler_context;

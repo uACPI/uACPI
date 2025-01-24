@@ -53,25 +53,25 @@ const struct uacpi_op_spec *uacpi_get_op_spec(uacpi_aml_op op)
         UACPI_PARSE_OP_LOAD_IMM, 1,                                    \
                                                                        \
         /* ReservedField := 0x00 PkgLength */                          \
-        UACPI_PARSE_OP_IF_EQUALS, 0x00, 3,                             \
+        UACPI_PARSE_OP_IF_LAST_EQUALS, 0x00, 3,                        \
             UACPI_PARSE_OP_PKGLEN,                                     \
             UACPI_PARSE_OP_JMP, parse_loop_pc,                         \
                                                                        \
         /* AccessField := 0x01 AccessType AccessAttrib */              \
-        UACPI_PARSE_OP_IF_EQUALS, 0x01, 6,                             \
+        UACPI_PARSE_OP_IF_LAST_EQUALS, 0x01, 6,                        \
             UACPI_PARSE_OP_LOAD_IMM, 1,                                \
             UACPI_PARSE_OP_LOAD_IMM, 1,                                \
             UACPI_PARSE_OP_JMP, parse_loop_pc,                         \
                                                                        \
         /* ConnectField := <0x02 NameString> | <0x02 BufferData> */    \
-        UACPI_PARSE_OP_IF_EQUALS, 0x02, 5,                             \
+        UACPI_PARSE_OP_IF_LAST_EQUALS, 0x02, 5,                        \
             UACPI_PARSE_OP_TERM_ARG_UNWRAP_INTERNAL,                   \
             UACPI_PARSE_OP_TYPECHECK, UACPI_OBJECT_BUFFER,             \
             UACPI_PARSE_OP_JMP, parse_loop_pc,                         \
                                                                        \
         /* ExtendedAccessField := 0x03 AccessType ExtendedAccessAttrib \
          *                                        AccessLength */      \
-        UACPI_PARSE_OP_IF_EQUALS, 0x03, 8,                             \
+        UACPI_PARSE_OP_IF_LAST_EQUALS, 0x03, 8,                        \
             UACPI_PARSE_OP_LOAD_IMM, 1,                                \
             UACPI_PARSE_OP_LOAD_IMM, 1,                                \
             UACPI_PARSE_OP_LOAD_IMM, 1,                                \
@@ -197,6 +197,7 @@ static
 const uacpi_char *const pop_names[UACPI_PARSE_OP_MAX + 1] = {
     [POP(END)] = "<END-OF-OP>",
     [POP(SKIP_WITH_WARN_IF_NULL)] = "SKIP_WITH_WARN_IF_NULL",
+    [POP(EMIT_SKIP_WARN)] = "EMIT_SKIP_WARN",
     [POP(SIMPLE_NAME)] = "SIMPLE_NAME",
     [POP(SUPERNAME)] = "SUPERNAME",
     [POP(SUPERNAME_OR_UNRESOLVED)] = "SUPERNAME_OR_UNRESOLVED",
@@ -246,8 +247,14 @@ const uacpi_char *const pop_names[UACPI_PARSE_OP_MAX + 1] = {
     [POP(CONVERT_NAMESTRING)] = "CONVERT_NAMESTRING",
     [POP(IF_HAS_DATA)] = "IF_HAS_DATA",
     [POP(IF_NULL)] = "IF_NULL",
+    [POP(IF_LAST_NULL)] = "IF_LAST_NULL",
     [POP(IF_NOT_NULL)] = "IF_NOT_NULL",
-    [POP(IF_EQUALS)] = "IF_EQUALS",
+    [POP(IF_LAST_NOT_NULL)] = "IF_NOT_NULL",
+    [POP(IF_LAST_EQUALS)] = "IF_LAST_EQUALS",
+    [POP(IF_LAST_FALSE)] = "IF_LAST_FALSE",
+    [POP(IF_LAST_TRUE)] = "IF_LAST_TRUE",
+    [POP(SWITCH_TO_NEXT_IF_EQUALS)] = "SWITCH_TO_NEXT_IF_EQUALS",
+    [POP(IF_SWITCHED_FROM)] = "IF_SWITCHED_FROM",
     [POP(JMP)] = "JMP",
 };
 

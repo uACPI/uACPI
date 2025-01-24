@@ -42,7 +42,7 @@ static uint8_t *io_space;
 uacpi_status uacpi_kernel_initialize(uacpi_init_level lvl)
 {
     if (lvl == UACPI_INIT_LEVEL_EARLY)
-        io_space = new uint8_t[UINT16_MAX + 1];
+        io_space = new uint8_t[UINT16_MAX + 1]{};
     return UACPI_STATUS_OK;
 }
 
@@ -62,22 +62,67 @@ uacpi_status uacpi_kernel_io_map(uacpi_io_addr addr, uacpi_size,
 
 void uacpi_kernel_io_unmap(uacpi_handle) {}
 
-uacpi_status uacpi_kernel_io_read(
-    uacpi_handle handle, uacpi_size offset,
-    uacpi_u8 byte_width, uacpi_u64 *value
-)
-{
-    auto addr = (uacpi_io_addr)handle + offset;
-
-    if (io_space && addr <= UINT16_MAX) {
-        *value = 0;
-        memcpy(value, &io_space[addr], byte_width);
-    } else {
-        *value = 0xFFFFFFFFFFFFFFFF;
+#define UACPI_IO_READ(bits)                                              \
+    uacpi_status uacpi_kernel_io_read##bits(                             \
+        uacpi_handle handle, uacpi_size offset, uacpi_u##bits *out_value \
+    )                                                                    \
+    {                                                                    \
+        auto addr = (uacpi_io_addr)handle + offset;                      \
+                                                                         \
+        if (io_space && addr <= UINT16_MAX) {                            \
+            memcpy(out_value, &io_space[addr], bits / 8);                \
+        } else {                                                         \
+            *out_value = (uacpi_u##bits)0xFFFFFFFFFFFFFFFF;              \
+        }                                                                \
+                                                                         \
+        return UACPI_STATUS_OK;                                          \
     }
 
-    return UACPI_STATUS_OK;
-}
+#define UACPI_IO_WRITE(bits)                                           \
+    uacpi_status uacpi_kernel_io_write##bits(                          \
+        uacpi_handle handle, uacpi_size offset, uacpi_u##bits in_value \
+    )                                                                  \
+    {                                                                  \
+        auto addr = (uacpi_io_addr)handle + offset;                    \
+                                                                       \
+        if (io_space && addr <= UINT16_MAX)                            \
+            memcpy(&io_space[addr], &in_value, bits / 8);              \
+                                                                       \
+        return UACPI_STATUS_OK;                                        \
+    }
+
+#define UACPI_PCI_READ(bits)                           \
+    uacpi_status uacpi_kernel_pci_read##bits(          \
+        uacpi_handle, uacpi_size, uacpi_u##bits *value \
+    )                                                  \
+    {                                                  \
+        *value = (uacpi_u##bits)0xFFFFFFFFFFFFFFFF;    \
+        return UACPI_STATUS_OK;                        \
+    }
+
+#define UACPI_PCI_WRITE(bits)                    \
+    uacpi_status uacpi_kernel_pci_write##bits(   \
+        uacpi_handle, uacpi_size, uacpi_u##bits  \
+    )                                            \
+    {                                            \
+        return UACPI_STATUS_OK;                  \
+    }
+
+UACPI_IO_READ(8)
+UACPI_IO_READ(16)
+UACPI_IO_READ(32)
+
+UACPI_IO_WRITE(8)
+UACPI_IO_WRITE(16)
+UACPI_IO_WRITE(32)
+
+UACPI_PCI_READ(8)
+UACPI_PCI_READ(16)
+UACPI_PCI_READ(32)
+
+UACPI_PCI_WRITE(8)
+UACPI_PCI_WRITE(16)
+UACPI_PCI_WRITE(32)
 
 uacpi_status uacpi_kernel_pci_device_open(
     uacpi_pci_address, uacpi_handle *out_handle
@@ -87,34 +132,6 @@ uacpi_status uacpi_kernel_pci_device_open(
     return UACPI_STATUS_OK;
 }
 void uacpi_kernel_pci_device_close(uacpi_handle) {}
-
-uacpi_status uacpi_kernel_pci_read(
-    uacpi_handle, uacpi_size offset,
-    uacpi_u8 byte_width, uacpi_u64 *value
-)
-{
-    return uacpi_kernel_io_read(nullptr, offset, byte_width, value);
-}
-
-uacpi_status uacpi_kernel_io_write(
-    uacpi_handle handle, uacpi_size offset,
-    uacpi_u8 byte_width, uacpi_u64 value
-)
-{
-    auto addr = (uacpi_io_addr)handle + offset;
-
-    if (io_space && addr <= UINT16_MAX)
-        memcpy(&io_space[addr], &value, byte_width);
-
-    return UACPI_STATUS_OK;
-}
-
-uacpi_status uacpi_kernel_pci_write(
-    uacpi_handle, uacpi_size offset, uacpi_u8 byte_width, uacpi_u64 value
-)
-{
-    return uacpi_kernel_io_write(nullptr, offset, byte_width, value);
-}
 
 bool g_expect_virtual_addresses = true;
 

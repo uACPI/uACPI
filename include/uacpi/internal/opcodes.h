@@ -24,6 +24,9 @@ enum uacpi_parse_op {
      */
     UACPI_PARSE_OP_SKIP_WITH_WARN_IF_NULL,
 
+    // Emit a warning as if the current opcode is being skipped
+    UACPI_PARSE_OP_EMIT_SKIP_WARN,
+
     // SimpleName := NameString | ArgObj | LocalObj
     UACPI_PARSE_OP_SIMPLE_NAME,
 
@@ -220,14 +223,47 @@ enum uacpi_parse_op {
      */
     UACPI_PARSE_OP_IF_NULL,
 
+   /*
+    * Execute the next instruction only if the handle at
+    * items[-1] is null. Otherwise skip decode_ops[pc + 1] bytes.
+    */
+    UACPI_PARSE_OP_IF_LAST_NULL,
+
     // The inverse of UACPI_PARSE_OP_IF_NULL
     UACPI_PARSE_OP_IF_NOT_NULL,
+
+    // The inverse of UACPI_PARSE_OP_IF_LAST_NULL
+    UACPI_PARSE_OP_IF_LAST_NOT_NULL,
 
     /*
      * Execute the next instruction only if the last immediate is equal to
      * decode_ops[pc + 1], otherwise skip decode_ops[pc + 2] bytes.
      */
-    UACPI_PARSE_OP_IF_EQUALS,
+    UACPI_PARSE_OP_IF_LAST_EQUALS,
+
+   /*
+    * Execute the next instruction only if the last object is a false value
+    * (has a value of 0), otherwise skip decode_ops[pc + 1] bytes.
+    */
+    UACPI_PARSE_OP_IF_LAST_FALSE,
+
+    // The inverse of UACPI_PARSE_OP_IF_LAST_FALSE
+    UACPI_PARSE_OP_IF_LAST_TRUE,
+
+    /*
+     * Switch to opcode at decode_ops[pc + 1] only if the next AML instruction
+     * in the stream is equal to it. Note that this looks ahead of the tracked
+     * package if one is active. Switching to the next op also applies the
+     * currently tracked package.
+     */
+    UACPI_PARSE_OP_SWITCH_TO_NEXT_IF_EQUALS,
+
+   /*
+    * Execute the next instruction only if this op was switched to from op at
+    * (decode_ops[pc + 1] | decode_ops[pc + 2] << 8), otherwise skip
+    * decode_ops[pc + 3] bytes.
+    */
+    UACPI_PARSE_OP_IF_SWITCHED_FROM,
 
     /*
      * pc = decode_ops[pc + 1]
@@ -665,9 +701,10 @@ UACPI_OP(                                                        \
     StoreOp, 0x70,                                               \
     {                                                            \
         UACPI_PARSE_OP_TERM_ARG,                                 \
-        UACPI_PARSE_OP_OBJECT_COPY_TO_PREV,                      \
         UACPI_PARSE_OP_SUPERNAME,                                \
         UACPI_PARSE_OP_INVOKE_HANDLER,                           \
+        UACPI_PARSE_OP_ITEM_POP,                                 \
+        UACPI_PARSE_OP_OBJECT_COPY_TO_PREV,                      \
     },                                                           \
     UACPI_OP_PROPERTY_TERM_ARG                                   \
 )                                                                \
@@ -889,24 +926,41 @@ UACPI_OP(                                                        \
 UACPI_OP(                                                        \
     IfOp, 0xA0,                                                  \
     {                                                            \
-        UACPI_PARSE_OP_PKGLEN,                                   \
+        UACPI_PARSE_OP_TRACKED_PKGLEN,                           \
         UACPI_PARSE_OP_OPERAND,                                  \
+        UACPI_PARSE_OP_IF_LAST_NULL, 3,                          \
+            UACPI_PARSE_OP_EMIT_SKIP_WARN,                       \
+            UACPI_PARSE_OP_JMP, 9,                               \
+        UACPI_PARSE_OP_IF_LAST_FALSE, 4,                         \
+            UACPI_PARSE_OP_SWITCH_TO_NEXT_IF_EQUALS, 0xA1, 0x00, \
+            UACPI_PARSE_OP_END,                                  \
         UACPI_PARSE_OP_INVOKE_HANDLER,                           \
     }                                                            \
 )                                                                \
 UACPI_OP(                                                        \
    ElseOp, 0xA1,                                                 \
    {                                                             \
-       UACPI_PARSE_OP_PKGLEN,                                    \
-       UACPI_PARSE_OP_INVOKE_HANDLER,                            \
+       UACPI_PARSE_OP_IF_SWITCHED_FROM, 0xA0, 0x00, 10,          \
+           UACPI_PARSE_OP_IF_LAST_NULL, 3,                       \
+               UACPI_PARSE_OP_TRACKED_PKGLEN,                    \
+               UACPI_PARSE_OP_EMIT_SKIP_WARN,                    \
+               UACPI_PARSE_OP_END,                               \
+           UACPI_PARSE_OP_ITEM_POP,                              \
+           UACPI_PARSE_OP_ITEM_POP,                              \
+           UACPI_PARSE_OP_PKGLEN,                                \
+           UACPI_PARSE_OP_INVOKE_HANDLER,                        \
+           UACPI_PARSE_OP_END,                                   \
+       UACPI_PARSE_OP_TRACKED_PKGLEN,                            \
    }                                                             \
 )                                                                \
 UACPI_OP(                                                        \
     WhileOp, 0xA2,                                               \
     {                                                            \
-        UACPI_PARSE_OP_PKGLEN,                                   \
+        UACPI_PARSE_OP_TRACKED_PKGLEN,                           \
         UACPI_PARSE_OP_OPERAND,                                  \
-        UACPI_PARSE_OP_INVOKE_HANDLER,                           \
+        UACPI_PARSE_OP_SKIP_WITH_WARN_IF_NULL, 1,                \
+        UACPI_PARSE_OP_IF_LAST_TRUE, 1,                          \
+            UACPI_PARSE_OP_INVOKE_HANDLER,                       \
     }                                                            \
 )                                                                \
 UACPI_OP(                                                        \

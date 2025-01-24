@@ -18,6 +18,8 @@
 #include <uacpi/event.h>
 
 void run_resource_tests();
+void test_object_api();
+void test_address_spaces();
 
 static uacpi_object_type string_to_object_type(std::string_view str)
 {
@@ -277,109 +279,7 @@ static uacpi_interrupt_ret handle_gpe(
     uacpi_handle, uacpi_namespace_node *, uacpi_u16
 )
 {
-    std::cout << "got a GPE" << std::endl;
     return UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
-}
-
-static void ensure_ok_status(uacpi_status st)
-{
-    if (st == UACPI_STATUS_OK)
-        return;
-
-    auto msg = uacpi_status_to_string(st);
-    throw std::runtime_error(std::string("uACPI error: ") + msg);
-}
-
-static void test_object_api()
-{
-    uacpi_status st;
-    uacpi_object_array arr;
-    uacpi_object *objects[2];
-    uacpi_u64 ret;
-
-    arr.objects = objects;
-    arr.count = sizeof(objects) / sizeof(*objects);
-    objects[0] = uacpi_object_create_integer(1);
-
-    auto check_ok = [&] {
-        st = uacpi_eval_integer(UACPI_NULL, "CHEK", &arr, &ret);
-        ensure_ok_status(st);
-        if (!ret)
-            throw std::runtime_error("integer check failed");
-        uacpi_object_unref(objects[1]);
-    };
-
-    st = uacpi_object_create_integer_safe(
-        0xDEADBEEFDEADBEEF, UACPI_OVERFLOW_DISALLOW, &objects[1]
-    );
-    if (st != UACPI_STATUS_INVALID_ARGUMENT)
-        throw std::runtime_error("expected integer creation to fail");
-
-    objects[1] = uacpi_object_create_integer(0xDEADBEEF);
-    check_ok();
-
-    st = uacpi_object_assign_integer(objects[0], 2);
-    ensure_ok_status(st);
-
-    objects[1] = uacpi_object_create_cstring("Hello World");
-    uacpi_object_ref(objects[1]);
-    check_ok();
-
-    uacpi_data_view view;
-    view.const_text = "Hello World";
-    // Don't include the null byte to check if this is accounted for
-    view.length = 11;
-
-    uacpi_object_assign_string(objects[1], view);
-    check_ok();
-
-    st = uacpi_object_assign_integer(objects[0], 3);
-    ensure_ok_status(st);
-    auto *tmp = uacpi_object_create_cstring("XXXX");
-    objects[1] = uacpi_object_create_reference(tmp);
-    uacpi_object_unref(tmp);
-    check_ok();
-
-    st = uacpi_object_assign_integer(objects[0], 4);
-    ensure_ok_status(st);
-    uint8_t buffer[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
-    view.const_bytes = buffer;
-    view.length = sizeof(buffer);
-    objects[1] = uacpi_object_create_buffer(view);
-    check_ok();
-
-    st = uacpi_object_assign_integer(objects[0], 5);
-    ensure_ok_status(st);
-    uacpi_object *pkg[3];
-
-    pkg[0] = uacpi_object_create_uninitialized();
-    view.const_text = "First Element";
-    view.length = strlen(view.const_text);
-    uacpi_object_assign_string(pkg[0], view);
-
-    pkg[1] = uacpi_object_create_cstring("test");
-    st = uacpi_object_assign_integer(pkg[1], 2);
-    ensure_ok_status(st);
-
-    buffer[0] = 1;
-    buffer[1] = 2;
-    buffer[2] = 3;
-    view.const_bytes = buffer;
-    view.length = 3;
-    pkg[2] = uacpi_object_create_buffer(view);
-    st = uacpi_object_assign_buffer(pkg[2], view);
-
-    uacpi_object_array arr1;
-    arr1.objects = pkg;
-    arr1.count = 3;
-    objects[1] = uacpi_object_create_package(arr1);
-    uacpi_object_assign_package(objects[1], arr1);
-    check_ok();
-    uacpi_object_unref(pkg[0]);
-    uacpi_object_unref(pkg[1]);
-    uacpi_object_unref(pkg[2]);
-
-    uacpi_object_unref(objects[0]);
 }
 
 static void run_test(
@@ -542,6 +442,11 @@ static void run_test(
 
     if (expected_value == "check-object-api-works") {
         test_object_api();
+        return;
+    }
+
+    if (expected_value == "check-address-spaces-work") {
+        test_address_spaces();
         return;
     }
 

@@ -37,3 +37,12 @@ void build_xsdt(full_xsdt& xsdt, acpi_rsdp& rsdp, std::string_view dsdt_path,
 
 std::pair<void*, size_t>
 read_entire_file(std::string_view path, size_t min_size = 0);
+
+inline void ensure_ok_status(uacpi_status st)
+{
+    if (st == UACPI_STATUS_OK)
+        return;
+
+    auto msg = uacpi_status_to_string(st);
+    throw std::runtime_error(std::string("uACPI error: ") + msg);
+}

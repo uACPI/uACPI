@@ -281,8 +281,8 @@ struct gp_event {
 };
 
 struct gpe_register {
-    struct acpi_gas status;
-    struct acpi_gas enable;
+    uacpi_mapped_gas status;
+    uacpi_mapped_gas enable;
 
     uacpi_u8 runtime_mask;
     uacpi_u8 wake_mask;
@@ -353,7 +353,7 @@ static uacpi_status set_gpe_state(struct gp_event *event, enum gpe_state state)
 
     flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
-    ret = uacpi_gas_read(&reg->enable, &enable_mask);
+    ret = uacpi_gas_read_mapped(&reg->enable, &enable_mask);
     if (uacpi_unlikely_error(ret))
         goto out;
 
@@ -369,7 +369,7 @@ static uacpi_status set_gpe_state(struct gp_event *event, enum gpe_state state)
         goto out;
     }
 
-    ret = uacpi_gas_write(&reg->enable, enable_mask);
+    ret = uacpi_gas_write_mapped(&reg->enable, enable_mask);
 out:
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
@@ -379,7 +379,7 @@ static uacpi_status clear_gpe(struct gp_event *event)
 {
     struct gpe_register *reg = event->reg;
 
-    return uacpi_gas_write(&reg->status, gpe_get_mask(event));
+    return uacpi_gas_write_mapped(&reg->status, gpe_get_mask(event));
 }
 
 static uacpi_status restore_gpe(struct gp_event *event)
@@ -576,11 +576,11 @@ static uacpi_interrupt_ret detect_gpes(struct gpe_block *block)
             if (!reg->runtime_mask && !reg->wake_mask)
                 continue;
 
-            ret = uacpi_gas_read(&reg->status, &status);
+            ret = uacpi_gas_read_mapped(&reg->status, &status);
             if (uacpi_unlikely_error(ret))
                 return int_ret;
 
-            ret = uacpi_gas_read(&reg->enable, &enable);
+            ret = uacpi_gas_read_mapped(&reg->enable, &enable);
             if (uacpi_unlikely_error(ret))
                 return int_ret;
 
@@ -610,7 +610,7 @@ static uacpi_status maybe_dispatch_gpe(
     struct gpe_register *reg = event->reg;
     uacpi_u64 status;
 
-    ret = uacpi_gas_read(&reg->status, &status);
+    ret = uacpi_gas_read_mapped(&reg->status, &status);
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -718,7 +718,7 @@ static uacpi_status gpe_block_apply_action(
             value = reg->wake_mask;
             break;
         case GPE_BLOCK_ACTION_CLEAR_ALL:
-            ret = uacpi_gas_write(&reg->status, 0xFF);
+            ret = uacpi_gas_write_mapped(&reg->status, 0xFF);
             if (uacpi_unlikely_error(ret))
                 return ret;
             continue;
@@ -727,7 +727,7 @@ static uacpi_status gpe_block_apply_action(
         }
 
         reg->current_mask = value;
-        ret = uacpi_gas_write(&reg->enable, value);
+        ret = uacpi_gas_write_mapped(&reg->enable, value);
         if (uacpi_unlikely_error(ret))
             return ret;
     }
@@ -763,7 +763,7 @@ static void gpe_block_mask_safe(struct gpe_block *block)
          *    safely disable all events knowing they won't be re-enabled by
          *    a racing IRQ.
          */
-        uacpi_gas_write(&reg->enable, 0x00);
+        uacpi_gas_write_mapped(&reg->enable, 0x00);
 
         /*
          * 4. Wait for the last possible IRQ to finish, now that this event is
@@ -775,8 +775,21 @@ static void gpe_block_mask_safe(struct gpe_block *block)
 
 static void uninstall_gpe_block(struct gpe_block *block)
 {
-    if (block->registers != UACPI_NULL)
+    if (block->registers != UACPI_NULL) {
+        struct gpe_register *reg;
+        uacpi_size i;
+
         gpe_block_mask_safe(block);
+
+        for (i = 0; i < block->num_registers; ++i) {
+            reg = &block->registers[i];
+
+            if (reg->enable.total_bit_width)
+                uacpi_unmap_gas_nofree(&reg->enable);
+            if (reg->status.total_bit_width)
+                uacpi_unmap_gas_nofree(&reg->status);
+        }
+    }
 
     if (block->prev)
         block->prev->next = block->next;
@@ -1000,6 +1013,10 @@ static uacpi_status create_gpe_block(
     struct gpe_block *block;
     struct gpe_register *reg;
     struct gp_event *event;
+    struct acpi_gas tmp_gas = {
+        .address_space_id = address_space_id,
+        .register_bit_width = 8,
+    };
     uacpi_size i, j;
 
     block = uacpi_kernel_alloc_zeroed(sizeof(*block));
@@ -1034,13 +1051,16 @@ static uacpi_status create_gpe_block(
          */
         reg->base_idx = base_idx + (i * EVENTS_PER_GPE_REGISTER);
 
-        reg->status.address = address + i;
-        reg->status.address_space_id = address_space_id;
-        reg->status.register_bit_width = 8;
 
-        reg->enable.address = address + num_registers + i;
-        reg->enable.address_space_id = address_space_id;
-        reg->enable.register_bit_width = 8;
+        tmp_gas.address = address + i;
+        ret = uacpi_map_gas_noalloc(&tmp_gas, &reg->status);
+        if (uacpi_unlikely_error(ret))
+            goto error_out;
+
+        tmp_gas.address += num_registers;
+        ret = uacpi_map_gas_noalloc(&tmp_gas, &reg->enable);
+        if (uacpi_unlikely_error(ret))
+            goto error_out;
 
         for (j = 0; j < EVENTS_PER_GPE_REGISTER; ++j, ++event) {
             event->idx = reg->base_idx + j;
@@ -1051,11 +1071,11 @@ static uacpi_status create_gpe_block(
          * Disable all GPEs in this register & clear anything that might be
          * pending from earlier.
          */
-        ret = uacpi_gas_write(&reg->enable, 0x00);
+        ret = uacpi_gas_write_mapped(&reg->enable, 0x00);
         if (uacpi_unlikely_error(ret))
             goto error_out;
 
-        ret = uacpi_gas_write(&reg->status, 0xFF);
+        ret = uacpi_gas_write_mapped(&reg->status, 0xFF);
         if (uacpi_unlikely_error(ret))
             goto error_out;
     }
@@ -2367,13 +2387,13 @@ uacpi_status uacpi_gpe_info(
     if (reg->wake_mask & mask)
         info |= UACPI_EVENT_INFO_ENABLED_FOR_WAKE;
 
-    ret = uacpi_gas_read(&reg->enable, &raw_value);
+    ret = uacpi_gas_read_mapped(&reg->enable, &raw_value);
     if (uacpi_unlikely_error(ret))
         goto out;
     if (raw_value & mask)
         info |= UACPI_EVENT_INFO_HW_ENABLED;
 
-    ret = uacpi_gas_read(&reg->status, &raw_value);
+    ret = uacpi_gas_read_mapped(&reg->status, &raw_value);
     if (uacpi_unlikely_error(ret))
         goto out;
     if (raw_value & mask)

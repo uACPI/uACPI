@@ -532,7 +532,7 @@ uacpi_status uacpi_wake_from_sleep_state(
 uacpi_status uacpi_reboot(void)
 {
     uacpi_status ret;
-    uacpi_handle pci_dev = UACPI_NULL;
+    uacpi_handle pci_dev = UACPI_NULL, io_handle = UACPI_NULL;
     struct acpi_fadt *fadt = &g_uacpi_rt_ctx.fadt;
     struct acpi_gas *reset_reg = &fadt->reset_reg;
 
@@ -551,7 +551,11 @@ uacpi_status uacpi_reboot(void)
          * For SystemIO we don't do any checking, and we ignore bit width
          * because that's what NT does.
          */
-        ret = uacpi_system_io_write(reset_reg->address, 1, fadt->reset_value);
+        ret = uacpi_kernel_io_map(reset_reg->address, 1, &io_handle);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+
+        ret = uacpi_kernel_io_write8(io_handle, 0, fadt->reset_value);
         break;
     case UACPI_ADDRESS_SPACE_SYSTEM_MEMORY:
         ret = uacpi_write_register(UACPI_REGISTER_RESET, fadt->reset_value);
@@ -569,8 +573,8 @@ uacpi_status uacpi_reboot(void)
         if (uacpi_unlikely_error(ret))
             break;
 
-        ret = uacpi_kernel_pci_write(
-            pci_dev, reset_reg->address & 0xFFFF, 1, fadt->reset_value
+        ret = uacpi_kernel_pci_write8(
+            pci_dev, reset_reg->address & 0xFFFF, fadt->reset_value
         );
         break;
     }
@@ -601,6 +605,8 @@ uacpi_status uacpi_reboot(void)
 
     if (pci_dev != UACPI_NULL)
         uacpi_kernel_pci_device_close(pci_dev);
+    if (io_handle != UACPI_NULL)
+        uacpi_kernel_io_unmap(io_handle);
 
     return ret;
 }

@@ -648,26 +648,82 @@ void uacpi_free_resources(uacpi_resources*);
 typedef uacpi_iteration_decision (*uacpi_resource_iteration_callback)
     (void *user, uacpi_resource *resource);
 
+/*
+ * Evaluate the _CRS method for a 'device' and get the returned resource list
+ * via 'out_resources'.
+ *
+ * NOTE: the returned buffer must be released via a uacpi_free_resources()
+ */
 uacpi_status uacpi_get_current_resources(
     uacpi_namespace_node *device, uacpi_resources **out_resources
 );
 
+/*
+ * Evaluate the _PRS method for a 'device' and get the returned resource list
+ * via 'out_resources'.
+ *
+ * NOTE: the returned buffer must be released via uacpi_free_resources()
+ */
 uacpi_status uacpi_get_possible_resources(
     uacpi_namespace_node *device, uacpi_resources **out_resources
 );
 
+/*
+ * Evaluate an arbitrary method that is expected to return an AML resource
+ * buffer for a 'device' and get the returned resource list via 'out_resources'.
+ *
+ * NOTE: the returned buffer must be released via uacpi_free_resources()
+ */
+uacpi_status uacpi_get_device_resources(
+    uacpi_namespace_node *device, const uacpi_char *method,
+    uacpi_resources **out_resources
+);
+
+/*
+ * Set the configuration to be used by the 'device' by calling its _SRS method.
+ *
+ * Note that this expects 'resources' in the normal 'uacpi_resources' format,
+ * and not the raw AML resources bytestream, the conversion to the latter is
+ * done automatically by this API. If you want to _SRS a raw AML resources
+ * bytestream, use 'uacpi_execute' or similar API directly.
+ */
 uacpi_status uacpi_set_resources(
     uacpi_namespace_node *device, uacpi_resources *resources
 );
 
+/*
+ * A convenience helper for iterating over the resource list returned by any
+ * of the uacpi_get_*_resources functions.
+ */
 uacpi_status uacpi_for_each_resource(
     uacpi_resources *resources, uacpi_resource_iteration_callback cb, void *user
 );
 
+/*
+ * A shorthand for uacpi_get_device_resources() + uacpi_for_each_resource().
+ *
+ * Use if you don't actually want to save the 'resources' list, but simply want
+ * to iterate it once to extract the resources you care about and then free it
+ * right away.
+ */
 uacpi_status uacpi_for_each_device_resource(
     uacpi_namespace_node *device, const uacpi_char *method,
     uacpi_resource_iteration_callback cb, void *user
 );
+
+/*
+ * Convert a single AML-encoded resource to native format.
+ *
+ * This should be used for converting Connection() fields (passed during IO on
+ * GeneralPurposeIO or GenericSerialBus operation regions) or other similar
+ * buffers with only one resource to native format.
+ *
+ * NOTE: the returned buffer must be released via uacpi_free_resource()
+ */
+uacpi_status uacpi_get_resource_from_buffer(
+    uacpi_data_view aml_buffer, uacpi_resource **out_resource
+);
+void uacpi_free_resource(uacpi_resource*);
 
 #ifdef __cplusplus
 }

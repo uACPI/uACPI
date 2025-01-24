@@ -9,10 +9,6 @@ void uacpi_deinitialize_opregion(void);
 void uacpi_trace_region_error(
     uacpi_namespace_node *node, uacpi_char *message, uacpi_status ret
 );
-void uacpi_trace_region_io(
-    uacpi_namespace_node *node, uacpi_address_space space, uacpi_region_op op,
-    uacpi_u64 offset, uacpi_u8 byte_size, uacpi_u64 ret
-);
 
 uacpi_status uacpi_install_address_space_handler_with_flags(
     uacpi_namespace_node *device_node, enum uacpi_address_space space,
@@ -36,7 +32,14 @@ uacpi_status uacpi_opregion_attach(uacpi_namespace_node *node);
 
 void uacpi_install_default_address_space_handlers(void);
 
+uacpi_bool uacpi_is_buffer_access_address_space(uacpi_address_space space);
+
+union uacpi_opregion_io_data {
+    uacpi_u64 *integer;
+    uacpi_data_view buffer;
+};
+
 uacpi_status uacpi_dispatch_opregion_io(
-    uacpi_namespace_node *region_node, uacpi_u32 offset, uacpi_u8 byte_width,
-    uacpi_region_op op, uacpi_u64 *in_out
+    uacpi_field_unit *field, uacpi_u32 offset,
+    uacpi_region_op op, union uacpi_opregion_io_data data
 );
