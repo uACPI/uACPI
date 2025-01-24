@@ -21,6 +21,7 @@ add_executable(
     helpers.cpp
     interface_impl.cpp
     resource_tests.cpp
+    api_tests.cpp
     ${UACPI_SOURCES}
 )
 target_include_directories(
