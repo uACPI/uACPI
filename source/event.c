@@ -183,7 +183,7 @@ static uacpi_interrupt_ret dispatch_fixed_event(
     if (uacpi_unlikely_error(ret))
         return UACPI_INTERRUPT_NOT_HANDLED;
 
-    if (uacpi_unlikely_error(evh->handler == UACPI_NULL)) {
+    if (uacpi_unlikely(evh->handler == UACPI_NULL)) {
         uacpi_warn(
             "fixed event %d fired but no handler installed, disabling...\n",
             event
