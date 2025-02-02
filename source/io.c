@@ -838,10 +838,6 @@ uacpi_status uacpi_map_gas_noalloc(
     if (ret != UACPI_STATUS_OK)
         return ret;
 
-    out_mapped->access_bit_width = access_bit_width;
-    out_mapped->total_bit_width = total_width;
-    out_mapped->bit_offset = gas->register_bit_offset;
-
     if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_MEMORY) {
         out_mapped->mapping = uacpi_kernel_map(gas->address, total_width / 8);
         if (uacpi_unlikely(out_mapped->mapping == UACPI_NULL))
@@ -859,6 +855,10 @@ uacpi_status uacpi_map_gas_noalloc(
         out_mapped->write = uacpi_system_io_write;
         out_mapped->unmap = unmap_gas_io;
     }
+
+    out_mapped->access_bit_width = access_bit_width;
+    out_mapped->total_bit_width = total_width;
+    out_mapped->bit_offset = gas->register_bit_offset;
 
     return UACPI_STATUS_OK;
 }
