@@ -453,7 +453,7 @@ uacpi_status uacpi_ininitialize_registers(void)
     return UACPI_STATUS_OK;
 }
 
-void uacpi_deininitialize_registers(void)
+void uacpi_deinitialize_registers(void)
 {
     uacpi_u8 i;
     struct register_mapping *mapping;
