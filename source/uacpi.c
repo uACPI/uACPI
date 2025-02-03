@@ -264,12 +264,16 @@ void uacpi_state_reset(void)
     uacpi_deinitialize_events();
     uacpi_deinitialize_notify();
     uacpi_deinitialize_opregion();
-    uacpi_deininitialize_registers();
     uacpi_deinitialize_tables();
 
 #ifndef UACPI_REDUCED_HARDWARE
     if (g_uacpi_rt_ctx.was_in_legacy_mode)
         uacpi_leave_acpi_mode();
+#endif
+
+    uacpi_deininitialize_registers();
+
+#ifndef UACPI_REDUCED_HARDWARE
     if (g_uacpi_rt_ctx.global_lock_event)
         uacpi_kernel_free_event(g_uacpi_rt_ctx.global_lock_event);
     if (g_uacpi_rt_ctx.global_lock_spinlock)
