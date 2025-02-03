@@ -282,14 +282,14 @@ If you want to contribute:
 
 |  Project | Description | (qemu w/ Q35 + KVM) ops/s  | CPU |
 |---  |--- |--- |--- |
-| [proxima](https://github.com/proxima-os/proxima) | A monolithic Unix-like operating system | 7,633,451 | AMD Ryzen 7 5800X |
+| [proxima](https://github.com/proxima-os/proxima) | A monolithic Unix-like operating system | 10,271,084 | Intel Core i7-13700K |
+| [davix](https://github.com/dbstream/davix) | Yet another unix-like by some bored nerd | 6,364,623 | Intel Core i7-13700K |
+| [ilobilix](https://github.com/ilobilo/ilobilix) | Yet another monolithic Linux clone wannabe. Currently under a rewrite | 5,662,213 | Intel Core i7-13700K |
 | [Managarm](https://github.com/managarm/managarm)  | Pragmatic microkernel-based OS with fully asynchronous I/O | 4,644,312 | Intel Core i7-14700K |
+| [pmOS](https://gitlab.com/mishakov/pmos) | Microkernel-based operating system written from scratch with uACPI running in userspace | 4,095,358 | Intel Core i7-13700K |
 | [menix](https://github.com/menix-os/menix) | A minimal and expandable Unix-like operating system | 3,923,771 | AMD Ryzen 7 7700X |
-| [pmOS](https://gitlab.com/mishakov/pmos) | Microkernel-based operating system written from scratch with uACPI running in userspace | 3,317,269 | Intel Core i7-13700K |
 | [Astral](https://github.com/mathewnd/astral) | Operating system written in C which aims be POSIX-compliant | 3,247,619 | Intel Core i5-13600K |
-| [ilobilix](https://github.com/ilobilo/ilobilix) | Yet another monolithic Linux clone wannabe. Currently under a rewrite | 2,751,309 | Intel Core i7-13700K |
 | [imaginarium](https://github.com/Khitiara/imaginarium) | Ziggy osdev experiments inspired by the NT kernel (using the zig general purpose allocator) | 2,388,082 | AMD Ryzen 7 3700X |
-| [davix](https://github.com/dbstream/davix) | Yet another unix-like by some bored nerd | 1,888,391 | AMD Ryzen 9 7950X3D |
 | [OBOS](https://github.com/OBOS-dev/obos) | Hybrid Kernel with advanced driver loading | 1,371,085 | Intel Core i7-13700K |
 | [NyauxKC](https://github.com/rayanmargham/NyauxKC) | Monolithic UNIX-like multi-architecture kernel | 985,988 | Intel Core Ultra 7 265K |
 
