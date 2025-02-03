@@ -22,6 +22,7 @@ A portable and easy-to-integrate implementation of the Advanced Configuration an
 - Firmware global lock management (_GL, locked fields, public API)
 - GAS read/write API
 - Fully thread safe
+- Supports both 32-bit and 64-bit platforms
 
 ## Why would I use this over ACPICA?
 
