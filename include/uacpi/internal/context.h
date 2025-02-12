@@ -75,6 +75,8 @@ struct uacpi_runtime_context {
 
     uacpi_u8 log_level;
     uacpi_u8 init_level;
+
+    uacpi_bool bad_timesource;
 };
 
 static inline const uacpi_char *uacpi_init_level_to_string(uacpi_u8 lvl)
