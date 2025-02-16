@@ -33,6 +33,30 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address);
 /*
  * Open a PCI device at 'address' for reading & writing.
  *
+ * Note that this must be able to open any arbitrary PCI device, not just those
+ * detected during kernel PCI enumeration, since the following pattern is
+ * relatively common in AML firmware:
+ *    Device (THC0)
+ *    {
+ *        // Device at 00:10.06
+ *        Name (_ADR, 0x00100006)  // _ADR: Address
+ *
+ *        OperationRegion (THCR, PCI_Config, Zero, 0x0100)
+ *        Field (THCR, ByteAcc, NoLock, Preserve)
+ *        {
+ *            // Vendor ID field in the PCI configuration space
+ *            VDID,   32
+ *        }
+ *
+ *        // Check if the device at 00:10.06 actually exists, that is reading
+ *        // from its configuration space returns something other than 0xFFs.
+ *        If ((VDID != 0xFFFFFFFF))
+ *        {
+ *            // Actually create the rest of the device's body if it's present
+ *            // in the system, otherwise skip it.
+ *        }
+ *    }
+ *
  * The handle returned via 'out_handle' is used to perform IO on the
  * configuration space of the device.
  */

@@ -3208,6 +3208,29 @@ static uacpi_status handle_bcd(struct execution_context *ctx)
     return UACPI_STATUS_OK;
 }
 
+static uacpi_status handle_unload(struct execution_context *ctx)
+{
+    UACPI_UNUSED(ctx);
+
+    /*
+     * Technically this doesn't exist in the wild, from the dumps that I have
+     * the only user of the Unload opcode is the Surface Pro 3, which triggers
+     * an unload of some I2C-related table as a response to some event.
+     *
+     * This op has been long deprecated by the specification exactly because
+     * it hasn't really been used by anyone and the fact that it introduces
+     * an enormous layer of complexity, which no driver is really prepared to
+     * deal with (aka namespace nodes disappearing under its feet).
+     *
+     * Just pretend we have actually unloaded whatever the AML asked for, if it
+     * ever tries to re-load this table that will just skip opcodes that create
+     * already existing objects, which should be good enough and mostly
+     * transparent to the AML.
+     */
+    uacpi_warn("refusing to unload a table from AML\n");
+    return UACPI_STATUS_OK;
+}
+
 static uacpi_status handle_logical_not(struct execution_context *ctx)
 {
     struct op_context *op_ctx = ctx->cur_op_ctx;
@@ -4857,6 +4880,7 @@ enum op_handler {
     OP_HANDLER_MATCH,
     OP_HANDLER_CREATE_MUTEX_OR_EVENT,
     OP_HANDLER_BCD,
+    OP_HANDLER_UNLOAD,
     OP_HANDLER_LOAD_TABLE,
     OP_HANDLER_LOAD,
     OP_HANDLER_STALL_OR_SLEEP,
@@ -4908,6 +4932,7 @@ static uacpi_status (*op_handlers[])(struct execution_context *ctx) = {
     [OP_HANDLER_MID] = handle_mid,
     [OP_HANDLER_MATCH] = handle_match,
     [OP_HANDLER_BCD] = handle_bcd,
+    [OP_HANDLER_UNLOAD] = handle_unload,
     [OP_HANDLER_LOAD_TABLE] = handle_load_table,
     [OP_HANDLER_LOAD] = handle_load,
     [OP_HANDLER_STALL_OR_SLEEP] = handle_stall_or_sleep,
@@ -5052,6 +5077,7 @@ static uacpi_u8 handler_idx_of_ext_op[0x100] = {
 
     [EXT_OP_IDX(UACPI_AML_OP_LoadTableOp)] = OP_HANDLER_LOAD_TABLE,
     [EXT_OP_IDX(UACPI_AML_OP_LoadOp)] = OP_HANDLER_LOAD,
+    [EXT_OP_IDX(UACPI_AML_OP_UnloadOp)] = OP_HANDLER_UNLOAD,
 
     [EXT_OP_IDX(UACPI_AML_OP_StallOp)] = OP_HANDLER_STALL_OR_SLEEP,
     [EXT_OP_IDX(UACPI_AML_OP_SleepOp)] = OP_HANDLER_STALL_OR_SLEEP,
