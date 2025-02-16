@@ -1274,6 +1274,13 @@ UACPI_OP(                                                   \
 UACPI_BUILD_TO_FROM_BCD(From, 0x28)                         \
 UACPI_BUILD_TO_FROM_BCD(To, 0x29)                           \
 UACPI_OP(                                                   \
+    UnloadOp, UACPI_EXT_OP(0x2A),                           \
+    {                                                       \
+        UACPI_PARSE_OP_SUPERNAME,                           \
+        UACPI_PARSE_OP_INVOKE_HANDLER,                      \
+    }                                                       \
+)                                                           \
+UACPI_OP(                                                   \
     RevisionOp, UACPI_EXT_OP(0x30),                         \
     {                                                       \
         UACPI_PARSE_OP_LOAD_INLINE_IMM_AS_OBJECT,           \
