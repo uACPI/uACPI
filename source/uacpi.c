@@ -27,10 +27,17 @@ void uacpi_context_set_log_level(uacpi_log_level lvl)
 
 void uacpi_logger_initialize(void)
 {
-    if (g_uacpi_rt_ctx.log_level != 0)
-        return;
+    if (g_uacpi_rt_ctx.log_level == 0)
+        uacpi_context_set_log_level(UACPI_DEFAULT_LOG_LEVEL);
 
-    uacpi_context_set_log_level(UACPI_DEFAULT_LOG_LEVEL);
+    static uacpi_bool version_printed = UACPI_FALSE;
+    if (!version_printed) {
+        version_printed = UACPI_TRUE;
+        uacpi_info(
+            "starting uACPI, version %d.%d.%d\n",
+            UACPI_MAJOR, UACPI_MINOR, UACPI_PATCH
+        );
+    }
 }
 
 void uacpi_context_set_loop_timeout(uacpi_u32 seconds)
