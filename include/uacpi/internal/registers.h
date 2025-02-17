@@ -18,9 +18,31 @@ typedef enum uacpi_register {
     UACPI_REGISTER_MAX = UACPI_REGISTER_SMI_CMD,
 } uacpi_register;
 
+/*
+ * Read a register from FADT
+ *
+ * NOTE: write-only bits (if any) are cleared automatically
+ */
 uacpi_status uacpi_read_register(uacpi_register, uacpi_u64*);
 
+/*
+ * Write a register from FADT
+ *
+ * NOTE:
+ * - Preserved bits (if any) are preserved automatically
+ * - If a register is made up of two (e.g. PM1a and PM1b) parts, the input
+ *   is written to both at the same time
+ */
 uacpi_status uacpi_write_register(uacpi_register, uacpi_u64);
+
+/*
+ * Write a register from FADT
+ *
+ * NOTE:
+ * - Preserved bits (if any) are preserved automatically
+ * - For registers that are made up of two (e.g. PM1a and PM1b) parts, the
+ *   provided values are written to their respective physical register
+ */
 uacpi_status uacpi_write_registers(uacpi_register, uacpi_u64, uacpi_u64);
 
 typedef enum uacpi_register_field {
@@ -50,5 +72,20 @@ typedef enum uacpi_register_field {
     UACPI_REGISTER_FIELD_MAX = UACPI_REGISTER_FIELD_ARB_DIS,
 } uacpi_register_field;
 
+/*
+ * Read a field from a FADT register
+ *
+ * NOTE: The value is automatically masked and shifted down as appropriate,
+ *       the client code doesn't have to do any bit manipulation. E.g. for
+ *       a field at 0b???XX??? the returned value will contain just the 0bXX
+ */
 uacpi_status uacpi_read_register_field(uacpi_register_field, uacpi_u64*);
+
+/*
+ * Write to a field of a FADT register
+ *
+ * NOTE: The value is automatically masked and shifted up as appropriate,
+ *       the client code doesn't have to do any bit manipulation. E.g. for
+ *       a field at 0b???XX??? the passed value should be just 0bXX
+ */
 uacpi_status uacpi_write_register_field(uacpi_register_field, uacpi_u64);
