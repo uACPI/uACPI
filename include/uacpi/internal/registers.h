@@ -5,7 +5,7 @@
 uacpi_status uacpi_ininitialize_registers(void);
 void uacpi_deinitialize_registers(void);
 
-enum uacpi_register {
+typedef enum uacpi_register {
     UACPI_REGISTER_PM1_STS = 0,
     UACPI_REGISTER_PM1_EN,
     UACPI_REGISTER_PM1_CNT,
@@ -16,14 +16,14 @@ enum uacpi_register {
     UACPI_REGISTER_RESET,
     UACPI_REGISTER_SMI_CMD,
     UACPI_REGISTER_MAX = UACPI_REGISTER_SMI_CMD,
-};
+} uacpi_register;
 
-uacpi_status uacpi_read_register(enum uacpi_register, uacpi_u64*);
+uacpi_status uacpi_read_register(uacpi_register, uacpi_u64*);
 
-uacpi_status uacpi_write_register(enum uacpi_register, uacpi_u64);
-uacpi_status uacpi_write_registers(enum uacpi_register, uacpi_u64, uacpi_u64);
+uacpi_status uacpi_write_register(uacpi_register, uacpi_u64);
+uacpi_status uacpi_write_registers(uacpi_register, uacpi_u64, uacpi_u64);
 
-enum uacpi_register_field {
+typedef enum uacpi_register_field {
     UACPI_REGISTER_FIELD_TMR_STS = 0,
     UACPI_REGISTER_FIELD_BM_STS,
     UACPI_REGISTER_FIELD_GBL_STS,
@@ -48,7 +48,7 @@ enum uacpi_register_field {
     UACPI_REGISTER_FIELD_HWR_SLP_EN,
     UACPI_REGISTER_FIELD_ARB_DIS,
     UACPI_REGISTER_FIELD_MAX = UACPI_REGISTER_FIELD_ARB_DIS,
-};
+} uacpi_register_field;
 
-uacpi_status uacpi_read_register_field(enum uacpi_register_field, uacpi_u64*);
-uacpi_status uacpi_write_register_field(enum uacpi_register_field, uacpi_u64);
+uacpi_status uacpi_read_register_field(uacpi_register_field, uacpi_u64*);
+uacpi_status uacpi_write_register_field(uacpi_register_field, uacpi_u64);
