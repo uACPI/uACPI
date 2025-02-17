@@ -2,6 +2,7 @@
 #include <uacpi/internal/stdlib.h>
 #include <uacpi/internal/context.h>
 #include <uacpi/internal/io.h>
+#include <uacpi/internal/log.h>
 #include <uacpi/platform/atomic.h>
 #include <uacpi/acpi.h>
 
@@ -229,6 +230,8 @@ uacpi_status uacpi_read_register(
     const struct register_spec *reg;
     struct register_mapping *mapping;
 
+    UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+
     ret = get_reg(reg_enum, &reg, &mapping);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -286,6 +289,8 @@ uacpi_status uacpi_write_register(
     const struct register_spec *reg;
     struct register_mapping *mapping;
 
+    UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+
     ret = get_reg(reg_enum, &reg, &mapping);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -304,6 +309,8 @@ uacpi_status uacpi_write_registers(
     uacpi_status ret;
     const struct register_spec *reg;
     struct register_mapping *mapping;
+
+    UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
     ret = get_reg(reg_enum, &reg, &mapping);
     if (uacpi_unlikely_error(ret))
@@ -485,6 +492,8 @@ uacpi_status uacpi_read_register_field(
     const struct register_spec *reg;
     struct register_mapping *mapping;
 
+    UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+
     if (uacpi_unlikely(field_idx > UACPI_REGISTER_FIELD_MAX))
         return UACPI_STATUS_INVALID_ARGUMENT;
 
@@ -516,6 +525,8 @@ uacpi_status uacpi_write_register_field(
 
     uacpi_u64 data;
     uacpi_cpu_flags flags;
+
+    UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
     if (uacpi_unlikely(field_idx > UACPI_REGISTER_FIELD_MAX))
         return UACPI_STATUS_INVALID_ARGUMENT;
