@@ -91,6 +91,9 @@ uacpi_status uacpi_kernel_pci_write32(
 /*
  * Map a SystemIO address at [base, base + len) and return a kernel-implemented
  * handle that can be used for reading and writing the IO range.
+ *
+ * NOTE: The x86 architecture uses the in/out family of instructions
+ *       to access the SystemIO address space.
  */
 uacpi_status uacpi_kernel_io_map(
     uacpi_io_addr base, uacpi_size len, uacpi_handle *out_handle
@@ -102,6 +105,9 @@ void uacpi_kernel_io_unmap(uacpi_handle handle);
  * at a 0-based 'offset' within the range.
  *
  * NOTE:
+ * The x86 architecture uses the in/out family of instructions
+ * to access the SystemIO address space.
+ *
  * You are NOT allowed to break e.g. a 4-byte access into four 1-byte accesses.
  * Hardware ALWAYS expects accesses to be of the exact width.
  */
