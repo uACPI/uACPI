@@ -886,7 +886,7 @@ uacpi_status uacpi_namespace_do_for_each_child(
 
             decision = cb(user, node, depth);
             if (decision == UACPI_ITERATION_DECISION_BREAK)
-                goto out;
+                return ret;
 
             if (should_lock == UACPI_SHOULD_LOCK_YES) {
                 ret = uacpi_namespace_read_lock();
