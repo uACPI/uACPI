@@ -91,6 +91,18 @@ if (KERNEL_INITIALIZATION)
     )
 endif ()
 
+if (NOT BUILTIN_STRING)
+    set(BUILTIN_STRING 0)
+endif()
+
+if (BUILTIN_STRING)
+    target_compile_definitions(
+        test-runner
+        PRIVATE
+        -DUACPI_USE_BUILTIN_STRING
+    )
+endif ()
+
 if (MSVC)
     # Address sanitizer on MSVC depends on a dynamic library that is not present in
     # PATH by default. Lets just not enable it here.

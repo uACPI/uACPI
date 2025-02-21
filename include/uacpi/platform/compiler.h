@@ -49,6 +49,11 @@
         #define UACPI_PRINTF_DECL(fmt_idx, args_idx) \
             __attribute__((format(gnu_printf, fmt_idx, args_idx)))
     #endif
+
+    #define UACPI_COMPILER_HAS_BUILTIN_MEMCPY
+    #define UACPI_COMPILER_HAS_BUILTIN_MEMMOVE
+    #define UACPI_COMPILER_HAS_BUILTIN_MEMSET
+    #define UACPI_COMPILER_HAS_BUILTIN_MEMCMP
 #else
     #define uacpi_unlikely(expr) expr
     #define uacpi_likely(expr)   expr

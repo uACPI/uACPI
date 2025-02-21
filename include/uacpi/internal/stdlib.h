@@ -5,6 +5,8 @@
 #include <uacpi/platform/libc.h>
 #include <uacpi/kernel_api.h>
 
+#ifdef UACPI_USE_BUILTIN_STRING
+
 #ifndef uacpi_memcpy
 void *uacpi_memcpy(void *dest, const void *src, uacpi_size count);
 #endif
@@ -19,6 +21,46 @@ void *uacpi_memset(void *dest, uacpi_i32 ch, uacpi_size count);
 
 #ifndef uacpi_memcmp
 uacpi_i32 uacpi_memcmp(const void *lhs, const void *rhs, uacpi_size count);
+#endif
+
+#else
+
+#ifndef uacpi_memcpy
+    #ifdef UACPI_COMPILER_HAS_BUILTIN_MEMCPY
+        #define uacpi_memcpy __builtin_memcpy
+    #else
+        extern void *memcpy(void *dest, const void *src, uacpi_size count);
+        #define uacpi_memcpy memcpy
+    #endif
+#endif
+
+#ifndef uacpi_memmove
+    #ifdef UACPI_COMPILER_HAS_BUILTIN_MEMMOVE
+        #define uacpi_memmove __builtin_memmove
+    #else
+        extern void *memmove(void *dest, const void *src, uacpi_size count);
+        #define uacpi_memmove memmove
+    #endif
+#endif
+
+#ifndef uacpi_memset
+    #ifdef UACPI_COMPILER_HAS_BUILTIN_MEMSET
+        #define uacpi_memset __builtin_memset
+    #else
+        extern void *memset(void *dest, int ch, uacpi_size count);
+        #define uacpi_memset memset
+    #endif
+#endif
+
+#ifndef uacpi_memcmp
+    #ifdef UACPI_COMPILER_HAS_BUILTIN_MEMCMP
+        #define uacpi_memcmp __builtin_memcmp
+    #else
+        extern int memcmp(const void *lhs, const void *rhs, uacpi_size count);
+        #define uacpi_memcmp memcmp
+    #endif
+#endif
+
 #endif
 
 #ifndef uacpi_strlen

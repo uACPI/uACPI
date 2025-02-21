@@ -2,6 +2,8 @@
 #include <uacpi/internal/utilities.h>
 #include <uacpi/platform/config.h>
 
+#ifdef UACPI_USE_BUILTIN_STRING
+
 #ifndef uacpi_memcpy
 void *uacpi_memcpy(void *dest, const void *src, uacpi_size count)
 {
@@ -64,6 +66,8 @@ uacpi_i32 uacpi_memcmp(const void *lhs, const void *rhs, uacpi_size count)
     return 0;
 }
 #endif
+
+#endif // ifdef UACPI_USE_BUILTIN_STRING
 
 #ifndef uacpi_strlen
 uacpi_size uacpi_strlen(const uacpi_char *str)
