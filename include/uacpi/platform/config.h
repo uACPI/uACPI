@@ -81,6 +81,15 @@ UACPI_BUILD_BUG_ON_WITH_MSG(
  */
 
 /*
+ * Makes uACPI use the builtin versions of mem{cpy,move,set,cmp} instead of
+ * relying on the host to provide them. Note that compilers like clang and GCC
+ * rely on these being available by default, even in freestanding mode, so
+ * compiling uACPI may theoretically generate implicit dependencies on them
+ * even if this option is defined.
+ */
+// #define UACPI_USE_BUILTIN_STRING
+
+/*
  * Turns uacpi_phys_addr and uacpi_io_addr into a 32-bit type, and adds extra
  * code for address truncation. Needed for e.g. i686 platforms without PAE
  * support.
