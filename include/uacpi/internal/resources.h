@@ -3,6 +3,8 @@
 #include <uacpi/internal/types.h>
 #include <uacpi/resources.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 enum uacpi_aml_resource {
     UACPI_AML_RESOURCE_TYPE_INVALID = 0,
 
@@ -321,3 +323,5 @@ uacpi_status uacpi_native_resources_from_aml(
 uacpi_status uacpi_native_resources_to_aml(
     uacpi_resources *resources, uacpi_object **out_template
 );
+
+#endif // !UACPI_BAREBONES_MODE

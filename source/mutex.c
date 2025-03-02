@@ -6,6 +6,8 @@
 #include <uacpi/kernel_api.h>
 #include <uacpi/internal/namespace.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 #ifndef UACPI_REDUCED_HARDWARE
 
 #define GLOBAL_LOCK_PENDING (1 << 0)
@@ -390,3 +392,5 @@ uacpi_status uacpi_rw_unlock_write(struct uacpi_rw_lock *lock)
 {
     return uacpi_release_native_mutex(lock->write_mutex);
 }
+
+#endif // !UACPI_BAREBONES_MODE

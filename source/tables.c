@@ -14,7 +14,42 @@ DYNAMIC_ARRAY_WITH_INLINE_STORAGE_IMPL(
 static struct table_array tables;
 static uacpi_bool early_table_access;
 static uacpi_table_installation_handler installation_handler;
+
+#ifndef UACPI_BAREBONES_MODE
+
 static uacpi_handle table_mutex;
+
+#define ENSURE_TABLES_ONLINE()                         \
+    do {                                               \
+        if (!early_table_access)                       \
+            UACPI_ENSURE_INIT_LEVEL_AT_LEAST(          \
+                UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED \
+            );                                         \
+    } while (0)
+
+#else
+
+/*
+ * Use a dummy function instead of a macro to prevent the following error:
+ *     error: statement with no effect [-Werror=unused-value]
+ */
+static inline uacpi_status dummy_mutex_acquire_release(uacpi_handle mtx)
+{
+    UACPI_UNUSED(mtx);
+    return UACPI_STATUS_OK;
+}
+
+#define table_mutex UACPI_NULL
+#define uacpi_acquire_native_mutex_may_be_null dummy_mutex_acquire_release
+#define uacpi_release_native_mutex_may_be_null dummy_mutex_acquire_release
+
+#define ENSURE_TABLES_ONLINE()                       \
+    do {                                             \
+        if (!early_table_access)                     \
+            return UACPI_STATUS_INIT_LEVEL_MISMATCH; \
+    } while (0)
+
+#endif // !UACPI_BAREBONES_MODE
 
 static uacpi_status table_install_physical_with_origin_unlocked(
     uacpi_phys_addr phys, enum uacpi_table_origin origin,
@@ -167,7 +202,9 @@ uacpi_status uacpi_setup_early_table_access(
 {
     uacpi_status ret;
 
+#ifndef UACPI_BAREBONES_MODE
     UACPI_ENSURE_INIT_LEVEL_IS(UACPI_INIT_LEVEL_EARLY);
+#endif
     if (uacpi_unlikely(early_table_access))
         return UACPI_STATUS_INIT_LEVEL_MISMATCH;
 
@@ -187,6 +224,7 @@ uacpi_status uacpi_setup_early_table_access(
     return ret;
 }
 
+#ifndef UACPI_BAREBONES_MODE
 static uacpi_iteration_decision warn_if_early_referenced(
     void *user, struct uacpi_installed_table *tbl, uacpi_size idx
 )
@@ -273,6 +311,7 @@ uacpi_status uacpi_initialize_tables(void)
 
     return UACPI_STATUS_OK;
 }
+#endif // !UACPI_BAREBONES_MODE
 
 void uacpi_deinitialize_tables(void)
 {
@@ -282,9 +321,11 @@ void uacpi_deinitialize_tables(void)
         struct uacpi_installed_table *tbl = table_array_at(&tables, i);
 
         switch (tbl->origin) {
+#ifndef UACPI_BAREBONES_MODE
         case UACPI_TABLE_ORIGIN_FIRMWARE_VIRTUAL:
             uacpi_free(tbl->ptr, tbl->hdr.length);
             break;
+#endif
         case UACPI_TABLE_ORIGIN_FIRMWARE_PHYSICAL:
         case UACPI_TABLE_ORIGIN_HOST_PHYSICAL:
             if (tbl->reference_count != 0)
@@ -302,11 +343,14 @@ void uacpi_deinitialize_tables(void)
         table_array_clear(&tables);
     }
 
+    installation_handler = UACPI_NULL;
+
+#ifndef UACPI_BAREBONES_MODE
     if (table_mutex)
         uacpi_kernel_free_mutex(table_mutex);
 
-    installation_handler = UACPI_NULL;
     table_mutex = UACPI_NULL;
+#endif
 }
 
 uacpi_status uacpi_set_table_installation_handler(
@@ -709,6 +753,7 @@ static uacpi_status table_install_with_origin_unlocked(
         return UACPI_STATUS_INVALID_TABLE_LENGTH;
     }
 
+#ifndef UACPI_BAREBONES_MODE
     if (origin == UACPI_TABLE_ORIGIN_FIRMWARE_VIRTUAL &&
         installation_handler != UACPI_NULL) {
         uacpi_u64 override;
@@ -741,6 +786,7 @@ static uacpi_status table_install_with_origin_unlocked(
         }
         }
     }
+#endif
 
     return verify_and_install_table(
         hdr, 0, virt, origin, out_table
@@ -765,8 +811,7 @@ uacpi_status uacpi_table_install_with_origin(
 
 uacpi_status uacpi_table_install(void *virt, uacpi_table *out_table)
 {
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
 
     return uacpi_table_install_with_origin(
         virt, UACPI_TABLE_ORIGIN_HOST_VIRTUAL, out_table
@@ -777,8 +822,7 @@ uacpi_status uacpi_table_install_physical(
     uacpi_phys_addr addr, uacpi_table *out_table
 )
 {
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
 
     return uacpi_table_install_physical_with_origin(
         addr, UACPI_TABLE_ORIGIN_HOST_PHYSICAL, out_table
@@ -794,8 +838,7 @@ uacpi_status uacpi_for_each_table(
     struct uacpi_installed_table *tbl;
     uacpi_iteration_decision dec;
 
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
 
     ret = uacpi_acquire_native_mutex_may_be_null(table_mutex);
     if (uacpi_unlikely_error(ret))
@@ -888,6 +931,7 @@ static uacpi_iteration_decision do_search_tables(
     return UACPI_ITERATION_DECISION_BREAK;
 }
 
+#ifndef UACPI_BAREBONES_MODE
 uacpi_status uacpi_table_match(
     uacpi_size base_idx, uacpi_table_match_callback cb, uacpi_table *out_table
 )
@@ -906,6 +950,7 @@ uacpi_status uacpi_table_match(
 
     return ctx.status;
 }
+#endif
 
 static uacpi_status find_table(
     uacpi_size base_idx, const uacpi_table_identifiers *id,
@@ -942,8 +987,8 @@ uacpi_status uacpi_table_find_by_signature(
         }
     };
 
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
+
     return find_table(0, &id, out_table);
 }
 
@@ -953,8 +998,7 @@ uacpi_status uacpi_table_find_next_with_same_signature(
 {
     struct uacpi_table_identifiers id = { 0 };
 
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
 
     if (uacpi_unlikely(in_out_table->ptr == UACPI_NULL))
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -970,8 +1014,8 @@ uacpi_status uacpi_table_find(
     const uacpi_table_identifiers *id, uacpi_table *out_table
 )
 {
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
+
     return find_table(0, id, out_table);
 }
 
@@ -998,8 +1042,7 @@ static uacpi_status table_ctl(uacpi_size idx, struct table_ctl_request *req)
     uacpi_status ret;
     struct uacpi_installed_table *tbl;
 
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
 
     ret = uacpi_acquire_native_mutex_may_be_null(table_mutex);
     if (uacpi_unlikely_error(ret))
@@ -1068,6 +1111,7 @@ out:
     return ret;
 }
 
+#ifndef UACPI_BAREBONES_MODE
 uacpi_status uacpi_table_load_with_cause(
     uacpi_size idx, enum uacpi_table_load_cause cause
 )
@@ -1102,6 +1146,7 @@ void uacpi_table_mark_as_loaded(uacpi_size idx)
         .type = TABLE_CTL_SET_FLAGS, .set = UACPI_TABLE_LOADED
     });
 }
+#endif // !UACPI_BAREBONES_MODE
 
 uacpi_status uacpi_table_ref(uacpi_table *tbl)
 {
@@ -1246,6 +1291,7 @@ static void convert_registers_to_gas(void)
     }
 }
 
+#ifndef UACPI_BAREBONES_MODE
 static void split_one_block(
     struct acpi_gas *src, struct acpi_gas *dst0, struct acpi_gas *dst1
 )
@@ -1275,6 +1321,7 @@ static void split_event_blocks(void)
         &g_uacpi_rt_ctx.pm1b_enable_blk
     );
 }
+#endif // !UACPI_BAREBONES_MODE
 
 static uacpi_status initialize_fadt(const void *virt)
 {
@@ -1289,7 +1336,7 @@ static uacpi_status initialize_fadt(const void *virt)
 
     uacpi_memcpy(fadt, hdr, UACPI_MIN(sizeof(*fadt), hdr->length));
 
-#ifndef UACPI_REDUCED_HARDWARE
+#if !defined(UACPI_REDUCED_HARDWARE) && !defined(UACPI_BAREBONES_MODE)
     g_uacpi_rt_ctx.is_hardware_reduced = fadt->flags & ACPI_HW_REDUCED_ACPI;
 #endif
 
@@ -1333,7 +1380,9 @@ static uacpi_status initialize_fadt(const void *virt)
 
     if (!uacpi_is_hardware_reduced()) {
         convert_registers_to_gas();
+#ifndef UACPI_BAREBONES_MODE
         split_event_blocks();
+#endif
     }
 
     return UACPI_STATUS_OK;
@@ -1341,8 +1390,7 @@ static uacpi_status initialize_fadt(const void *virt)
 
 uacpi_status uacpi_table_fadt(struct acpi_fadt **out_fadt)
 {
-    if (!early_table_access)
-        UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
+    ENSURE_TABLES_ONLINE();
 
     *out_fadt = &g_uacpi_rt_ctx.fadt;
     return UACPI_STATUS_OK;

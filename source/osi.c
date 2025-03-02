@@ -6,6 +6,8 @@
 #include <uacpi/internal/mutex.h>
 #include <uacpi/kernel_api.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 struct registered_interface {
     const uacpi_char *name;
     uacpi_u8 weight;
@@ -382,3 +384,5 @@ out:
     *out_value = is_supported;
     return UACPI_STATUS_OK;
 }
+
+#endif // !UACPI_BAREBONES_MODE

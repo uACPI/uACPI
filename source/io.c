@@ -6,6 +6,8 @@
 #include <uacpi/internal/mutex.h>
 #include <uacpi/internal/namespace.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 uacpi_size uacpi_round_up_bits_to_bytes(uacpi_size bit_length)
 {
     return UACPI_ALIGN_UP(bit_length, 8, uacpi_size) / 8;
@@ -1101,3 +1103,5 @@ uacpi_status uacpi_pci_write(
 
     return ret;
 }
+
+#endif // !UACPI_BAREBONES_MODE

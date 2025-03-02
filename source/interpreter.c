@@ -18,6 +18,8 @@
 #include <uacpi/internal/mutex.h>
 #include <uacpi/internal/osi.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 enum item_type {
     ITEM_NONE = 0,
     ITEM_NAMESPACE_NODE,
@@ -6040,3 +6042,5 @@ uacpi_status uacpi_osi(uacpi_handle handle, uacpi_object *retval)
                 arg->buffer->text, is_supported ? "" : "un");
     return UACPI_STATUS_OK;
 }
+
+#endif // !UACPI_BAREBONES_MODE

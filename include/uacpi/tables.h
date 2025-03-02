@@ -48,10 +48,12 @@ uacpi_status uacpi_table_install_physical(
     uacpi_phys_addr, uacpi_table *out_table
 );
 
+#ifndef UACPI_BAREBONES_MODE
 /*
  * Load a previously installed table by feeding it to the interpreter.
  */
 uacpi_status uacpi_table_load(uacpi_size index);
+#endif // !UACPI_BAREBONES_MODE
 
 /*
  * Helpers for finding tables.

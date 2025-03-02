@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 typedef enum uacpi_fixed_event {
     UACPI_FIXED_EVENT_TIMER_STATUS = 1,
     UACPI_FIXED_EVENT_POWER_BUTTON,
@@ -276,6 +278,8 @@ UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_uninstall_gpe_block(
     uacpi_namespace_node *gpe_device
 ))
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }

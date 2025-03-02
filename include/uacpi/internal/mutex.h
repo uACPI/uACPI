@@ -3,6 +3,8 @@
 #include <uacpi/internal/types.h>
 #include <uacpi/kernel_api.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 uacpi_bool uacpi_this_thread_owns_aml_mutex(uacpi_mutex*);
 
 uacpi_status uacpi_acquire_aml_mutex(uacpi_mutex*, uacpi_u16 timeout);
@@ -76,3 +78,5 @@ uacpi_status uacpi_rw_unlock_read(struct uacpi_rw_lock *lock);
 
 uacpi_status uacpi_rw_lock_write(struct uacpi_rw_lock *lock);
 uacpi_status uacpi_rw_unlock_write(struct uacpi_rw_lock *lock);
+
+#endif // !UACPI_BAREBONES_MODE

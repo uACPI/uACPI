@@ -8,6 +8,8 @@
 #include <uacpi/internal/mutex.h>
 #include <uacpi/internal/interpreter.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 struct uacpi_recursive_lock g_opregion_lock;
 
 uacpi_status uacpi_initialize_opregion(void)
@@ -1051,3 +1053,5 @@ out:
     uacpi_recursive_lock_release(&g_opregion_lock);
     return ret;
 }
+
+#endif // !UACPI_BAREBONES_MODE

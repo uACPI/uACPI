@@ -7,8 +7,10 @@
 #include <uacpi/tables.h>
 
 enum uacpi_table_origin {
+#ifndef UACPI_BAREBONES_MODE
     UACPI_TABLE_ORIGIN_FIRMWARE_VIRTUAL = 0,
-    UACPI_TABLE_ORIGIN_FIRMWARE_PHYSICAL,
+#endif
+    UACPI_TABLE_ORIGIN_FIRMWARE_PHYSICAL = 1,
 
     UACPI_TABLE_ORIGIN_HOST_VIRTUAL,
     UACPI_TABLE_ORIGIN_HOST_PHYSICAL,
@@ -42,11 +44,13 @@ uacpi_status uacpi_table_install_with_origin(
     void *virt, enum uacpi_table_origin origin, uacpi_table *out_table
 );
 
+#ifndef UACPI_BAREBONES_MODE
 void uacpi_table_mark_as_loaded(uacpi_size idx);
 
 uacpi_status uacpi_table_load_with_cause(
     uacpi_size idx, enum uacpi_table_load_cause cause
 );
+#endif // !UACPI_BAREBONES_MODE
 
 typedef uacpi_iteration_decision (*uacpi_table_iteration_callback)
     (void *user, struct uacpi_installed_table *tbl, uacpi_size idx);

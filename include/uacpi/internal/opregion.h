@@ -3,6 +3,8 @@
 #include <uacpi/internal/types.h>
 #include <uacpi/opregion.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 uacpi_status uacpi_initialize_opregion(void);
 void uacpi_deinitialize_opregion(void);
 
@@ -43,3 +45,5 @@ uacpi_status uacpi_dispatch_opregion_io(
     uacpi_field_unit *field, uacpi_u32 offset,
     uacpi_region_op op, union uacpi_opregion_io_data data
 );
+
+#endif // !UACPI_BAREBONES_MODE

@@ -23,6 +23,7 @@ A portable and easy-to-integrate implementation of the Advanced Configuration an
 - GAS read/write API
 - Fully thread safe
 - Supports both 32-bit and 64-bit platforms
+- A special barebones mode with only table API (see [config.h](include/uacpi/platform/config.h#L127))
 
 ## Why would I use this over ACPICA?
 

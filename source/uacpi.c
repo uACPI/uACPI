@@ -39,27 +39,6 @@ void uacpi_logger_initialize(void)
     }
 }
 
-void uacpi_context_set_loop_timeout(uacpi_u32 seconds)
-{
-    if (seconds == 0)
-        seconds = UACPI_DEFAULT_LOOP_TIMEOUT_SECONDS;
-
-    g_uacpi_rt_ctx.loop_timeout_seconds = seconds;
-}
-
-void uacpi_context_set_max_call_stack_depth(uacpi_u32 depth)
-{
-    if (depth == 0)
-        depth = UACPI_DEFAULT_MAX_CALL_STACK_DEPTH;
-
-    g_uacpi_rt_ctx.max_call_stack_depth = depth;
-}
-
-uacpi_u32 uacpi_context_get_loop_timeout(void)
-{
-    return g_uacpi_rt_ctx.loop_timeout_seconds;
-}
-
 void uacpi_context_set_proactive_table_checksum(uacpi_bool setting)
 {
     if (setting)
@@ -139,6 +118,66 @@ const uacpi_char *uacpi_status_to_string(uacpi_status st)
     default:
         return "<invalid status>";
     }
+}
+
+void uacpi_state_reset(void)
+{
+#ifndef UACPI_BAREBONES_MODE
+    uacpi_deinitialize_namespace();
+    uacpi_deinitialize_interfaces();
+    uacpi_deinitialize_events();
+    uacpi_deinitialize_notify();
+    uacpi_deinitialize_opregion();
+#endif
+
+    uacpi_deinitialize_tables();
+
+#ifndef UACPI_BAREBONES_MODE
+
+#ifndef UACPI_REDUCED_HARDWARE
+    if (g_uacpi_rt_ctx.was_in_legacy_mode)
+        uacpi_leave_acpi_mode();
+#endif
+
+    uacpi_deinitialize_registers();
+
+#ifndef UACPI_REDUCED_HARDWARE
+    if (g_uacpi_rt_ctx.global_lock_event)
+        uacpi_kernel_free_event(g_uacpi_rt_ctx.global_lock_event);
+    if (g_uacpi_rt_ctx.global_lock_spinlock)
+        uacpi_kernel_free_spinlock(g_uacpi_rt_ctx.global_lock_spinlock);
+#endif
+
+#endif // !UACPI_BAREBONES_MODE
+
+    uacpi_memzero(&g_uacpi_rt_ctx, sizeof(g_uacpi_rt_ctx));
+
+#if defined(UACPI_KERNEL_INITIALIZATION) && !defined(UACPI_BAREBONES_MODE)
+    uacpi_kernel_deinitialize();
+#endif
+}
+
+#ifndef UACPI_BAREBONES_MODE
+
+void uacpi_context_set_loop_timeout(uacpi_u32 seconds)
+{
+    if (seconds == 0)
+        seconds = UACPI_DEFAULT_LOOP_TIMEOUT_SECONDS;
+
+    g_uacpi_rt_ctx.loop_timeout_seconds = seconds;
+}
+
+void uacpi_context_set_max_call_stack_depth(uacpi_u32 depth)
+{
+    if (depth == 0)
+        depth = UACPI_DEFAULT_MAX_CALL_STACK_DEPTH;
+
+    g_uacpi_rt_ctx.max_call_stack_depth = depth;
+}
+
+uacpi_u32 uacpi_context_get_loop_timeout(void)
+{
+    return g_uacpi_rt_ctx.loop_timeout_seconds;
 }
 
 #ifndef UACPI_REDUCED_HARDWARE
@@ -261,36 +300,6 @@ static void enter_acpi_mode_initial(void) { }
 uacpi_init_level uacpi_get_current_init_level(void)
 {
     return g_uacpi_rt_ctx.init_level;
-}
-
-void uacpi_state_reset(void)
-{
-    uacpi_deinitialize_namespace();
-    uacpi_deinitialize_interfaces();
-    uacpi_deinitialize_events();
-    uacpi_deinitialize_notify();
-    uacpi_deinitialize_opregion();
-    uacpi_deinitialize_tables();
-
-#ifndef UACPI_REDUCED_HARDWARE
-    if (g_uacpi_rt_ctx.was_in_legacy_mode)
-        uacpi_leave_acpi_mode();
-#endif
-
-    uacpi_deinitialize_registers();
-
-#ifndef UACPI_REDUCED_HARDWARE
-    if (g_uacpi_rt_ctx.global_lock_event)
-        uacpi_kernel_free_event(g_uacpi_rt_ctx.global_lock_event);
-    if (g_uacpi_rt_ctx.global_lock_spinlock)
-        uacpi_kernel_free_spinlock(g_uacpi_rt_ctx.global_lock_spinlock);
-#endif
-
-    uacpi_memzero(&g_uacpi_rt_ctx, sizeof(g_uacpi_rt_ctx));
-
-#ifdef UACPI_KERNEL_INITIALIZATION
-    uacpi_kernel_deinitialize();
-#endif
 }
 
 uacpi_status uacpi_initialize(uacpi_u64 flags)
@@ -984,3 +993,5 @@ uacpi_status uacpi_get_aml_bitness(uacpi_u8 *out_bitness)
     *out_bitness = g_uacpi_rt_ctx.is_rev1 ? 32 : 64;
     return UACPI_STATUS_OK;
 }
+
+#endif // !UACPI_BAREBONES_MODE
