@@ -81,7 +81,7 @@ UACPI_BUILD_BUG_ON_WITH_MSG(
  */
 
 /*
- * Makes uACPI use the builtin versions of mem{cpy,move,set,cmp} instead of
+ * Makes uACPI use the internal versions of mem{cpy,move,set,cmp} instead of
  * relying on the host to provide them. Note that compilers like clang and GCC
  * rely on these being available by default, even in freestanding mode, so
  * compiling uACPI may theoretically generate implicit dependencies on them
