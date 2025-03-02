@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 /*
  * Install an address space handler to a device node.
  * The handler is recursively connected to all of the operation regions of
@@ -37,6 +39,8 @@ uacpi_status uacpi_reg_all_opregions(
     uacpi_namespace_node *device_node,
     enum uacpi_address_space space
 );
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }
