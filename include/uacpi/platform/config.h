@@ -5,7 +5,7 @@
 #else
 
 #include <uacpi/helpers.h>
-#include <uacpi/types.h>
+#include <uacpi/log.h>
 
 /*
  * =======================
