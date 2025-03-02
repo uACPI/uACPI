@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 typedef struct uacpi_namespace_node uacpi_namespace_node;
 
 uacpi_namespace_node *uacpi_namespace_root(void);
@@ -176,6 +178,8 @@ const uacpi_char *uacpi_namespace_node_generate_absolute_path(
     const uacpi_namespace_node *node
 );
 void uacpi_free_absolute_path(const uacpi_char *path);
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }
