@@ -1,6 +1,5 @@
 #include <uacpi/uacpi.h>
 #include <uacpi/acpi.h>
-#include <uacpi/platform/config.h>
 
 #include <uacpi/internal/log.h>
 #include <uacpi/internal/context.h>
