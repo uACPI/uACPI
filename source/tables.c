@@ -2,7 +2,6 @@
 #include <uacpi/internal/utilities.h>
 #include <uacpi/internal/stdlib.h>
 #include <uacpi/internal/interpreter.h>
-#include <uacpi/platform/config.h>
 #include <uacpi/internal/mutex.h>
 
 DYNAMIC_ARRAY_WITH_INLINE_STORAGE(

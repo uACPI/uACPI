@@ -1,6 +1,5 @@
 #include <uacpi/internal/stdlib.h>
 #include <uacpi/internal/utilities.h>
-#include <uacpi/platform/config.h>
 
 #ifdef UACPI_USE_BUILTIN_STRING
 

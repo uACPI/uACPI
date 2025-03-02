@@ -1,4 +1,5 @@
 #include <uacpi/internal/shareable.h>
+#include <uacpi/internal/stdlib.h>
 #include <uacpi/platform/atomic.h>
 
 #define BUGGED_REFCOUNT 0xFFFFFFFF

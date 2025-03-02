@@ -1,6 +1,6 @@
 #pragma once
 
-#include <uacpi/platform/types.h>
+#include <uacpi/types.h>
 #include <uacpi/status.h>
 
 #ifdef __cplusplus
