@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 typedef enum uacpi_vendor_interface {
     UACPI_VENDOR_INTERFACE_NONE = 0,
     UACPI_VENDOR_INTERFACE_WINDOWS_2000,
@@ -115,6 +117,8 @@ typedef enum uacpi_interface_action {
 uacpi_status uacpi_bulk_configure_interfaces(
     uacpi_interface_action action, uacpi_interface_kind kind
 );
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }

@@ -2,6 +2,8 @@
 #include <uacpi/internal/stdlib.h>
 #include <uacpi/platform/atomic.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 #define BUGGED_REFCOUNT 0xFFFFFFFF
 
 void uacpi_shareable_init(uacpi_handle handle)
@@ -65,3 +67,5 @@ uacpi_u32 uacpi_shareable_refcount(uacpi_handle handle)
     struct uacpi_shareable *shareable = handle;
     return uacpi_atomic_load32(&shareable->reference_count);
 }
+
+#endif // !UACPI_BAREBONES_MODE
