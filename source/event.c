@@ -14,7 +14,7 @@
 #define UACPI_EVENT_DISABLED 0
 #define UACPI_EVENT_ENABLED 1
 
-#ifndef UACPI_REDUCED_HARDWARE
+#if !defined(UACPI_REDUCED_HARDWARE) && !defined(UACPI_BAREBONES_MODE)
 
 static uacpi_handle g_gpe_state_slock;
 static struct uacpi_recursive_lock g_event_lock;
@@ -2441,4 +2441,4 @@ out:
     return ret;
 }
 
-#endif
+#endif // !UACPI_REDUCED_HARDWARE && !UACPI_BAREBONES_MODE

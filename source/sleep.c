@@ -6,6 +6,8 @@
 #include <uacpi/internal/event.h>
 #include <uacpi/platform/arch_helpers.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 #ifndef UACPI_REDUCED_HARDWARE
 #define CALL_SLEEP_FN(name, state)                       \
     (uacpi_is_hardware_reduced() ?                       \
@@ -610,3 +612,5 @@ uacpi_status uacpi_reboot(void)
 
     return ret;
 }
+
+#endif // !UACPI_BAREBONES_MODE

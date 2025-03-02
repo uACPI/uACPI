@@ -7,6 +7,8 @@
 #include <uacpi/kernel_api.h>
 #include <uacpi/uacpi.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 #define PCI_ROOT_PNP_ID "PNP0A03"
 #define PCI_EXPRESS_ROOT_PNP_ID "PNP0A08"
 
@@ -330,3 +332,5 @@ void uacpi_install_default_address_space_handlers(void)
         UACPI_ADDRESS_SPACE_HANDLER_DEFAULT
     );
 }
+
+#endif // !UACPI_BAREBONES_MODE

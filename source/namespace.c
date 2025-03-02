@@ -9,6 +9,8 @@
 #include <uacpi/internal/mutex.h>
 #include <uacpi/kernel_api.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 #define UACPI_REV_VALUE 2
 #define UACPI_OS_VALUE "Microsoft Windows NT"
 
@@ -1073,3 +1075,5 @@ void uacpi_free_absolute_path(const uacpi_char *path)
 {
     uacpi_free_dynamic_string(path);
 }
+
+#endif // !UACPI_BAREBONES_MODE

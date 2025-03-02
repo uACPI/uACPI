@@ -7,6 +7,8 @@
 #include <uacpi/internal/namespace.h>
 #include <uacpi/uacpi.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 #define LARGE_RESOURCE_BASE (ACPI_RESOURCE_END_TAG + 1)
 #define L(x) (x + LARGE_RESOURCE_BASE)
 
@@ -2557,3 +2559,5 @@ uacpi_status uacpi_set_resources(
     uacpi_object_unref(res_template);
     return ret;
 }
+
+#endif // !UACPI_BAREBONES_MODE

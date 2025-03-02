@@ -7,6 +7,8 @@
 #include <uacpi/internal/stdlib.h>
 #include <uacpi/kernel_api.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 static uacpi_handle notify_mutex;
 
 uacpi_status uacpi_initialize_notify(void)
@@ -249,3 +251,5 @@ out_no_mutex:
 
     return ret;
 }
+
+#endif // !UACPI_BAREBONES_MODE

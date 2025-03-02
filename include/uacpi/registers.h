@@ -11,6 +11,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 typedef enum uacpi_register {
     UACPI_REGISTER_PM1_STS = 0,
     UACPI_REGISTER_PM1_EN,
@@ -95,6 +97,8 @@ uacpi_status uacpi_read_register_field(uacpi_register_field, uacpi_u64*);
  *       a field at 0b???XX??? the passed value should be just 0bXX
  */
 uacpi_status uacpi_write_register_field(uacpi_register_field, uacpi_u64);
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }

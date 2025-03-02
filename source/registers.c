@@ -6,6 +6,8 @@
 #include <uacpi/platform/atomic.h>
 #include <uacpi/acpi.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 static uacpi_handle g_reg_lock;
 
 enum register_kind {
@@ -566,3 +568,5 @@ out:
     uacpi_kernel_unlock_spinlock(g_reg_lock, flags);
     return ret;
 }
+
+#endif // !UACPI_BAREBONES_MODE

@@ -1,5 +1,7 @@
 #include <uacpi/internal/opcodes.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 #define UACPI_OP(opname, opcode, ...) \
     { #opname, .decode_ops = __VA_ARGS__, .code = opcode },
 
@@ -266,3 +268,5 @@ const uacpi_char *uacpi_parse_op_to_string(enum uacpi_parse_op op)
 
     return pop_names[op];
 }
+
+#endif // !UACPI_BAREBONES_MODE

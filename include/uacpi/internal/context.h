@@ -14,6 +14,9 @@ struct uacpi_runtime_context {
      */
     struct acpi_fadt fadt;
 
+    uacpi_u64 flags;
+
+#ifndef UACPI_BAREBONES_MODE
     /*
      * A cached pointer to FACS so that we don't have to look it up in interrupt
      * contexts as we can't take mutexes.
@@ -28,8 +31,6 @@ struct uacpi_runtime_context {
     struct acpi_gas pm1a_enable_blk;
     struct acpi_gas pm1b_enable_blk;
 
-    uacpi_u64 flags;
-
 #define UACPI_SLEEP_TYP_INVALID 0xFF
     uacpi_u8 last_sleep_typ_a;
     uacpi_u8 last_sleep_typ_b;
@@ -37,16 +38,9 @@ struct uacpi_runtime_context {
     uacpi_u8 s0_sleep_typ_a;
     uacpi_u8 s0_sleep_typ_b;
 
-    /*
-     * This is a per-table value but we mimic the NT implementation:
-     * treat all other definition blocks as if they were the same revision
-     * as DSDT.
-     */
-    uacpi_bool is_rev1;
     uacpi_bool global_lock_acquired;
 
 #ifndef UACPI_REDUCED_HARDWARE
-    uacpi_bool is_hardware_reduced;
     uacpi_bool was_in_legacy_mode;
     uacpi_bool has_global_lock;
     uacpi_bool sci_handle_valid;
@@ -73,11 +67,46 @@ struct uacpi_runtime_context {
     uacpi_bool global_lock_pending;
 #endif
 
-    uacpi_u8 log_level;
-    uacpi_u8 init_level;
-
     uacpi_bool bad_timesource;
+    uacpi_u8 init_level;
+#endif // !UACPI_BAREBONES_MODE
+
+#ifndef UACPI_REDUCED_HARDWARE
+    uacpi_bool is_hardware_reduced;
+#endif
+
+    /*
+     * This is a per-table value but we mimic the NT implementation:
+     * treat all other definition blocks as if they were the same revision
+     * as DSDT.
+     */
+    uacpi_bool is_rev1;
+
+    uacpi_u8 log_level;
 };
+
+extern struct uacpi_runtime_context g_uacpi_rt_ctx;
+
+static inline uacpi_bool uacpi_check_flag(uacpi_u64 flag)
+{
+    return (g_uacpi_rt_ctx.flags & flag) == flag;
+}
+
+static inline uacpi_bool uacpi_should_log(enum uacpi_log_level lvl)
+{
+    return lvl <= g_uacpi_rt_ctx.log_level;
+}
+
+static inline uacpi_bool uacpi_is_hardware_reduced(void)
+{
+#ifndef UACPI_REDUCED_HARDWARE
+    return g_uacpi_rt_ctx.is_hardware_reduced;
+#else
+    return UACPI_TRUE;
+#endif
+}
+
+#ifndef UACPI_BAREBONES_MODE
 
 static inline const uacpi_char *uacpi_init_level_to_string(uacpi_u8 lvl)
 {
@@ -123,23 +152,4 @@ static inline const uacpi_char *uacpi_init_level_to_string(uacpi_u8 lvl)
         }                                                                   \
     } while (0)
 
-extern struct uacpi_runtime_context g_uacpi_rt_ctx;
-
-static inline uacpi_bool uacpi_check_flag(uacpi_u64 flag)
-{
-    return (g_uacpi_rt_ctx.flags & flag) == flag;
-}
-
-static inline uacpi_bool uacpi_should_log(enum uacpi_log_level lvl)
-{
-    return lvl <= g_uacpi_rt_ctx.log_level;
-}
-
-static inline uacpi_bool uacpi_is_hardware_reduced(void)
-{
-#ifndef UACPI_REDUCED_HARDWARE
-    return g_uacpi_rt_ctx.is_hardware_reduced;
-#else
-    return UACPI_TRUE;
-#endif
-}
+#endif // !UACPI_BAREBONES_MODE

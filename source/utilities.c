@@ -7,52 +7,6 @@
 #include <uacpi/internal/log.h>
 #include <uacpi/internal/namespace.h>
 
-void uacpi_eisa_id_to_string(uacpi_u32 id, uacpi_char *out_string)
-{
-    static uacpi_char hex_to_ascii[16] = {
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-        'A', 'B', 'C', 'D', 'E', 'F'
-    };
-
-    /*
-     * For whatever reason bits are encoded upper to lower here, swap
-     * them around so that we don't have to do ridiculous bit shifts
-     * everywhere.
-     */
-    union {
-        uacpi_u8 bytes[4];
-        uacpi_u32 dword;
-    } orig, swapped;
-
-    orig.dword = id;
-    swapped.bytes[0] = orig.bytes[3];
-    swapped.bytes[1] = orig.bytes[2];
-    swapped.bytes[2] = orig.bytes[1];
-    swapped.bytes[3] = orig.bytes[0];
-
-    /*
-     * Bit 16 - 20: 3rd character (- 0x40) of mfg code
-     * Bit 21 - 25: 2nd character (- 0x40) of mfg code
-     * Bit 26 - 30: 1st character (- 0x40) of mfg code
-     */
-    out_string[0] = (uacpi_char)(0x40 + ((swapped.dword >> 26) & 0x1F));
-    out_string[1] = (uacpi_char)(0x40 + ((swapped.dword >> 21) & 0x1F));
-    out_string[2] = (uacpi_char)(0x40 + ((swapped.dword >> 16) & 0x1F));
-
-    /*
-     * Bit 0  - 3 : 4th hex digit of product number
-     * Bit 4  - 7 : 3rd hex digit of product number
-     * Bit 8  - 11: 2nd hex digit of product number
-     * Bit 12 - 15: 1st hex digit of product number
-     */
-    out_string[3] = hex_to_ascii[(swapped.dword >> 12) & 0x0F];
-    out_string[4] = hex_to_ascii[(swapped.dword >> 8 ) & 0x0F];
-    out_string[5] = hex_to_ascii[(swapped.dword >> 4 ) & 0x0F];
-    out_string[6] = hex_to_ascii[(swapped.dword >> 0 ) & 0x0F];
-
-    out_string[7] = '\0';
-}
-
 enum char_type {
     CHAR_TYPE_CONTROL = 1 << 0,
     CHAR_TYPE_SPACE = 1 << 1,
@@ -212,30 +166,6 @@ static const uacpi_u8 ascii_map[256] = {
     CHAR_TYPE_CONTROL // 127 backspace
 };
 
-static inline uacpi_bool is_valid_name_byte(uacpi_u8 c)
-{
-    // ‘_’ := 0x5F
-    if (c == 0x5F)
-        return UACPI_TRUE;
-
-    /*
-     * LeadNameChar := ‘A’-‘Z’ | ‘_’
-     * DigitChar := ‘0’ - ‘9’
-     * NameChar := DigitChar | LeadNameChar
-     * ‘A’-‘Z’ := 0x41 - 0x5A
-     * ‘0’-‘9’ := 0x30 - 0x39
-     */
-    return (ascii_map[c] & (CHAR_TYPE_DIGIT | CHAR_TYPE_UPPER)) != 0;
-}
-
-uacpi_bool uacpi_is_valid_nameseg(uacpi_u8 *nameseg)
-{
-    return is_valid_name_byte(nameseg[0]) &&
-           is_valid_name_byte(nameseg[1]) &&
-           is_valid_name_byte(nameseg[2]) &&
-           is_valid_name_byte(nameseg[3]);
-}
-
 static uacpi_bool is_char(uacpi_char c, enum char_type type)
 {
     return (ascii_map[(uacpi_u8)c] & type) == type;
@@ -362,6 +292,78 @@ out:
         ret = UACPI_STATUS_OK;
 
     return ret;
+}
+
+#ifndef UACPI_BAREBONES_MODE
+
+static inline uacpi_bool is_valid_name_byte(uacpi_u8 c)
+{
+    // ‘_’ := 0x5F
+    if (c == 0x5F)
+        return UACPI_TRUE;
+
+    /*
+     * LeadNameChar := ‘A’-‘Z’ | ‘_’
+     * DigitChar := ‘0’ - ‘9’
+     * NameChar := DigitChar | LeadNameChar
+     * ‘A’-‘Z’ := 0x41 - 0x5A
+     * ‘0’-‘9’ := 0x30 - 0x39
+     */
+    return (ascii_map[c] & (CHAR_TYPE_DIGIT | CHAR_TYPE_UPPER)) != 0;
+}
+
+uacpi_bool uacpi_is_valid_nameseg(uacpi_u8 *nameseg)
+{
+    return is_valid_name_byte(nameseg[0]) &&
+           is_valid_name_byte(nameseg[1]) &&
+           is_valid_name_byte(nameseg[2]) &&
+           is_valid_name_byte(nameseg[3]);
+}
+
+void uacpi_eisa_id_to_string(uacpi_u32 id, uacpi_char *out_string)
+{
+    static uacpi_char hex_to_ascii[16] = {
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F'
+    };
+
+    /*
+     * For whatever reason bits are encoded upper to lower here, swap
+     * them around so that we don't have to do ridiculous bit shifts
+     * everywhere.
+     */
+    union {
+        uacpi_u8 bytes[4];
+        uacpi_u32 dword;
+    } orig, swapped;
+
+    orig.dword = id;
+    swapped.bytes[0] = orig.bytes[3];
+    swapped.bytes[1] = orig.bytes[2];
+    swapped.bytes[2] = orig.bytes[1];
+    swapped.bytes[3] = orig.bytes[0];
+
+    /*
+     * Bit 16 - 20: 3rd character (- 0x40) of mfg code
+     * Bit 21 - 25: 2nd character (- 0x40) of mfg code
+     * Bit 26 - 30: 1st character (- 0x40) of mfg code
+     */
+    out_string[0] = (uacpi_char)(0x40 + ((swapped.dword >> 26) & 0x1F));
+    out_string[1] = (uacpi_char)(0x40 + ((swapped.dword >> 21) & 0x1F));
+    out_string[2] = (uacpi_char)(0x40 + ((swapped.dword >> 16) & 0x1F));
+
+    /*
+     * Bit 0  - 3 : 4th hex digit of product number
+     * Bit 4  - 7 : 3rd hex digit of product number
+     * Bit 8  - 11: 2nd hex digit of product number
+     * Bit 12 - 15: 1st hex digit of product number
+     */
+    out_string[3] = hex_to_ascii[(swapped.dword >> 12) & 0x0F];
+    out_string[4] = hex_to_ascii[(swapped.dword >> 8 ) & 0x0F];
+    out_string[5] = hex_to_ascii[(swapped.dword >> 4 ) & 0x0F];
+    out_string[6] = hex_to_ascii[(swapped.dword >> 0 ) & 0x0F];
+
+    out_string[7] = '\0';
 }
 
 #define PNP_ID_LENGTH 8
@@ -1137,3 +1139,5 @@ void uacpi_free_dynamic_string(const uacpi_char *str)
 
     uacpi_free((void*)str, uacpi_strlen(str) + 1);
 }
+
+#endif // !UACPI_BAREBONES_MODE

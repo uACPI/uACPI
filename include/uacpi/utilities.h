@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 /*
  * Checks whether the device at 'node' matches any of the PNP ids provided in
  * 'list' (terminated by a UACPI_NULL). This is done by first attempting to
@@ -178,6 +180,8 @@ void uacpi_free_namespace_node_info(uacpi_namespace_node_info*);
 uacpi_status uacpi_get_namespace_node_info(
     uacpi_namespace_node *node, uacpi_namespace_node_info **out_info
 );
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }

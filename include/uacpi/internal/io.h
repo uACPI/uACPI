@@ -4,6 +4,8 @@
 #include <uacpi/acpi.h>
 #include <uacpi/io.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 typedef struct uacpi_mapped_gas {
     uacpi_handle mapping;
     uacpi_u8 access_bit_width;
@@ -71,3 +73,5 @@ uacpi_status uacpi_pci_read(
 uacpi_status uacpi_pci_write(
     uacpi_handle handle, uacpi_size offset, uacpi_u8 width, uacpi_u64 in
 );
+
+#endif // !UACPI_BAREBONES_MODE
