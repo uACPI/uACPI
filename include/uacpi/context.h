@@ -1,6 +1,7 @@
 #pragma once
 
 #include <uacpi/types.h>
+#include <uacpi/log.h>
 
 #ifdef __cplusplus
 extern "C" {
