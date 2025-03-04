@@ -29,18 +29,32 @@ void set_oem_table_id(char(&oemid_table_id)[8])
     memcpy(oemid_table_id, "uTESTTBL", sizeof(oemid_table_id));
 }
 
-void build_xsdt(
-    full_xsdt& xsdt, acpi_rsdp& rsdp, std::string_view dsdt_path,
+full_xsdt* make_xsdt(
+    acpi_rsdp& rsdp, std::string_view dsdt_path,
     const std::vector<std::string> &ssdt_paths
 )
 {
+    memcpy(&rsdp.signature, ACPI_RSDP_SIGNATURE, sizeof(ACPI_RSDP_SIGNATURE) - 1);
+    set_oem(rsdp.oemid);
+
+    auto xsdt_bytes = sizeof(full_xsdt);
+    xsdt_bytes += ssdt_paths.size() * sizeof(acpi_sdt_hdr*);
+
+    auto& xsdt = *new (std::calloc(xsdt_bytes, 1)) full_xsdt();
     std::vector<std::pair<void*, size_t>> tables(ssdt_paths.size() + 1);
-    auto tables_delete = ScopeGuard(
-        [&tables] {
+
+    auto cleanup = ScopeGuard(
+        [&tables, &xsdt] {
             for (auto& table : tables)
                 delete[] reinterpret_cast<uint8_t*>(table.first);
+
+            xsdt.~full_xsdt();
+            std::free(&xsdt);
         }
     );
+
+    set_oem(xsdt.hdr.oemid);
+    set_oem_table_id(xsdt.hdr.oem_table_id);
 
     tables[0] = read_entire_file(dsdt_path, sizeof(acpi_sdt_hdr));
     for (size_t i = 0; i < ssdt_paths.size(); ++i)
@@ -77,7 +91,7 @@ void build_xsdt(
         hdr->checksum = gen_checksum(hdr, hdr->length);
     }
 
-    tables_delete.disarm();
+    cleanup.disarm();
 
     auto& fadt = *new acpi_fadt {};
     set_oem(fadt.hdr.oemid);
@@ -145,6 +159,27 @@ void build_xsdt(
         rsdp.extended_checksum = gen_checksum(&rsdp, sizeof(rsdp));
     }
     xsdt.hdr.checksum = gen_checksum(&xsdt, xsdt.hdr.length);
+
+    return &xsdt;
+}
+
+void delete_xsdt(full_xsdt& xsdt, size_t num_tables)
+{
+    if (xsdt.fadt) {
+        delete[] reinterpret_cast<uint8_t*>(
+            static_cast<uintptr_t>(xsdt.fadt->x_dsdt)
+        );
+        delete reinterpret_cast<acpi_facs*>(
+            static_cast<uintptr_t>(xsdt.fadt->x_firmware_ctrl)
+        );
+        delete xsdt.fadt;
+    }
+
+    for (size_t i = 0; i < num_tables; ++i)
+        delete[] xsdt.ssdts[i];
+
+    xsdt.~full_xsdt();
+    std::free(&xsdt);
 }
 
 std::pair<void*, size_t>
