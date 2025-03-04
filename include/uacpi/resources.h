@@ -6,6 +6,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 typedef enum uacpi_resource_type {
     UACPI_RESOURCE_TYPE_IRQ,
     UACPI_RESOURCE_TYPE_EXTENDED_IRQ,
@@ -724,6 +726,8 @@ uacpi_status uacpi_get_resource_from_buffer(
     uacpi_data_view aml_buffer, uacpi_resource **out_resource
 );
 void uacpi_free_resource(uacpi_resource*);
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }

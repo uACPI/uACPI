@@ -1,6 +1,7 @@
 #pragma once
 
 #include <uacpi/types.h>
+#include <uacpi/log.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,14 @@ extern "C" {
 void uacpi_context_set_log_level(uacpi_log_level);
 
 /*
+ * Enables table checksum validation at installation time instead of first use.
+ * Note that this makes uACPI map the entire table at once, which not all
+ * hosts are able to handle at early init.
+ */
+void uacpi_context_set_proactive_table_checksum(uacpi_bool);
+
+#ifndef UACPI_BAREBONES_MODE
+/*
  * Set the maximum number of seconds a While loop is allowed to run for before
  * getting timed out.
  *
@@ -37,8 +46,7 @@ void uacpi_context_set_loop_timeout(uacpi_u32 seconds);
 void uacpi_context_set_max_call_stack_depth(uacpi_u32 depth);
 
 uacpi_u32 uacpi_context_get_loop_timeout(void);
-
-void uacpi_context_set_proactive_table_checksum(uacpi_bool);
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }

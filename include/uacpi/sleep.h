@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+#ifndef UACPI_BAREBONES_MODE
+
 /*
  * Set the firmware waking vector in FACS.
  *
@@ -57,6 +59,8 @@ uacpi_status uacpi_wake_from_sleep_state(uacpi_sleep_state);
  * Attempt reset via the FADT reset register.
  */
 uacpi_status uacpi_reboot(void);
+
+#endif // !UACPI_BAREBONES_MODE
 
 #ifdef __cplusplus
 }
