@@ -290,38 +290,13 @@ static void run_test(
 {
     acpi_rsdp rsdp {};
 
-    memcpy(&rsdp.signature, ACPI_RSDP_SIGNATURE, sizeof(ACPI_RSDP_SIGNATURE) - 1);
-    set_oem(rsdp.oemid);
-
-    auto xsdt_bytes = sizeof(full_xsdt);
-    xsdt_bytes += ssdt_paths.size() * sizeof(acpi_sdt_hdr*);
-
-    auto *xsdt = new (std::calloc(xsdt_bytes, 1)) full_xsdt();
-    set_oem(xsdt->hdr.oemid);
-    set_oem_table_id(xsdt->hdr.oem_table_id);
-
-    auto xsdt_delete = ScopeGuard(
+    auto *xsdt = make_xsdt(rsdp, dsdt_path, ssdt_paths);
+    auto cleanup = ScopeGuard(
         [&xsdt, &ssdt_paths] {
             uacpi_state_reset();
-
-            if (xsdt->fadt) {
-                delete[] reinterpret_cast<uint8_t*>(
-                    static_cast<uintptr_t>(xsdt->fadt->x_dsdt)
-                );
-                delete reinterpret_cast<acpi_facs*>(
-                    static_cast<uintptr_t>(xsdt->fadt->x_firmware_ctrl)
-                );
-                delete xsdt->fadt;
-            }
-
-            for (size_t i = 0; i < ssdt_paths.size(); ++i)
-                delete[] xsdt->ssdts[i];
-
-            xsdt->~full_xsdt();
-            std::free(xsdt);
+            delete_xsdt(*xsdt, ssdt_paths.size());
         }
     );
-    build_xsdt(*xsdt, rsdp, dsdt_path, ssdt_paths);
 
     g_rsdp = reinterpret_cast<uacpi_phys_addr>(&rsdp);
 

@@ -1,5 +1,6 @@
 #include <string_view>
 #include <vector>
+#include <stdexcept>
 
 #include <uacpi/acpi.h>
 #include <uacpi/uacpi.h>
@@ -32,8 +33,9 @@ UACPI_PACKED(struct full_xsdt {
 void set_oem(char (&oemid)[6]);
 void set_oem_table_id(char(&oemid_table_id)[8]);
 
-void build_xsdt(full_xsdt& xsdt, acpi_rsdp& rsdp, std::string_view dsdt_path,
-                const std::vector<std::string>& ssdt_paths);
+full_xsdt* make_xsdt(acpi_rsdp& rsdp, std::string_view dsdt_path,
+                     const std::vector<std::string>& ssdt_paths);
+void delete_xsdt(full_xsdt& xsdt, size_t num_tables);
 
 std::pair<void*, size_t>
 read_entire_file(std::string_view path, size_t min_size = 0);
