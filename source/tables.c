@@ -82,7 +82,7 @@ static void dump_table_header(
         struct acpi_rsdp *rsdp = hdr;
 
         uacpi_info(
-            "RSDP 0x%016"UACPI_PRIX64" %08X v%02X (%.6s)\n",
+            "RSDP 0x%016"UACPI_PRIX64" %08X v%02X (%6.6s)\n",
             UACPI_FMT64(phys_addr), rsdp->length, rsdp->revision,
             rsdp->oemid
         );
@@ -90,7 +90,7 @@ static void dump_table_header(
     }
 
     uacpi_info(
-        "%.4s 0x%016"UACPI_PRIX64" %08X v%02X (%.6s %.8s)\n",
+        "%.4s 0x%016"UACPI_PRIX64" %08X v%02X (%6.6s %8.8s)\n",
         sdt->signature, UACPI_FMT64(phys_addr), sdt->length, sdt->revision,
         sdt->oemid, sdt->oem_table_id
     );
