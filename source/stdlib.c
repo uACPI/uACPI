@@ -565,8 +565,8 @@ uacpi_i32 uacpi_vsnprintf(
 
             for (i = 0; (!fm.has_precision || i < fm.precision) && string[i]; ++i)
                 write_one(&fb_state, string[i]);
-            while (fm.has_precision && (i++ < fm.precision))
-                write_one(&fb_state, fm.pad_char);
+            while (i++ < fm.min_width)
+                write_one(&fb_state, ' ');
             continue;
         }
 
