@@ -4,6 +4,8 @@
 #include <uacpi/types.h>
 #include <uacpi/internal/shareable.h>
 
+#ifndef UACPI_BAREBONES_MODE
+
 // object->flags field if object->type == UACPI_OBJECT_REFERENCE
 enum uacpi_reference_kind {
     UACPI_REFERENCE_KIND_REFOF = 0,
@@ -304,3 +306,5 @@ void uacpi_method_unref(uacpi_control_method*);
 void uacpi_address_space_handler_unref(uacpi_address_space_handler *handler);
 
 void uacpi_buffer_to_view(uacpi_buffer*, uacpi_data_view*);
+
+#endif // !UACPI_BAREBONES_MODE
