@@ -595,7 +595,7 @@ void uacpi_memcpy_zerout(void *dst, const void *src,
 
 uacpi_u8 uacpi_bit_scan_forward(uacpi_u64 value)
 {
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
     unsigned char ret;
     unsigned long index;
 
@@ -625,7 +625,7 @@ uacpi_u8 uacpi_bit_scan_forward(uacpi_u64 value)
 
 uacpi_u8 uacpi_bit_scan_backward(uacpi_u64 value)
 {
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
     unsigned char ret;
     unsigned long index;
 
