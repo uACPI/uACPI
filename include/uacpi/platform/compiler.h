@@ -25,7 +25,7 @@
     #define UACPI_PACKED(decl) decl __attribute__((packed));
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
     #define uacpi_unlikely(expr) __builtin_expect(!!(expr), 0)
     #define uacpi_likely(expr)   __builtin_expect(!!(expr), 1)
 
