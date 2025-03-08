@@ -48,3 +48,21 @@ inline void ensure_ok_status(uacpi_status st)
     auto msg = uacpi_status_to_string(st);
     throw std::runtime_error(std::string("uACPI error: ") + msg);
 }
+
+static inline const char* uacpi_log_level_to_string(uacpi_log_level lvl)
+{
+    switch (lvl) {
+    case UACPI_LOG_DEBUG:
+        return "DEBUG";
+    case UACPI_LOG_TRACE:
+        return "TRACE";
+    case UACPI_LOG_INFO:
+        return "INFO";
+    case UACPI_LOG_WARN:
+        return "WARN";
+    case UACPI_LOG_ERROR:
+        return "ERROR";
+    default:
+        std::abort();
+    }
+}
