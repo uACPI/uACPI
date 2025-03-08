@@ -11,6 +11,8 @@
 #include <cstring>
 #include <cinttypes>
 
+#include "helpers.h"
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -279,28 +281,10 @@ void *uacpi_kernel_alloc_zeroed(uacpi_size size)
 }
 #endif
 
-static const char* log_level_to_string(uacpi_log_level lvl)
-{
-    switch (lvl) {
-    case UACPI_LOG_DEBUG:
-        return "DEBUG";
-    case UACPI_LOG_TRACE:
-        return "TRACE";
-    case UACPI_LOG_INFO:
-        return "INFO";
-    case UACPI_LOG_WARN:
-        return "WARN";
-    case UACPI_LOG_ERROR:
-        return "ERROR";
-    default:
-        std::abort();
-    }
-}
-
 #ifdef UACPI_FORMATTED_LOGGING
 void uacpi_kernel_vlog(enum uacpi_log_level lvl, const char* text, uacpi_va_list vlist)
 {
-    printf("[uACPI][%s] ", log_level_to_string(lvl));
+    printf("[uACPI][%s] ", uacpi_log_level_to_string(lvl));
     vprintf(text, vlist);
 }
 
@@ -316,7 +300,7 @@ void uacpi_kernel_log(enum uacpi_log_level lvl, const char* text, ...)
 #else
 void uacpi_kernel_log(enum uacpi_log_level lvl, const char* text)
 {
-    printf("[uACPI][%s] %s", log_level_to_string(lvl), text);
+    printf("[uACPI][%s] %s", uacpi_log_level_to_string(lvl), text);
 }
 #endif
 
