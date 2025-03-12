@@ -38,6 +38,16 @@ class TestCase(ABC):
         pass
 
 
+class BarebonesTestCase(TestCase):
+    def __init__(
+        self, name: str
+    ) -> None:
+        super().__init__(name, name)
+
+    def extra_runner_args(self) -> List[str]:
+        return []
+
+
 class TestCaseWithMain(TestCase):
     def __init__(
         self, path: str, name: str, rtype: str, value: str
@@ -309,19 +319,28 @@ def test_relpath(*args: str) -> str:
     return os.path.join(abs_path_to_current_dir(), *args)
 
 
-def test_runner_binary() -> str:
-    out = "test-runner"
-
+def platform_name_for_binary(binary: str) -> str:
     if platform.system() == "Windows":
-        out += ".exe"
+        binary += ".exe"
 
-    return out
+    return binary
 
 
-def build_test_runner(bitness: int) -> str:
+def test_runner_binary() -> str:
+    return platform_name_for_binary("test-runner")
+
+
+def barebones_test_runner_binary() -> str:
+    return platform_name_for_binary("barebones-test-runner")
+
+
+def build_test_runner(bitness: int) -> Tuple[str, str]:
     build_dir = f"build-{platform.system().lower()}-{bitness}bits"
     runner_build_dir = test_relpath("runner", build_dir)
     runner_exe = os.path.join(runner_build_dir, test_runner_binary())
+    barebones_runner_exe = os.path.join(
+        runner_build_dir, barebones_test_runner_binary()
+    )
     use_ninja = False
 
     if platform.system() != "Windows":
@@ -353,7 +372,7 @@ def build_test_runner(bitness: int) -> str:
         subprocess.run(cmake_args, cwd=runner_build_dir, check=True)
 
     subprocess.run(["cmake", "--build", "."], cwd=runner_build_dir, check=True)
-    return runner_exe
+    return barebones_runner_exe, runner_exe
 
 
 def main() -> int:
@@ -370,6 +389,8 @@ def main() -> int:
                              "'test-cases' in the same directory")
     parser.add_argument("--test-runner",
                         help="The test runner binary to invoke")
+    parser.add_argument("--barebones-test-runner",
+                        help="The barebones test runner binary to invoke")
     parser.add_argument("--binary-directory",
                         default=test_relpath("bin"),
                         help="The directory to store intermediate files in, "
@@ -379,6 +400,8 @@ def main() -> int:
                         help="uACPI build bitness")
     parser.add_argument("--large", action="store_true",
                         help="Run the large test suite as well")
+    parser.add_argument("--barebones", action="store_true",
+                        help="Run the barebones test suite as well")
     parser.add_argument("--parallelism", type=int,
                         default=os.cpu_count() or 1,
                         help="Number of test runners to run in parallel")
@@ -387,8 +410,15 @@ def main() -> int:
     test_compiler = args.asl_compiler
     test_dir = args.test_dir
     test_runner = args.test_runner
-    if test_runner is None:
-        test_runner = build_test_runner(args.bitness)
+    bare_test_runner = args.barebones_test_runner
+
+    if test_runner is None or (args.barebones and bare_test_runner is None):
+        bare_runner_default, runner_default = build_test_runner(args.bitness)
+
+        if bare_test_runner is None:
+            bare_test_runner = bare_runner_default
+        if test_runner is None:
+            test_runner = runner_default
 
     ret = run_resource_tests(test_runner)
     if ret != 0:
@@ -417,6 +447,15 @@ def main() -> int:
 
         with TestHeaderFooter("Large AML Tests"):
             ret = run_tests(large_test_cases, test_runner, args.parallelism)
+
+    if ret and args.barebones:
+        bare_cases: List[TestCase] = [
+            BarebonesTestCase("basic-operation"),
+            BarebonesTestCase("table-installation"),
+        ]
+
+        with TestHeaderFooter("Barebones Mode Tests"):
+            ret = run_tests(bare_cases, bare_test_runner, args.parallelism)
 
     sys.exit(not ret)
 
