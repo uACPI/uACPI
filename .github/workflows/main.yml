@@ -61,7 +61,7 @@ jobs:
           cmake --build .
 
       - name: Run tests (64-bit)
-        run: python3 ${{ github.workspace }}/tests/run_tests.py --bitness=64 --large
+        run: python3 ${{ github.workspace }}/tests/run_tests.py --bitness=64 --large --barebones
 
       # MacOS doesn't want to compile i386 (at least easily) so just ignore it:
       #     ld: warning: The i386 architecture is deprecated for macOS
@@ -69,4 +69,4 @@ jobs:
       #     clang: error: linker command failed with exit code 1 (use -v to see invocation)
       - if: ${{ matrix.os != 'macos-latest' }}
         name: Run tests (32-bit)
-        run: python3 ${{ github.workspace }}/tests/run_tests.py --bitness=32 --large
+        run: python3 ${{ github.workspace }}/tests/run_tests.py --bitness=32 --large --barebones
