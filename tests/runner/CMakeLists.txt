@@ -15,19 +15,71 @@ foreach(CONF_TYPE ${CMAKE_CONFIGURATION_TYPES})
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONF_TYPE} ${CMAKE_BINARY_DIR})
 endforeach(CONF_TYPE ${CMAKE_CONFIGURATION_TYPES})
 
-add_executable(
+macro (define_test_runner NAME)
+    message("ADDING EXEC ${NAME} ${NAME}.cpp ${ARGN} ${UACPI_SOURCES}")
+
+    add_executable(
+        ${NAME}
+        ${ARGN}
+    )
+    target_sources(
+        ${NAME}
+        PRIVATE
+        ${UACPI_SOURCES}
+    )
+
+    target_include_directories(
+        ${NAME}
+        PRIVATE
+        ${UACPI_INCLUDES}
+    )
+
+    if (MSVC)
+        # Address sanitizer on MSVC depends on a dynamic library that is not present in
+        # PATH by default. Lets just not enable it here.
+        target_compile_options(
+            ${NAME}
+            PRIVATE
+            /W3 /WX
+            /wd4200 /wd4267 /wd4244
+        )
+    else ()
+        target_compile_options(
+            ${NAME}
+            PRIVATE
+            -fsanitize=address,undefined -g3 -Wall -Wextra -Werror
+        )
+        target_link_options(
+            ${NAME}
+            PRIVATE
+            -fsanitize=address,undefined -g3
+        )
+        add_compile_options(
+            $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
+        )
+    endif ()
+endmacro ()
+
+define_test_runner(
     test-runner
     test_runner.cpp
     helpers.cpp
     interface_impl.cpp
     resource_tests.cpp
     api_tests.cpp
-    ${UACPI_SOURCES}
 )
-target_include_directories(
-    test-runner
+find_package(Threads REQUIRED)
+target_link_libraries(test-runner PRIVATE Threads::Threads)
+
+define_test_runner(
+    barebones-test-runner
+    helpers.cpp
+    barebones_runner.cpp
+)
+target_compile_definitions(
+    barebones-test-runner
     PRIVATE
-    ${UACPI_INCLUDES}
+    -DUACPI_BAREBONES_MODE
 )
 
 if (NOT REDUCED_HARDWARE_BUILD)
@@ -102,31 +154,3 @@ if (BUILTIN_STRING)
         -DUACPI_USE_BUILTIN_STRING
     )
 endif ()
-
-if (MSVC)
-    # Address sanitizer on MSVC depends on a dynamic library that is not present in
-    # PATH by default. Lets just not enable it here.
-    target_compile_options(
-        test-runner
-        PRIVATE
-        /W3 /WX
-        /wd4200 /wd4267 /wd4244
-    )
-else ()
-    target_compile_options(
-        test-runner
-        PRIVATE
-        -fsanitize=address,undefined -g3 -Wall -Wextra -Werror
-    )
-    target_link_options(
-        test-runner
-        PRIVATE
-        -fsanitize=address,undefined -g3
-    )
-    add_compile_options(
-        $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
-    )
-endif ()
-
-find_package(Threads REQUIRED)
-target_link_libraries(test-runner PRIVATE Threads::Threads)
