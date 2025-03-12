@@ -290,7 +290,11 @@ static void run_test(
 {
     acpi_rsdp rsdp {};
 
-    auto *xsdt = make_xsdt(rsdp, dsdt_path, ssdt_paths);
+    std::vector<path_or_data> ssdts(ssdt_paths.size());
+    for (size_t i = 0; i < ssdt_paths.size(); i++)
+        ssdts[i] = ssdt_paths[i];
+
+    auto *xsdt = make_xsdt(rsdp, dsdt_path, ssdts);
     auto cleanup = ScopeGuard(
         [&xsdt, &ssdt_paths] {
             uacpi_state_reset();
