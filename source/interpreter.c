@@ -1412,7 +1412,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
     uacpi_table table;
     uacpi_control_method *method;
     uacpi_object *src;
-    struct acpi_sdt_hdr *src_table;
+    struct acpi_sdt_hdr *src_table = UACPI_NULL;
     void *table_buffer;
     uacpi_size declared_size;
     uacpi_bool unmap_src = UACPI_FALSE;

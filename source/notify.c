@@ -193,7 +193,7 @@ uacpi_status uacpi_uninstall_notify_handler(
     uacpi_status ret;
     uacpi_object *obj;
     uacpi_handlers *handlers;
-    uacpi_device_notify_handler *containing, *prev_handler;
+    uacpi_device_notify_handler *prev_handler, *containing = UACPI_NULL;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
