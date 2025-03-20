@@ -332,7 +332,7 @@ uacpi_status uacpi_initialize(uacpi_u64 flags)
     if (uacpi_unlikely_error(ret))
         goto out_fatal_error;
 
-    ret = uacpi_ininitialize_registers();
+    ret = uacpi_initialize_registers();
     if (uacpi_unlikely_error(ret))
         return ret;
 

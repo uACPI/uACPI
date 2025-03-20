@@ -453,7 +453,7 @@ static const struct register_field g_fields[UACPI_REGISTER_FIELD_MAX + 1] = {
     },
 };
 
-uacpi_status uacpi_ininitialize_registers(void)
+uacpi_status uacpi_initialize_registers(void)
 {
     g_reg_lock = uacpi_kernel_create_spinlock();
     if (uacpi_unlikely(g_reg_lock == UACPI_NULL))
