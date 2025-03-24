@@ -121,7 +121,7 @@ static uacpi_status map_one(
     if (spec->kind == REGISTER_KIND_GAS) {
         struct acpi_gas *gas = spec->accessors[idx];
 
-        if (gas->address == 0) {
+        if (gas == UACPI_NULL || gas->address == 0) {
             mapping->states[idx] = REGISTER_MAPPING_STATE_NOT_NEEDED;
             return ret;
         }
