@@ -595,6 +595,11 @@ static uacpi_status resolve_name_string(
 
                 // Create the node and link to parent but don't install YET
                 cur_node = uacpi_namespace_node_alloc(name);
+                if (uacpi_unlikely(cur_node == UACPI_NULL)) {
+                    ret = UACPI_STATUS_OUT_OF_MEMORY;
+                    goto out;
+                }
+
                 cur_node->parent = parent;
             }
             break;
