@@ -663,7 +663,7 @@ static uacpi_status table_install_physical_with_origin_unlocked(
         return ret;
 
     if (uacpi_unlikely(hdr.length < sizeof(struct acpi_sdt_hdr))) {
-        uacpi_error("invalid table '%.4s' (0x016%"UACPI_PRIX64") size: %u\n",
+        uacpi_error("invalid table '%.4s' (0x%016"UACPI_PRIX64") size: %u\n",
                     hdr.signature, UACPI_FMT64(phys), hdr.length);
         return UACPI_STATUS_INVALID_TABLE_LENGTH;
     }
@@ -692,7 +692,7 @@ static uacpi_status table_install_physical_with_origin_unlocked(
             break;
         case UACPI_TABLE_INSTALLATION_DISPOSITON_DENY:
             uacpi_info(
-                "table '%.4s' (0x016%"UACPI_PRIX64") installation denied "
+                "table '%.4s' (0x%016"UACPI_PRIX64") installation denied "
                 "by host\n", hdr.signature, UACPI_FMT64(phys)
             );
             ret = UACPI_STATUS_DENIED;
@@ -700,7 +700,7 @@ static uacpi_status table_install_physical_with_origin_unlocked(
 
         default:
             uacpi_info(
-                "table '%.4s' (0x016%"UACPI_PRIX64") installation "
+                "table '%.4s' (0x%016"UACPI_PRIX64") installation "
                 "overridden by host\n", hdr.signature, UACPI_FMT64(phys)
             );
 
