@@ -211,7 +211,7 @@ typedef struct uacpi_resource_fixed_io {
 #define UACPI_CONSUMER 1
 
 // decode_type
-#define UACPI_POISITIVE_DECODE 0
+#define UACPI_POSITIVE_DECODE 0
 #define UACPI_SUBTRACTIVE_DECODE 1
 
 // fixed_min_address & fixed_max_address
