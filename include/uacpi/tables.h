@@ -58,6 +58,15 @@ uacpi_status uacpi_table_load(uacpi_size index);
 /*
  * Helpers for finding tables.
  *
+ * for find_by_signature:
+ *     'signature' is an array of 4 characters, a null terminator is not
+ *     necessary and can be omitted (especially useful for non-C language
+ *     bindings)
+ *
+ * 'out_table' is a pointer to a caller allocated uacpi_table structure that
+ * receives the table pointer & its internal index in case the call was
+ * successful.
+ *
  * NOTE:
  * The returned table's reference count is incremented by 1, which keeps its
  * mapping alive forever unless uacpi_table_unref() is called for this table
