@@ -9,6 +9,8 @@
 #include "uacpi_types.h"
 #else
 
+#include <stddef.h>
+
 #ifdef __WATCOMC__
 
 #define uintptr_t unsigned int *
@@ -19,7 +21,6 @@
 #define true 1
 
 typedef int bool;
-typedef int size_t;
 
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
@@ -35,7 +36,6 @@ typedef signed long long int64_t;
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stddef.h>
 
 #endif
 

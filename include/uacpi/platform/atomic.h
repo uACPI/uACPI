@@ -86,6 +86,154 @@ UACPI_MAKE_MSVC_CMPXCHG(16, short, 16)
 #define uacpi_atomic_dec16(ptr) UACPI_MSVC_ATOMIC_DEC(ptr, short, 16)
 #define uacpi_atomic_dec32(ptr) UACPI_MSVC_ATOMIC_DEC(ptr, long,)
 #define uacpi_atomic_dec64(ptr) UACPI_MSVC_ATOMIC_DEC(ptr, __int64, 64)
+#elif __WATCOMC__
+
+int uacpi_atomic_cmpxchg16(void *ptr, short *expected, short desired);
+#pragma aux uacpi_atomic_cmpxchg16 =\
+    "mov edx,eax" \
+    "xchg ax,[esi]" \
+	"mov [edi],ax" \
+	"cmp ax,dx" \
+	"jne fail" \
+	"mov eax,1" \
+	"jmp done" \
+	"fail: "\
+	"xor eax,eax" \
+	"done: " \
+    __parm [__esi] [__edi] [__ax] \
+    __value [__eax] \
+    __modify [__edx]
+
+int uacpi_atomic_cmpxchg32(void *ptr, int *expected, int desired);
+#pragma aux uacpi_atomic_cmpxchg32 =\
+    "mov edx,eax" \
+    "xchg eax,[esi]" \
+	"mov [edi],eax" \
+	"cmp eax,edx" \
+	"jne fail" \
+	"mov eax,1" \
+	"jmp done" \
+	"fail: "\
+	"xor eax,eax" \
+	"done: " \
+    __parm [__esi] [__edi] [__eax] \
+    __value [__eax] \
+    __modify [__edx]
+
+int uacpi_atomic_cmpxchg64(void *ptr, long long *expected, long long desired);
+#pragma aux uacpi_atomic_cmpxchg64 =\
+    "mov ebx,eax" \
+	"mov ecx,edx" \
+    "xchg eax,[esi]" \
+    "xchg edx,[esi+4]" \
+	"mov [edi],eax" \
+	"mov [edi+4],edx" \
+	"cmp eax,ebx" \
+	"jne fail" \
+	"cmp edx,ecx" \
+	"jne fail" \
+	"mov eax,1" \
+	"jmp done" \
+	"fail: "\
+	"xor eax,eax" \
+	"done: " \
+    __parm [__esi] [__edi] [__edx __eax] \
+    __value [__eax] \
+    __modify [__ebx __ecx]
+
+
+char uacpi_atomic_load8(void *ptr);
+#pragma aux uacpi_atomic_load8 =\
+	"mov al,[esi]" \
+    __parm [__esi] \
+    __value [__al]
+
+short uacpi_atomic_load16(void *ptr);
+#pragma aux uacpi_atomic_load16 =\
+	"mov ax,[esi]" \
+    __parm [__esi] \
+    __value [__ax]
+
+int uacpi_atomic_load32(void *ptr);
+#pragma aux uacpi_atomic_load32 =\
+	"mov eax,[esi]" \
+    __parm [__esi] \
+    __value [__eax]
+
+long long uacpi_atomic_load64(void *ptr);
+#pragma aux uacpi_atomic_load64 =\
+	"mov eax,[esi]" \
+	"mov edx,[esi+4]" \
+    __parm [__esi] \
+    __value [__edx __eax]
+
+void uacpi_atomic_store8(void *ptr, char val);
+#pragma aux uacpi_atomic_store8 =\
+	"mov [esi],al" \
+    __parm [__esi] [__al]
+
+void uacpi_atomic_store16(void *ptr, short val);
+#pragma aux uacpi_atomic_store16 =\
+	"mov [esi],ax" \
+    __parm [__esi] [__ax]
+
+void uacpi_atomic_store32(void *ptr, int val);
+#pragma aux uacpi_atomic_store32 =\
+	"mov [esi],eax" \
+    __parm [__esi] [__eax]
+
+void uacpi_atomic_store64(void *ptr, long long val);
+#pragma aux uacpi_atomic_store64 =\
+	"mov [esi],eax" \
+	"mov [esi+4],edx" \
+    __parm [__esi] [__edx __eax]
+
+short uacpi_atomic_inc16(void *ptr);
+#pragma aux uacpi_atomic_inc16 =\
+    "lock add word ptr [esi],1" \
+	"mov ax,[esi]" \
+    __parm [__esi] \
+    __value [__ax]
+
+int uacpi_atomic_inc32(void *ptr);
+#pragma aux uacpi_atomic_inc32 =\
+    "lock add dword ptr [esi],1" \
+	"mov eax,[esi]" \
+    __parm [__esi] \
+    __value [__eax]
+
+long long uacpi_atomic_inc64(void *ptr);
+#pragma aux uacpi_atomic_inc64 =\
+    "lock add dword ptr [esi],1" \
+    "lock adc dword ptr [esi+4],0" \
+	"mov eax,[esi]" \
+	"mov edx,[esi+4]" \
+    __parm [__esi] \
+    __value [__edx __eax]
+
+short uacpi_atomic_dec16(void *ptr);
+#pragma aux uacpi_atomic_dec16 =\
+    "lock sub word ptr [esi],1" \
+	"mov ax,[esi]" \
+    __parm [__esi] \
+    __value [__ax]
+
+int uacpi_atomic_dec32(void *ptr);
+#pragma aux uacpi_atomic_dec32 =\
+    "lock sub dword ptr [esi],1" \
+	"mov eax,[esi]" \
+    __parm [__esi] \
+    __value [__eax]
+
+long long uacpi_atomic_dec64(void *ptr);
+#pragma aux uacpi_atomic_dec64 =\
+    "lock sub dword ptr [esi],1" \
+    "lock sbb dword ptr [esi+4],0" \
+	"mov eax,[esi]" \
+	"mov edx,[esi+4]" \
+    __parm [__esi] \
+    __value [__edx __eax]
+
 #else
 
 #define UACPI_DO_CMPXCHG(ptr, expected, desired)           \
