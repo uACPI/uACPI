@@ -6,7 +6,11 @@
 #define UACPI_STATIC_ASSERT _Static_assert
 #endif
 
+#ifdef __WATCOMC__
+#define UACPI_BUILD_BUG_ON_WITH_MSG(expr, msg) 
+#else
 #define UACPI_BUILD_BUG_ON_WITH_MSG(expr, msg) UACPI_STATIC_ASSERT(!(expr), msg)
+#endif
 
 #define UACPI_BUILD_BUG_ON(expr) \
     UACPI_BUILD_BUG_ON_WITH_MSG(expr, "BUILD BUG: " #expr " evaluated to true")

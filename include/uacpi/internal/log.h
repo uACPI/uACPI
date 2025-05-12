@@ -4,6 +4,15 @@
 #include <uacpi/internal/context.h>
 #include <uacpi/log.h>
 
+#ifdef __WATCOMC__
+#define uacpi_debug(...)
+#define uacpi_trace(...)
+#define uacpi_info(...)
+#define uacpi_warn(...)
+#define uacpi_error(...)
+#define uacpi_log_lvl(lvl, ...)
+#else
+
 #ifdef UACPI_FORMATTED_LOGGING
 #define uacpi_log uacpi_kernel_log
 #else
@@ -19,5 +28,7 @@ void uacpi_log(uacpi_log_level, const uacpi_char*, ...);
 #define uacpi_info(...)  uacpi_log_lvl(UACPI_LOG_INFO, __VA_ARGS__)
 #define uacpi_warn(...)  uacpi_log_lvl(UACPI_LOG_WARN, __VA_ARGS__)
 #define uacpi_error(...) uacpi_log_lvl(UACPI_LOG_ERROR, __VA_ARGS__)
+
+#endif
 
 void uacpi_logger_initialize(void);

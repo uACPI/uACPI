@@ -26,8 +26,10 @@ void uacpi_context_set_log_level(uacpi_log_level lvl)
 
 void uacpi_logger_initialize(void)
 {
+#ifndef __WATCOMC__
     if (g_uacpi_rt_ctx.log_level == 0)
         uacpi_context_set_log_level(UACPI_DEFAULT_LOG_LEVEL);
+#endif
 
     static uacpi_bool version_printed = UACPI_FALSE;
     if (!version_printed) {

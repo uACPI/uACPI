@@ -98,14 +98,14 @@ static void do_misaligned_buffer_read(
     const uacpi_buffer_field *field, uacpi_u8 *dst
 )
 {
-    struct bit_span src_span = {
-        .index = field->bit_index,
-        .length = field->bit_length,
-        .const_data = field->backing->data,
-    };
-    struct bit_span dst_span = {
-        .data = dst,
-    };
+    struct bit_span src_span;
+    struct bit_span dst_span;
+
+    src_span.index = field->bit_index;
+    src_span.length = field->bit_length;
+    src_span.const_data = field->backing->data;
+
+    dst_span.data = dst;
 
     dst_span.length = uacpi_round_up_bits_to_bytes(field->bit_length) * 8;
     bit_copy(&dst_span, &src_span);
@@ -133,15 +133,15 @@ static void do_write_misaligned_buffer_field(
     const void *src, uacpi_size size
 )
 {
-    struct bit_span src_span = {
-        .length = size * 8,
-        .const_data = src,
-    };
-    struct bit_span dst_span = {
-        .index = field->bit_index,
-        .length = field->bit_length,
-        .data = field->backing->data,
-    };
+    struct bit_span src_span;
+    struct bit_span dst_span;
+
+    src_span.length = size * 8;
+    src_span.const_data = src;
+
+    dst_span.index = field->bit_index;
+    dst_span.length = field->bit_length;
+    dst_span.data = field->backing->data;
 
     bit_copy(&dst_span, &src_span);
 }
@@ -244,8 +244,6 @@ out:
     return ret;
 }
 
-#define OPREGION_IO_U64(x) (union uacpi_opregion_io_data) { .integer = x }
-
 #define SERIAL_HEADER_SIZE 2
 #define IPMI_DATA_SIZE 64
 
@@ -321,6 +319,7 @@ static uacpi_status handle_special_field(
     uacpi_operation_region *region;
     uacpi_u64 in_out;
     uacpi_data_view wtr_buffer;
+    union uacpi_opregion_io_data io_tmp;
 
     *did_handle = UACPI_FALSE;
 
@@ -347,7 +346,8 @@ static uacpi_status handle_special_field(
             );
         }
 
-        ret = access_field_unit(field, 0, op, OPREGION_IO_U64(&in_out));
+		io_tmp.integer = &in_out;
+        ret = access_field_unit(field, 0, op, io_tmp);
         if (uacpi_unlikely_error(ret))
             goto out_handled;
 
@@ -386,11 +386,11 @@ do_wtr:
     uacpi_memcpy_zerout(
         wtr_buffer.data, buf.const_data, wtr_buffer.length, buf.length
     );
+	
+	io_tmp.buffer = wtr_buffer;
     ret = access_field_unit(
         field, field->byte_offset,
-        op, (union uacpi_opregion_io_data) {
-            .buffer = wtr_buffer,
-        }
+        op, io_tmp
     );
     if (uacpi_unlikely_error(ret)) {
         uacpi_free(wtr_buffer.data, wtr_buffer.length);
@@ -415,16 +415,18 @@ static uacpi_status do_read_misaligned_field_unit(
     uacpi_u32 byte_offset = field->byte_offset;
     uacpi_u32 bits_left = field->bit_length;
     uacpi_u8 width_access_bits = field->access_width_bytes * 8;
+    struct bit_span src_span;
+    struct bit_span dst_span;
+    union uacpi_opregion_io_data io_tmp;
 
-    struct bit_span src_span = {
-        .data = (uacpi_u8*)&out,
-        .index = field->bit_offset_within_first_byte,
-    };
-    struct bit_span dst_span = {
-        .data = dst,
-        .index = 0,
-        .length = size * 8
-    };
+    src_span.data = (uacpi_u8*)&out;
+    src_span.index = field->bit_offset_within_first_byte;
+
+    dst_span.data = dst;
+    dst_span.index = 0;
+    dst_span.length = size * 8;
+
+    io_tmp.integer = &out;
 
     reads_to_do = UACPI_ALIGN_UP(
         field->bit_offset_within_first_byte + field->bit_length,
@@ -438,9 +440,10 @@ static uacpi_status do_read_misaligned_field_unit(
             bits_left, width_access_bits - src_span.index
         );
 
+
         ret = access_field_unit(
             field, byte_offset, UACPI_REGION_OP_READ,
-            OPREGION_IO_U64(&out)
+            io_tmp
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -464,12 +467,14 @@ uacpi_status uacpi_read_field_unit(
     uacpi_status ret;
     uacpi_u32 field_byte_length;
     uacpi_bool did_handle;
+    uacpi_data_view view;
+    union uacpi_opregion_io_data io_tmp;
+
+    view.data = dst;
+    view.length = size;
 
     ret = handle_special_field(
-        field, (uacpi_data_view) {
-            .data = dst,
-            .length = size,
-        }, UACPI_REGION_OP_READ,
+        field, view, UACPI_REGION_OP_READ,
         wtr_response, &did_handle
     );
     if (did_handle)
@@ -488,9 +493,11 @@ uacpi_status uacpi_read_field_unit(
     {
         uacpi_u64 out;
 
+		io_tmp.integer = &out;
+
         ret = access_field_unit(
             field, field->byte_offset, UACPI_REGION_OP_READ,
-            OPREGION_IO_U64(&out)
+            io_tmp
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -514,16 +521,18 @@ static uacpi_status write_generic_field_unit(
     uacpi_u32 bits_left, byte_offset = field->byte_offset;
     uacpi_u8 width_access_bits = field->access_width_bytes * 8;
     uacpi_u64 in;
+    struct bit_span src_span;
+    struct bit_span dst_span;
+    union uacpi_opregion_io_data io_tmp;
 
-    struct bit_span src_span = {
-        .const_data = src,
-        .index = 0,
-        .length = size * 8
-    };
-    struct bit_span dst_span = {
-        .data = (uacpi_u8*)&in,
-        .index = field->bit_offset_within_first_byte,
-    };
+    src_span.const_data = src;
+    src_span.index = 0;
+    src_span.length = size * 8;
+
+    dst_span.data = (uacpi_u8*)&in;
+    dst_span.index = field->bit_offset_within_first_byte;
+
+    io_tmp.integer = &in;
 
     bits_left = field->bit_length;
 
@@ -538,7 +547,7 @@ static uacpi_status write_generic_field_unit(
             case UACPI_UPDATE_RULE_PRESERVE:
                 ret = access_field_unit(
                     field, byte_offset, UACPI_REGION_OP_READ,
-                    OPREGION_IO_U64(&in)
+                    io_tmp
                 );
                 if (uacpi_unlikely_error(ret))
                     return ret;
@@ -560,7 +569,7 @@ static uacpi_status write_generic_field_unit(
 
         ret = access_field_unit(
             field, byte_offset, UACPI_REGION_OP_WRITE,
-            OPREGION_IO_U64(&in)
+            io_tmp
         );
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -580,12 +589,13 @@ uacpi_status uacpi_write_field_unit(
 {
     uacpi_status ret;
     uacpi_bool did_handle;
+    uacpi_data_view view;
+
+    view.const_data = src;
+    view.length = size;
 
     ret = handle_special_field(
-        field, (uacpi_data_view) {
-            .const_data = src,
-            .length = size,
-        }, UACPI_REGION_OP_WRITE,
+        field, view, UACPI_REGION_OP_WRITE,
         wtr_response, &did_handle
     );
     if (did_handle)

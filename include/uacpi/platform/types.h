@@ -9,9 +9,36 @@
 #include "uacpi_types.h"
 #else
 
+#ifdef __WATCOMC__
+
+#define uintptr_t unsigned int *
+#ifndef NULL
+#define NULL 0
+#endif
+#define false 0
+#define true 1
+
+typedef int bool;
+typedef int size_t;
+
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
+
+typedef signed char int8_t;
+typedef signed short int16_t;
+typedef signed int int32_t;
+typedef signed long long int64_t;
+
+#else
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+
+#endif
+
 #include <stdarg.h>
 
 #include <uacpi/helpers.h>
@@ -45,6 +72,8 @@ typedef char uacpi_char;
 
 #define uacpi_offsetof offsetof
 
+#ifndef __WATCOMC__
+
 /*
  * We use unsignd long long for 64-bit number formatting because 64-bit types
  * don't have a standard way to format them. The inttypes.h header is not
@@ -56,6 +85,9 @@ UACPI_BUILD_BUG_ON_WITH_MSG(
     sizeof(unsigned long long) < 8,
     "unsigned long long must be at least 64 bits large as per C99"
 );
+
+#endif
+
 #define UACPI_PRIu64 "llu"
 #define UACPI_PRIx64 "llx"
 #define UACPI_PRIX64 "llX"

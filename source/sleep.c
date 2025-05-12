@@ -537,6 +537,7 @@ uacpi_status uacpi_reboot(void)
     uacpi_handle pci_dev = UACPI_NULL, io_handle = UACPI_NULL;
     struct acpi_fadt *fadt = &g_uacpi_rt_ctx.fadt;
     struct acpi_gas *reset_reg = &fadt->reset_reg;
+    uacpi_pci_address address;
 
     /*
      * Allow restarting earlier than namespace load so that the kernel can
@@ -564,12 +565,10 @@ uacpi_status uacpi_reboot(void)
         break;
     case UACPI_ADDRESS_SPACE_PCI_CONFIG: {
         // Bus is assumed to be 0 here
-        uacpi_pci_address address = {
-            .segment = 0,
-            .bus = 0,
-            .device = (reset_reg->address >> 32) & 0xFF,
-            .function = (reset_reg->address >> 16) & 0xFF,
-        };
+        address.segment = 0;
+        address.bus = 0;
+        address.device = (reset_reg->address >> 32) & 0xFF;
+        address.function = (reset_reg->address >> 16) & 0xFF;
 
         ret = uacpi_kernel_pci_device_open(address, &pci_dev);
         if (uacpi_unlikely_error(ret))

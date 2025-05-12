@@ -114,6 +114,7 @@ static uacpi_status map_one(
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
+    struct acpi_gas temp_gas;
 
     if (mapping->states[idx] != REGISTER_MAPPING_STATE_NONE)
         return ret;
@@ -133,11 +134,9 @@ static uacpi_status map_one(
             return ret;
         }
 
-        struct acpi_gas temp_gas = {
-            .address_space_id = UACPI_ADDRESS_SPACE_SYSTEM_IO,
-            .address = *(uacpi_u32*)spec->accessors[0],
-            .register_bit_width = spec->access_width * 8,
-        };
+        temp_gas.address_space_id = UACPI_ADDRESS_SPACE_SYSTEM_IO;
+        temp_gas.address = *(uacpi_u32*)spec->accessors[0];
+        temp_gas.register_bit_width = spec->access_width * 8;
 
         ret = uacpi_map_gas_noalloc(&temp_gas, &mapping->mappings[idx]);
     }

@@ -555,6 +555,7 @@ void uacpi_address_space_handler_unref(uacpi_address_space_handler *handler)
 static void free_op_region(uacpi_handle handle)
 {
     uacpi_operation_region *op_region = handle;
+    struct uacpi_table tbl;
 
     if (uacpi_unlikely(op_region->handler != UACPI_NULL)) {
         uacpi_warn(
@@ -568,9 +569,8 @@ static void free_op_region(uacpi_handle handle)
         uacpi_free(op_region->internal_buffer, op_region->length);
         break;
     case UACPI_ADDRESS_SPACE_TABLE_DATA:
-        uacpi_table_unref(
-            &(struct uacpi_table) { .index = op_region->table_idx }
-        );
+   	    tbl.index = op_region->table_idx;
+        uacpi_table_unref(&tbl);
         break;
     default:
         break;
@@ -1023,12 +1023,14 @@ uacpi_status uacpi_object_get_integer(uacpi_object *obj, uacpi_u64 *out)
 
 uacpi_status uacpi_object_assign_integer(uacpi_object *obj, uacpi_u64 value)
 {
+    uacpi_object tmp_obj;
+
     ENSURE_VALID_USER_OBJ(obj);
 
-    return uacpi_object_assign(obj, &(uacpi_object) {
-        .type = UACPI_OBJECT_INTEGER,
-        .integer = value,
-    }, UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+    tmp_obj.type = UACPI_OBJECT_INTEGER;
+    tmp_obj.integer = value;
+
+    return uacpi_object_assign(obj, &tmp_obj, UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
 }
 
 void uacpi_buffer_to_view(uacpi_buffer *buf, uacpi_data_view *out_view)
@@ -1100,11 +1102,10 @@ static uacpi_status uacpi_object_do_assign_buffer(
 )
 {
     uacpi_status ret;
-    uacpi_object tmp_obj = {
-        .type = type,
-    };
+    uacpi_object tmp_obj;
     uacpi_size dst_buf_size = in.length;
 
+    tmp_obj.type = type;
     ENSURE_VALID_USER_OBJ(obj);
 
     if (type == UACPI_OBJECT_STRING && (in.length == 0 ||
@@ -1218,10 +1219,12 @@ uacpi_object *uacpi_object_create_buffer(uacpi_data_view view)
 
 uacpi_object *uacpi_object_create_cstring(const uacpi_char *str)
 {
-    return uacpi_object_create_string((uacpi_data_view) {
-        .const_text = str,
-        .length = uacpi_strlen(str) + 1,
-    });
+    uacpi_data_view view;
+
+    view.const_text = str;
+    view.length = uacpi_strlen(str) + 1;
+
+    return uacpi_object_create_string(view);
 }
 
 uacpi_status uacpi_object_get_package(
@@ -1256,13 +1259,16 @@ uacpi_status uacpi_object_assign_reference(
 )
 {
     uacpi_status ret;
+    uacpi_object tmp_obj;
 
     ENSURE_VALID_USER_OBJ(obj);
     ENSURE_VALID_USER_OBJ(child);
 
+    tmp_obj.type = UACPI_OBJECT_UNINITIALIZED;
+
     // First clear out the object
     ret = uacpi_object_assign(
-        obj, &(uacpi_object) { .type = UACPI_OBJECT_UNINITIALIZED },
+        obj, &tmp_obj,
         UACPI_ASSIGN_BEHAVIOR_DEEP_COPY
     );
     if (uacpi_unlikely_error(ret))

@@ -958,13 +958,12 @@ uacpi_status uacpi_find_devices_at(
     uacpi_iteration_callback cb, void *user
 )
 {
+    struct device_find_ctx ctx;
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
-    struct device_find_ctx ctx = {
-        .target_hids = hids,
-        .user = user,
-        .cb = cb,
-    };
+    ctx.target_hids = hids;
+    ctx.user = user;
+    ctx.cb = cb;
 
     return uacpi_namespace_for_each_child(
         parent, find_one_device, UACPI_NULL, UACPI_OBJECT_DEVICE_BIT,
@@ -976,9 +975,15 @@ uacpi_status uacpi_find_devices(
     const uacpi_char *hid, uacpi_iteration_callback cb, void *user
 )
 {
+#ifdef __WATCOMC__
+    const uacpi_char *hids[2];
+    hids[0]	= hid;
+    hids[1]	= UACPI_NULL;
+#else
     const uacpi_char *hids[] = {
         hid, UACPI_NULL
     };
+#endif
 
     return uacpi_find_devices_at(uacpi_namespace_root(), hids, cb, user);
 }

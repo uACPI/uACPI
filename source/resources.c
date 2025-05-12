@@ -603,8 +603,8 @@ static uacpi_size aml_size_for_serial_connection(
 
 static const struct uacpi_resource_convert_instruction convert_irq_to_native[] = {
     OP(PACKED_ARRAY_16, AML_F(irq, irq_mask), NATIVE_F(irq, irqs),
-       ARG2(NATIVE_O(irq, num_irqs))),
-    OP(SKIP_IF_AML_SIZE_LESS_THAN, ARG0(3), IMM(6)),
+       .arg2 = NATIVE_O(irq, num_irqs)),
+    OP(SKIP_IF_AML_SIZE_LESS_THAN, .arg0 = 3, IMM(6)),
         OP(SET_TO_IMM, NATIVE_F(irq, length_kind),
            IMM(UACPI_RESOURCE_LENGTH_KIND_FULL)),
         OP(BIT_FIELD_1, AML_F(irq, flags), NATIVE_F(irq, triggering), IMM(0)),

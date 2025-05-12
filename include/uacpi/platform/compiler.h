@@ -20,6 +20,10 @@
         __pragma(pack(push, 1)) \
         decl;                   \
         __pragma(pack(pop))
+#elif __WATCOMC__
+    #pragma pack( __push, 1 )
+    #define UACPI_ALWAYS_INLINE
+    #define UACPI_PACKED(decl) decl;
 #else
     #define UACPI_ALWAYS_INLINE inline __attribute__((always_inline))
     #define UACPI_PACKED(decl) decl __attribute__((packed));
@@ -79,6 +83,8 @@
         #endif
     #elif defined(__GNUC__)
         #define UACPI_POINTER_SIZE __SIZEOF_POINTER__
+    #elif __WATCOMC__
+        #define UACPI_POINTER_SIZE 4
     #else
         #error Failed to detect pointer size
     #endif
