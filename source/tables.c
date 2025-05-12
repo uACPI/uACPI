@@ -83,8 +83,8 @@ static void dump_table_header(
 
         uacpi_info(
             "RSDP 0x%016"UACPI_PRIX64" %08X v%02X (%6.6s)\n",
-            UACPI_FMT64(phys_addr), rsdp->length, rsdp->revision,
-            rsdp->oemid
+            UACPI_FMT64(phys_addr), rsdp->revision >= 2 ? rsdp->length : 20,
+            rsdp->revision, rsdp->oemid
         );
         return;
     }
