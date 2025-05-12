@@ -937,12 +937,12 @@ uacpi_status uacpi_table_match(
 )
 {
     uacpi_status ret;
-    struct table_search_ctx ctx = {
-        .match_cb = cb,
-        .search_type = SEARCH_TYPE_MATCH,
-        .out_table = out_table,
-        .status = UACPI_STATUS_NOT_FOUND,
-    };
+    struct table_search_ctx ctx = { 0 };
+
+    ctx.match_cb = cb;
+    ctx.search_type = SEARCH_TYPE_MATCH;
+    ctx.out_table = out_table;
+    ctx.status = UACPI_STATUS_NOT_FOUND;
 
     ret = uacpi_for_each_table(base_idx, do_search_tables, &ctx);
     if (uacpi_unlikely_error(ret))
@@ -958,12 +958,12 @@ static uacpi_status find_table(
 )
 {
     uacpi_status ret;
-    struct table_search_ctx ctx = {
-        .id = id,
-        .out_table = out_table,
-        .search_type = SEARCH_TYPE_BY_ID,
-        .status = UACPI_STATUS_NOT_FOUND,
-    };
+    struct table_search_ctx ctx = { 0 };
+
+    ctx.id = id;
+    ctx.out_table = out_table;
+    ctx.search_type = SEARCH_TYPE_BY_ID;
+    ctx.status = UACPI_STATUS_NOT_FOUND;
 
     ret = uacpi_for_each_table(base_idx, do_search_tables, &ctx);
     if (uacpi_unlikely_error(ret))
@@ -976,16 +976,12 @@ uacpi_status uacpi_table_find_by_signature(
     const uacpi_char *signature_string, struct uacpi_table *out_table
 )
 {
-    struct uacpi_table_identifiers id = {
-        .signature = {
-            .text = {
-                signature_string[0],
-                signature_string[1],
-                signature_string[2],
-                signature_string[3]
-            }
-        }
-    };
+    struct uacpi_table_identifiers id = { 0 };
+
+    id.signature.text[0] = signature_string[0];
+    id.signature.text[1] = signature_string[1];
+    id.signature.text[2] = signature_string[2];
+    id.signature.text[3] = signature_string[3];
 
     ENSURE_TABLES_ONLINE();
 
@@ -1142,24 +1138,30 @@ uacpi_status uacpi_table_load(uacpi_size idx)
 
 void uacpi_table_mark_as_loaded(uacpi_size idx)
 {
-    table_ctl(idx, &(struct table_ctl_request) {
+    struct table_ctl_request req = {
         .type = TABLE_CTL_SET_FLAGS, .set = UACPI_TABLE_LOADED
-    });
+    };
+
+    table_ctl(idx, &req);
 }
 #endif // !UACPI_BAREBONES_MODE
 
 uacpi_status uacpi_table_ref(uacpi_table *tbl)
 {
-    return table_ctl(tbl->index, &(struct table_ctl_request) {
+    struct table_ctl_request req = {
         .type = TABLE_CTL_GET
-    });
+    };
+
+    return table_ctl(tbl->index, &req);
 }
 
 uacpi_status uacpi_table_unref(uacpi_table *tbl)
 {
-    return table_ctl(tbl->index, &(struct table_ctl_request) {
+    struct table_ctl_request req = {
         .type = TABLE_CTL_PUT
-    });
+    };
+
+    return table_ctl(tbl->index, &req);
 }
 
 uacpi_u16 fadt_version_sizes[] = {

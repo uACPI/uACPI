@@ -380,7 +380,7 @@ typedef struct uacpi_resource_gpio_connection {
     uacpi_u8 direction;
 
     union {
-        uacpi_interrupt_connection_flags interrupt;
+        uacpi_interrupt_connection_flags intr;
         uacpi_io_connection_flags io;
         uacpi_u16 type_specific;
     };

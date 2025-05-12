@@ -391,9 +391,11 @@ uacpi_status uacpi_eval_hid(uacpi_namespace_node *node, uacpi_id_string **out_id
 
         size += buf->size;
         if (uacpi_unlikely(buf->size == 0 || size < buf->size)) {
+            uacpi_object_name name = uacpi_namespace_node_name(node);
+
             uacpi_error(
                 "%.4s._HID: empty/invalid EISA ID string (%zu bytes)\n",
-                uacpi_namespace_node_name(node).text, buf->size
+                name.text, buf->size
             );
             ret = UACPI_STATUS_AML_BAD_ENCODING;
             break;
@@ -485,18 +487,22 @@ uacpi_status uacpi_eval_cid(
             uacpi_size buf_size = object->buffer->size;
 
             if (uacpi_unlikely(buf_size == 0)) {
+                uacpi_object_name name = uacpi_namespace_node_name(node);
+
                 uacpi_error(
                     "%.4s._CID: empty EISA ID string (sub-object %zu)\n",
-                    uacpi_namespace_node_name(node).text, i
+                    name.text, i
                 );
                 return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
             }
 
             size += buf_size;
             if (uacpi_unlikely(size < buf_size)) {
+                uacpi_object_name name = uacpi_namespace_node_name(node);
+
                 uacpi_error(
                     "%.4s._CID: buffer size overflow (+ %zu)\n",
-                    uacpi_namespace_node_name(node).text, buf_size
+                    name.text, buf_size
                 );
                 return UACPI_STATUS_AML_BAD_ENCODING;
             }
@@ -507,13 +513,16 @@ uacpi_status uacpi_eval_cid(
         case UACPI_OBJECT_INTEGER:
             size += PNP_ID_LENGTH;
             break;
-        default:
+        default: {
+            uacpi_object_name name = uacpi_namespace_node_name(node);
+
             uacpi_error(
                 "%.4s._CID: invalid package sub-object %zu type: %s\n",
-                uacpi_namespace_node_name(node).text, i,
+                name.text, i,
                 uacpi_object_type_to_string(object->type)
             );
             return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
+        }
         }
     }
 
@@ -672,9 +681,11 @@ uacpi_status uacpi_eval_uid(
     if (obj->type == UACPI_OBJECT_STRING) {
         size = obj->buffer->size;
         if (uacpi_unlikely(size == 0 || size > 0xE0000000)) {
+            uacpi_object_name name = uacpi_namespace_node_name(node);
+
             uacpi_error(
                 "invalid %.4s._UID string size: %u\n",
-                uacpi_namespace_node_name(node).text, size
+                name.text, size
             );
             ret = UACPI_STATUS_AML_BAD_ENCODING;
             goto out;
@@ -958,13 +969,13 @@ uacpi_status uacpi_find_devices_at(
     uacpi_iteration_callback cb, void *user
 )
 {
+    struct device_find_ctx ctx = { 0 };
+
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
-    struct device_find_ctx ctx = {
-        .target_hids = hids,
-        .user = user,
-        .cb = cb,
-    };
+    ctx.target_hids = hids;
+    ctx.user = user;
+    ctx.cb = cb;
 
     return uacpi_namespace_for_each_child(
         parent, find_one_device, UACPI_NULL, UACPI_OBJECT_DEVICE_BIT,
@@ -976,9 +987,11 @@ uacpi_status uacpi_find_devices(
     const uacpi_char *hid, uacpi_iteration_callback cb, void *user
 )
 {
-    const uacpi_char *hids[] = {
-        hid, UACPI_NULL
+    const uacpi_char *hids[2] = {
+        UACPI_NULL, UACPI_NULL
     };
+
+    hids[0] = hid;
 
     return uacpi_find_devices_at(uacpi_namespace_root(), hids, cb, user);
 }

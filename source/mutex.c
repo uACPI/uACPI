@@ -15,7 +15,7 @@
 #define GLOBAL_LOCK_OWNED_BIT 1
 #define GLOBAL_LOCK_OWNED (1 << GLOBAL_LOCK_OWNED_BIT)
 
-#define GLOBAL_LOCK_MASK 0b11u
+#define GLOBAL_LOCK_MASK 3u
 
 static uacpi_bool try_acquire_global_lock_from_firmware(uacpi_u32 *lock)
 {

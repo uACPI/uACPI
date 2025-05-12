@@ -567,11 +567,15 @@ static void free_op_region(uacpi_handle handle)
     case UACPI_ADDRESS_SPACE_PCC:
         uacpi_free(op_region->internal_buffer, op_region->length);
         break;
-    case UACPI_ADDRESS_SPACE_TABLE_DATA:
+    case UACPI_ADDRESS_SPACE_TABLE_DATA: {
+        struct uacpi_table table = { 0 };
+
+        table.index = op_region->table_idx;
         uacpi_table_unref(
-            &(struct uacpi_table) { .index = op_region->table_idx }
+            &table
         );
         break;
+    }
     default:
         break;
     }
@@ -1023,12 +1027,14 @@ uacpi_status uacpi_object_get_integer(uacpi_object *obj, uacpi_u64 *out)
 
 uacpi_status uacpi_object_assign_integer(uacpi_object *obj, uacpi_u64 value)
 {
+    uacpi_object object = { 0 };
+
     ENSURE_VALID_USER_OBJ(obj);
 
-    return uacpi_object_assign(obj, &(uacpi_object) {
-        .type = UACPI_OBJECT_INTEGER,
-        .integer = value,
-    }, UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+    object.type = UACPI_OBJECT_INTEGER;
+    object.integer = value;
+
+    return uacpi_object_assign(obj, &object, UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
 }
 
 void uacpi_buffer_to_view(uacpi_buffer *buf, uacpi_data_view *out_view)
@@ -1100,10 +1106,10 @@ static uacpi_status uacpi_object_do_assign_buffer(
 )
 {
     uacpi_status ret;
-    uacpi_object tmp_obj = {
-        .type = type,
-    };
+    uacpi_object tmp_obj = { 0 };
     uacpi_size dst_buf_size = in.length;
+
+    tmp_obj.type = type;
 
     ENSURE_VALID_USER_OBJ(obj);
 
@@ -1218,10 +1224,11 @@ uacpi_object *uacpi_object_create_buffer(uacpi_data_view view)
 
 uacpi_object *uacpi_object_create_cstring(const uacpi_char *str)
 {
-    return uacpi_object_create_string((uacpi_data_view) {
-        .const_text = str,
-        .length = uacpi_strlen(str) + 1,
-    });
+    uacpi_data_view data_view = { 0 };
+
+    data_view.const_text = str;
+    data_view.length = uacpi_strlen(str) + 1;
+    return uacpi_object_create_string(data_view);
 }
 
 uacpi_status uacpi_object_get_package(
@@ -1256,13 +1263,15 @@ uacpi_status uacpi_object_assign_reference(
 )
 {
     uacpi_status ret;
+    uacpi_object object = { 0 };
 
     ENSURE_VALID_USER_OBJ(obj);
     ENSURE_VALID_USER_OBJ(child);
 
     // First clear out the object
+    object.type = UACPI_OBJECT_UNINITIALIZED;
     ret = uacpi_object_assign(
-        obj, &(uacpi_object) { .type = UACPI_OBJECT_UNINITIALIZED },
+        obj, &object,
         UACPI_ASSIGN_BEHAVIOR_DEEP_COPY
     );
     if (uacpi_unlikely_error(ret))
