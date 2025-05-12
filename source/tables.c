@@ -1,3 +1,4 @@
+#include <string.h>
 #include <uacpi/internal/tables.h>
 #include <uacpi/internal/utilities.h>
 #include <uacpi/internal/stdlib.h>
