@@ -86,6 +86,64 @@ UACPI_MAKE_MSVC_CMPXCHG(16, short, 16)
 #define uacpi_atomic_dec16(ptr) UACPI_MSVC_ATOMIC_DEC(ptr, short, 16)
 #define uacpi_atomic_dec32(ptr) UACPI_MSVC_ATOMIC_DEC(ptr, long,)
 #define uacpi_atomic_dec64(ptr) UACPI_MSVC_ATOMIC_DEC(ptr, __int64, 64)
+#elif defined(__WATCOMC__)
+// TODO: Use compiler intrinsics or inline ASM here
+
+#include <stdint.h>
+
+// mimic __atomic_compare_exchange_n that doesn't exist on OpenWatcom
+#define UACPI_MAKE_OWC_CMPXCHG(width, type)                       \
+    static inline int uacpi_do_atomic_cmpxchg##width(             \
+        volatile type *ptr, volatile type *expected, type desired \
+    )                                                             \
+    {                                                             \
+        type current;                                             \
+                                                                  \
+        current = *ptr;                                           \
+        if (current == *expected) {                               \
+            *ptr = desired;                                       \
+            return 0;                                             \
+        } else {                                                  \
+            *expected = current;                                  \
+        }                                                         \
+        return 1;                                                 \
+    }
+
+#define UACPI_OWC_CMPXCHG_INVOKE(ptr, expected, desired, width, type) \
+    uacpi_do_atomic_cmpxchg##width(                                   \
+        (volatile type*)ptr, (volatile type*)expected, desired        \
+    )
+
+UACPI_MAKE_OWC_CMPXCHG(64, int64_t)
+UACPI_MAKE_OWC_CMPXCHG(32, long)
+UACPI_MAKE_OWC_CMPXCHG(16, short)
+
+#define uacpi_atomic_cmpxchg16(ptr, expected, desired) \
+    UACPI_OWC_CMPXCHG_INVOKE(ptr, expected, desired, 16, short)
+
+#define uacpi_atomic_cmpxchg32(ptr, expected, desired) \
+    UACPI_OWC_CMPXCHG_INVOKE(ptr, expected, desired, 32, long)
+
+#define uacpi_atomic_cmpxchg64(ptr, expected, desired) \
+    UACPI_OWC_CMPXCHG_INVOKE(ptr, expected, desired, 64, int64_t)
+
+#define uacpi_atomic_load8(ptr) (*(ptr))
+#define uacpi_atomic_load16(ptr) (*(ptr))
+#define uacpi_atomic_load32(ptr) (*(ptr))
+#define uacpi_atomic_load64(ptr) (*(ptr))
+
+#define uacpi_atomic_store8(ptr, value) (*(ptr) = (value))
+#define uacpi_atomic_store16(ptr, value) (*(ptr) = (value))
+#define uacpi_atomic_store32(ptr, value) (*(ptr) = (value))
+#define uacpi_atomic_store64(ptr, value) (*(ptr) = (value))
+
+#define uacpi_atomic_inc16(ptr) (++*(ptr))
+#define uacpi_atomic_inc32(ptr) (++*(ptr))
+#define uacpi_atomic_inc64(ptr) (++*(ptr))
+
+#define uacpi_atomic_dec16(ptr) (--*(ptr))
+#define uacpi_atomic_dec32(ptr) (--*(ptr))
+#define uacpi_atomic_dec64(ptr) (--*(ptr))
 #else
 
 #define UACPI_DO_CMPXCHG(ptr, expected, desired)           \

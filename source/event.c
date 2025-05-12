@@ -422,6 +422,7 @@ static void async_run_gpe_handler(uacpi_handle opaque)
     switch (event->handler_type) {
     case GPE_HANDLER_TYPE_AML_HANDLER: {
         uacpi_object *method_obj;
+        uacpi_object_name name;
 
         method_obj = uacpi_namespace_node_get_object_typed(
             event->aml_handler, UACPI_OBJECT_METHOD_BIT
@@ -431,9 +432,10 @@ static void async_run_gpe_handler(uacpi_handle opaque)
             break;
         }
 
+        name = uacpi_namespace_node_name(event->aml_handler);
         uacpi_trace(
             "executing GPE(%02X) handler %.4s\n",
-            event->idx, uacpi_namespace_node_name(event->aml_handler).text
+            event->idx, name.text
         );
 
         ret = uacpi_execute_control_method(
@@ -1013,11 +1015,11 @@ static uacpi_status create_gpe_block(
     struct gpe_block *block;
     struct gpe_register *reg;
     struct gp_event *event;
-    struct acpi_gas tmp_gas = {
-        .address_space_id = address_space_id,
-        .register_bit_width = 8,
-    };
+    struct acpi_gas tmp_gas = { 0 };
     uacpi_size i, j;
+
+    tmp_gas.address_space_id = address_space_id;
+    tmp_gas.register_bit_width = 8;
 
     block = uacpi_kernel_alloc_zeroed(sizeof(*block));
     if (uacpi_unlikely(block == UACPI_NULL))
@@ -1158,10 +1160,10 @@ static struct gp_event *get_gpe(
     uacpi_namespace_node *gpe_device, uacpi_u16 idx
 )
 {
-    struct gpe_search_ctx ctx = {
-        .gpe_device = gpe_device,
-        .idx = idx,
-    };
+    struct gpe_search_ctx ctx = { 0 };
+
+    ctx.gpe_device = gpe_device;
+    ctx.idx = idx;
 
     for_each_gpe_block(do_find_gpe, &ctx);
     return ctx.out_event;
@@ -2055,10 +2057,10 @@ uacpi_status uacpi_uninstall_gpe_block(
 {
     uacpi_status ret;
     uacpi_bool is_dev;
-    struct gpe_search_ctx search_ctx = {
-        .idx = 0,
-        .gpe_device = gpe_device,
-    };
+    struct gpe_search_ctx search_ctx = { 0 };
+
+    search_ctx.idx = 0;
+    search_ctx.gpe_device = gpe_device;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 

@@ -146,6 +146,18 @@ uacpi_u8 uacpi_bit_scan_forward(uacpi_u64 value)
     return (uacpi_u8)index + 1;
 #endif
 
+#elif defined(__WATCOMC__)
+    // TODO: Use compiler intrinsics or inline ASM here
+    uacpi_u8 index;
+    uacpi_u64 mask = 1;
+
+    for (index = 1; index <= 64; index++, mask <<= 1) {
+        if (value & mask) {
+            return index;
+        }
+    }
+
+    return 0;
 #else
     return __builtin_ffsll(value);
 #endif
@@ -176,6 +188,18 @@ uacpi_u8 uacpi_bit_scan_backward(uacpi_u64 value)
     return (uacpi_u8)index + 33;
 #endif
 
+#elif defined(__WATCOMC__)
+    // TODO: Use compiler intrinsics or inline ASM here
+    uacpi_u8 index;
+    uacpi_u64 mask = (1ull << 63);
+
+    for (index = 64; index > 0; index--, mask >>= 1) {
+        if (value & mask) {
+            return index;
+        }
+    }
+
+    return 0;
 #else
     if (value == 0)
         return 0;
@@ -477,11 +501,11 @@ uacpi_i32 uacpi_vsnprintf(
     uacpi_va_list vlist
 )
 {
-    struct fmt_buf_state fb_state = {
-        .buffer = buffer,
-        .capacity = capacity,
-        .bytes_written = 0
-    };
+    struct fmt_buf_state fb_state = { 0 };
+
+    fb_state.buffer = buffer;
+    fb_state.capacity = capacity;
+    fb_state.bytes_written = 0;
 
     uacpi_u64 value;
     const uacpi_char *next_conversion;

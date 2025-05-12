@@ -1318,9 +1318,11 @@ static uacpi_status handle_load_table(struct execution_context *ctx)
      */
     if (item_array_size(items) == 12) {
         uacpi_size idx;
+        struct uacpi_table tmp_table = { 0 };
 
         idx = item_array_at(items, 2)->immediate;
-        uacpi_table_unref(&(struct uacpi_table) { .index = idx });
+        tmp_table.index = idx;
+        uacpi_table_unref(&tmp_table);
 
         /*
          * If this load failed, remove the target that was provided via
@@ -1681,9 +1683,9 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
      * bit 7: Reserved (must be 0)
      */
     raw_value = item_array_at(&op_ctx->items, i++)->immediate;
-    access_type = (raw_value >> 0) & 0b1111;
-    lock_rule   = (raw_value >> 4) & 0b1;
-    update_rule = (raw_value >> 5) & 0b11;
+    access_type = (raw_value >> 0) & 0xF;
+    lock_rule   = (raw_value >> 4) & 0x1;
+    update_rule = (raw_value >> 5) & 0x3;
 
     while (i < item_array_size(&op_ctx->items)) {
         struct item *item;
@@ -1804,7 +1806,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
         }
 
         // All other stuff
-        switch (item->immediate) {
+        switch ((int)item->immediate) {
         // ReservedField := 0x00 PkgLength
         case 0x00:
             length = get_field_length(item_array_at(&op_ctx->items, i++));
@@ -1818,8 +1820,8 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
         case 0x03:
             raw_value = item_array_at(&op_ctx->items, i++)->immediate;
 
-            access_type = raw_value & 0b1111;
-            access_attrib = (raw_value >> 6) & 0b11;
+            access_type = raw_value & 0xF;
+            access_attrib = (raw_value >> 6) & 0x3;
 
             raw_value = item_array_at(&op_ctx->items, i++)->immediate;
 
@@ -3198,7 +3200,7 @@ static uacpi_status handle_bcd(struct execution_context *ctx)
         do {
             i -= 4;
             dst *= 10;
-            dst += (src >> i) & 0b1111;
+            dst += (src >> i) & 0xF;
         } while (i);
     } else {
         while (src != 0) {
@@ -3449,14 +3451,14 @@ static uacpi_status parse_package_length(struct call_frame *frame,
 
     switch (marker_length) {
     case 1:
-        size = *data & 0b111111;
+        size = *data & 0x3F;
         break;
     case 2:
     case 3:
     case 4: {
         uacpi_u32 temp_byte = 0;
 
-        size = *data & 0b1111;
+        size = *data & 0xF;
         uacpi_memcpy(&temp_byte, data + 1, marker_length - 1);
 
         // marker_length - 1 is at most 3, so this shift is safe
@@ -3488,7 +3490,7 @@ static uacpi_status parse_package_length(struct call_frame *frame,
  */
 static void init_method_flags(uacpi_control_method *method, uacpi_u8 flags_byte)
 {
-    method->args = flags_byte & 0b111;
+    method->args = flags_byte & 0x7;
     method->is_serialized = (flags_byte >> 3) & 1;
     method->sync_level = flags_byte >> 4;
 }
@@ -3559,7 +3561,7 @@ static uacpi_status handle_create_mutex_or_event(struct execution_context *ctx)
 
         // bits 0-3: SyncLevel (0x00-0x0f), bits 4-7: Reserved (must be 0)
         dst->mutex->sync_level = item_array_at(&op_ctx->items, 1)->immediate;
-        dst->mutex->sync_level &= 0b1111;
+        dst->mutex->sync_level &= 0xF;
     } else {
         dst = item_array_at(&op_ctx->items, 1)->obj;
     }

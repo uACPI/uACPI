@@ -23,6 +23,19 @@ jobs:
 
       - name: Run mypy on the project
         run: mypy --disallow-incomplete-defs --no-implicit-optional tests/*.py tests/utilities/*.py tests/generated_test_cases/*.py
+  build-open-watcom:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - uses: open-watcom/setup-watcom@v0
+        with:
+          version: '2.0'
+      - name: Compile uACPI
+        run: owcc -b nt -march=i386 -Iinclude -c -std=c99 $(find source -name '*.c')
+
   build-and-run-tests:
     runs-on: ${{ matrix.os }}
 

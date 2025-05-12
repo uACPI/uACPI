@@ -879,13 +879,13 @@ convert_gpio_connection[] = {
     OP(LOAD_8_STORE, AML_F(gpio_connection, type), NATIVE_F(gpio_connection, type)),
     OP(SKIP_IF_NOT_EQUALS, ARG0(UACPI_GPIO_CONNECTION_INTERRUPT), IMM(5)),
         OP(BIT_FIELD_1, AML_F(gpio_connection, connection_flags),
-           NATIVE_F(gpio_connection, interrupt.triggering), IMM(0)),
+           NATIVE_F(gpio_connection, intr.triggering), IMM(0)),
         OP(BIT_FIELD_2, AML_F(gpio_connection, connection_flags),
-           NATIVE_F(gpio_connection, interrupt.polarity), IMM(1)),
+           NATIVE_F(gpio_connection, intr.polarity), IMM(1)),
         OP(BIT_FIELD_1, AML_F(gpio_connection, connection_flags),
-           NATIVE_F(gpio_connection, interrupt.sharing), IMM(3)),
+           NATIVE_F(gpio_connection, intr.sharing), IMM(3)),
         OP(BIT_FIELD_1, AML_F(gpio_connection, connection_flags),
-           NATIVE_F(gpio_connection, interrupt.wake_capability), IMM(4)),
+           NATIVE_F(gpio_connection, intr.wake_capability), IMM(4)),
         END(),
     OP(SKIP_IF_NOT_EQUALS, ARG0(UACPI_GPIO_CONNECTION_IO), IMM(3)),
         OP(BIT_FIELD_2, AML_F(gpio_connection, connection_flags),
@@ -1759,7 +1759,9 @@ static uacpi_iteration_decision do_aml_resource_to_native(
                 void *ptr;
                 uacpi_resource_source *source;
                 uacpi_resource_label *label;
-            } dst_name = { .ptr = dst };
+            } dst_name = { 0 };
+
+            dst_name.ptr = dst;
 
             /*
              * Check if the string is bounded by anything at the top. If not, we
@@ -2004,9 +2006,8 @@ uacpi_status uacpi_native_resources_from_aml(
     resources->length = ctx.size;
     resources->entries = UACPI_PTR_ADD(resources, sizeof(uacpi_resources));
 
-    ctx = (struct resource_conversion_ctx) {
-        .buf = resources->entries,
-    };
+    uacpi_memzero(&ctx, sizeof(ctx));
+    ctx.buf = resources->entries;
 
     ret = uacpi_for_each_aml_resource(aml_buffer, do_aml_resource_to_native, &ctx);
     if (uacpi_unlikely_error(ret)) {
@@ -2038,10 +2039,9 @@ uacpi_status uacpi_get_resource_from_buffer(
     if (uacpi_unlikely(resource == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
-    ctx = (struct resource_conversion_ctx) {
-        .buf = resource,
-        .just_one = UACPI_TRUE,
-    };
+    uacpi_memzero(&ctx, sizeof(ctx));
+    ctx.buf = resource;
+    ctx.just_one = UACPI_TRUE;
 
     ret = uacpi_for_each_aml_resource(aml_buffer, do_aml_resource_to_native, &ctx);
     if (uacpi_unlikely_error(ret)) {
@@ -2267,7 +2267,9 @@ static uacpi_iteration_decision do_native_resource_to_aml(
                 void *ptr;
                 uacpi_resource_source *source;
                 uacpi_resource_label *label;
-            } src_name = { .ptr = src };
+            } src_name = { 0 };
+
+            src_name.ptr = src;
 
             source_offset = base_aml_size_with_header + accumulator;
             dst_string = dst_base + source_offset;
@@ -2440,23 +2442,23 @@ static uacpi_iteration_decision do_native_resource_to_aml(
     }
 }
 
-#define INLINE_END_TAG &(uacpi_resource) { .type = UACPI_RESOURCE_TYPE_END_TAG }
-
 static uacpi_status native_resources_to_aml(
     uacpi_resources *native_resources, void *aml_buffer
 )
 {
     uacpi_status ret;
-    struct resource_conversion_ctx ctx = {
-        .buf = aml_buffer,
-    };
+    struct resource_conversion_ctx ctx = { 0 };
+
+    ctx.buf = aml_buffer;
 
     ret = uacpi_for_each_resource(
         native_resources, do_native_resource_to_aml, &ctx
     );
     if (ret == UACPI_STATUS_NO_RESOURCE_END_TAG) {
         // An end tag is always included
-        do_native_resource_to_aml(&ctx, INLINE_END_TAG);
+        uacpi_resource end_tag = { .type = UACPI_RESOURCE_TYPE_END_TAG };
+
+        do_native_resource_to_aml(&ctx, &end_tag);
         ret = UACPI_STATUS_OK;
     }
     if (uacpi_unlikely_error(ret))
@@ -2502,7 +2504,9 @@ uacpi_status uacpi_native_resources_to_aml(
     );
     if (ret == UACPI_STATUS_NO_RESOURCE_END_TAG) {
         // An end tag is always included
-        accumulate_aml_buffer_size(&ctx, INLINE_END_TAG);
+        uacpi_resource end_tag = { .type = UACPI_RESOURCE_TYPE_END_TAG };
+
+        accumulate_aml_buffer_size(&ctx, &end_tag);
         ret = UACPI_STATUS_OK;
     }
     if (uacpi_unlikely_error(ret))
