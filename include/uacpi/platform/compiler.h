@@ -11,6 +11,12 @@
 
 #define UACPI_ALIGN(x) __declspec(align(x))
 
+#ifdef __cplusplus
+#define UACPI_STATIC_ASSERT static_assert
+#else
+#define UACPI_STATIC_ASSERT _Static_assert
+#endif
+
 #ifdef _MSC_VER
     #include <intrin.h>
 
