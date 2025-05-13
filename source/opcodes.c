@@ -2,8 +2,8 @@
 
 #ifndef UACPI_BAREBONES_MODE
 
-#define UACPI_OP(opname, opcode, ...) \
-    { #opname, .decode_ops = __VA_ARGS__, .code = opcode },
+#define UACPI_OP(opname, opcode, props, ...) \
+    { #opname, .decode_ops = __VA_ARGS__, .properties = props, .code = opcode },
 
 #define UACPI_OUT_OF_LINE_OP(opname, opcode, out_of_line_buf, props) \
     {                                                                \
