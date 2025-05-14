@@ -587,18 +587,18 @@ static uacpi_size aml_size_for_serial_connection(
     uacpi_offsetof(struct acpi_resource_##short_aml_name, field)
 
 #define AML_F(short_aml_name, field) \
-    .aml_offset = AML_O(short_aml_name, field)
+    .f1.aml_offset = AML_O(short_aml_name, field)
 
 #define NATIVE_O(short_name, field) \
     uacpi_offsetof(uacpi_resource_##short_name, field)
 
 #define NATIVE_F(short_native_name, field) \
-    .native_offset = NATIVE_O(short_native_name, field)
+    .f2.native_offset = NATIVE_O(short_native_name, field)
 
-#define IMM(value) .imm = value
-#define ARG0(value) .arg0 = (value)
-#define ARG1(value) .arg1 = (value)
-#define ARG2(value) .arg2 = (value)
+#define IMM(value) .f3.imm = value
+#define ARG0(value) .f1.arg0 = (value)
+#define ARG1(value) .f2.arg1 = (value)
+#define ARG2(value) .f3.arg2 = (value)
 
 
 static const struct uacpi_resource_convert_instruction convert_irq_to_native[] = {
@@ -1578,7 +1578,7 @@ static uacpi_iteration_decision conditional_continue(
         uacpi_u8 bytes;                                                      \
                                                                              \
         bytes = 1 << (insn->code - UACPI_RESOURCE_CONVERT_OPCODE_FIELD_8);   \
-        accumulator = insn->imm == 0xFF ? 0 : accumulator + insn->imm;       \
+        accumulator = insn->f3.imm == 0xFF ? 0 : accumulator + insn->f3.imm; \
                                                                              \
         uacpi_memcpy(dst, src, bytes * UACPI_MAX(1, accumulator));           \
         accumulator = 0;                                                     \
@@ -1586,28 +1586,28 @@ static uacpi_iteration_decision conditional_continue(
     }                                                                        \
                                                                              \
     case UACPI_RESOURCE_CONVERT_OPCODE_SKIP_IF_AML_SIZE_LESS_THAN:           \
-        if (aml_size < insn->arg0)                                           \
-            pc += insn->imm;                                                 \
+        if (aml_size < insn->f1.arg0)                                        \
+            pc += insn->f3.imm;                                              \
         break;                                                               \
     case UACPI_RESOURCE_CONVERT_OPCODE_SKIP_IF_NOT_EQUALS:                   \
-        if (insn->arg0 != accumulator)                                       \
-            pc += insn->imm;                                                 \
+        if (insn->f1.arg0 != accumulator)                                    \
+            pc += insn->f3.imm;                                              \
         break;                                                               \
                                                                              \
     case UACPI_RESOURCE_CONVERT_OPCODE_SET_TO_IMM:                           \
-        uacpi_memcpy(dst, &insn->imm, sizeof(insn->imm));                    \
+        uacpi_memcpy(dst, &insn->f3.imm, sizeof(insn->f3.imm));              \
         break;                                                               \
                                                                              \
     case UACPI_RESOURCE_CONVERT_OPCODE_LOAD_IMM:                             \
-        accumulator = insn->imm;                                             \
+        accumulator = insn->f3.imm;                                          \
         break;                                                               \
                                                                              \
     case UACPI_RESOURCE_CONVERT_OPCODE_LOAD_8_STORE:                         \
         uacpi_memcpy_zerout(&accumulator, src, sizeof(accumulator), 1);      \
         uacpi_memcpy(dst, &accumulator, 1);                                  \
                                                                              \
-        if (insn->imm)                                                       \
-            accumulator *= insn->imm;                                        \
+        if (insn->f3.imm)                                                    \
+            accumulator *= insn->f3.imm;                                     \
         break;                                                               \
                                                                              \
     case UACPI_RESOURCE_CONVERT_OPCODE_LOAD_8_NATIVE:                        \
@@ -1701,8 +1701,8 @@ static uacpi_iteration_decision do_aml_resource_to_native(
     for (;;) {
         insn = &insns[pc++];
 
-        src = data + insn->aml_offset;
-        dst = NATIVE_OFFSET(resource, insn->native_offset);
+        src = data + insn->f1.aml_offset;
+        dst = NATIVE_OFFSET(resource, insn->f2.native_offset);
 
         switch (insn->code) {
         case UACPI_RESOURCE_CONVERT_OPCODE_PACKED_ARRAY_8:
@@ -1727,7 +1727,7 @@ static uacpi_iteration_decision do_aml_resource_to_native(
                 dst[j++] = i;
             }
 
-            uacpi_memcpy(NATIVE_OFFSET(resource, insn->arg2), &j, 1);
+            uacpi_memcpy(NATIVE_OFFSET(resource, insn->f3.arg2), &j, 1);
             break;
         }
 
@@ -1740,7 +1740,7 @@ static uacpi_iteration_decision do_aml_resource_to_native(
             mask = (insn->code - UACPI_RESOURCE_CONVERT_OPCODE_BIT_FIELD_1) + 1;
             mask = (1 << mask) - 1;
 
-            value = (*src >> insn->imm) & mask;
+            value = (*src >> insn->f3.imm) & mask;
             uacpi_memcpy(dst, &value, sizeof(value));
             break;
         }
@@ -1767,8 +1767,8 @@ static uacpi_iteration_decision do_aml_resource_to_native(
              * Check if the string is bounded by anything at the top. If not, we
              * just assume it ends at the end of the resource.
              */
-            if (insn->arg2) {
-                uacpi_memcpy_zerout(&max_offset, data + insn->arg2,
+            if (insn->f3.arg2) {
+                uacpi_memcpy_zerout(&max_offset, data + insn->f3.arg2,
                                     sizeof(max_offset), sizeof(uacpi_u16));
                 CHECK_AML_OFFSET(max_offset, "resource source");
             } else {
@@ -1847,7 +1847,7 @@ static uacpi_iteration_decision do_aml_resource_to_native(
             uacpi_memcpy(dst, &entry_count, sizeof(entry_count));
 
             // Set pin_table pointer
-            uacpi_memcpy(NATIVE_OFFSET(resource, insn->arg2),
+            uacpi_memcpy(NATIVE_OFFSET(resource, insn->f3.arg2),
                          &resource_end, sizeof(void*));
             break;
         }
@@ -1878,7 +1878,7 @@ static uacpi_iteration_decision do_aml_resource_to_native(
             native_dst = PTR_AT(resource_end, offset_from_end);
 
             uacpi_memcpy(native_dst, vendor_data, length);
-            uacpi_memcpy(NATIVE_OFFSET(resource, insn->arg2),
+            uacpi_memcpy(NATIVE_OFFSET(resource, insn->f3.arg2),
                          &native_dst, sizeof(void*));
             break;
         }
@@ -2226,8 +2226,8 @@ static uacpi_iteration_decision do_native_resource_to_aml(
     for (;;) {
         insn = &insns[pc++];
 
-        src = NATIVE_OFFSET(resource, insn->native_offset);
-        dst = dst_base + insn->aml_offset;
+        src = NATIVE_OFFSET(resource, insn->f2.native_offset);
+        dst = dst_base + insn->f1.aml_offset;
 
         switch (insn->code) {
         case UACPI_RESOURCE_CONVERT_OPCODE_PACKED_ARRAY_8:
@@ -2235,7 +2235,7 @@ static uacpi_iteration_decision do_native_resource_to_aml(
             uacpi_u8 i, *array_size, bytes = 1;
             uacpi_u16 mask = 0;
 
-            array_size = NATIVE_OFFSET(resource, insn->arg2);
+            array_size = NATIVE_OFFSET(resource, insn->f3.arg2);
             for (i = 0; i < *array_size; ++i)
                 mask |= 1 << src[i];
 
@@ -2250,7 +2250,7 @@ static uacpi_iteration_decision do_native_resource_to_aml(
         case UACPI_RESOURCE_CONVERT_OPCODE_BIT_FIELD_2:
         case UACPI_RESOURCE_CONVERT_OPCODE_BIT_FIELD_3:
         case UACPI_RESOURCE_CONVERT_OPCODE_BIT_FIELD_6:
-            *dst |= *src << insn->imm;
+            *dst |= *src << insn->f3.imm;
             break;
 
         case UACPI_RESOURCE_CONVERT_OPCODE_LOAD_AML_SIZE_32:
@@ -2274,7 +2274,7 @@ static uacpi_iteration_decision do_native_resource_to_aml(
             source_offset = base_aml_size_with_header + accumulator;
             dst_string = dst_base + source_offset;
 
-            if (insn->aml_offset)
+            if (insn->f1.aml_offset)
                 uacpi_memcpy(dst, &source_offset, sizeof(uacpi_u16));
 
             if (insn->code == UACPI_RESOURCE_CONVERT_OPCODE_RESOURCE_SOURCE &&
@@ -2334,7 +2334,7 @@ static uacpi_iteration_decision do_native_resource_to_aml(
             uacpi_u8 *vendor_data;
 
             // Read the vendor_data pointer
-            uacpi_memcpy(&vendor_data, NATIVE_OFFSET(resource, insn->arg2),
+            uacpi_memcpy(&vendor_data, NATIVE_OFFSET(resource, insn->f3.arg2),
                          sizeof(void*));
             uacpi_memcpy(&vendor_data_length, src, sizeof(uacpi_u16));
 
