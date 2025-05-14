@@ -450,10 +450,12 @@ uacpi_namespace_node *uacpi_namespace_node_find_sub_node(
     uacpi_object_name name
 )
 {
+    uacpi_namespace_node *node;
+
     if (parent == UACPI_NULL)
         parent = uacpi_namespace_root();
 
-    uacpi_namespace_node *node = parent->child;
+    node = parent->child;
 
     while (node) {
         if (node->name.id == name.id)

@@ -502,15 +502,14 @@ uacpi_i32 uacpi_vsnprintf(
 )
 {
     struct fmt_buf_state fb_state = { 0 };
-
-    fb_state.buffer = buffer;
-    fb_state.capacity = capacity;
-    fb_state.bytes_written = 0;
-
     uacpi_u64 value;
     const uacpi_char *next_conversion;
     uacpi_size next_offset;
     uacpi_char flag;
+
+    fb_state.buffer = buffer;
+    fb_state.capacity = capacity;
+    fb_state.bytes_written = 0;
 
     while (*fmt) {
         struct fmt_spec fm = {

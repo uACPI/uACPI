@@ -132,9 +132,10 @@ static uacpi_size extra_size_for_native_irq_or_dma(
     const struct uacpi_resource_spec *spec, void *data, uacpi_size size
 )
 {
-    UACPI_UNUSED(size);
     uacpi_u16 mask;
     uacpi_u8 i, total_bits, num_bits = 0;
+
+    UACPI_UNUSED(size);
 
     if (spec->type == UACPI_AML_RESOURCE_IRQ) {
         struct acpi_resource_irq *irq = data;
@@ -230,8 +231,9 @@ static uacpi_size size_for_aml_vendor(
     const struct uacpi_resource_spec *spec, uacpi_resource *resource
 )
 {
-    UACPI_UNUSED(spec);
     uacpi_size size = resource->vendor.length;
+
+    UACPI_UNUSED(spec);
 
     if (size > 7 || resource->type == UACPI_RESOURCE_TYPE_VENDOR_LARGE) {
         size += aml_resource_kind_to_header_size[
