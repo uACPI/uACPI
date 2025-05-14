@@ -126,12 +126,14 @@ static void dump_resources(
 }
 
 static uacpi_iteration_decision dump_one_node(
-    UNUSED void *ptr, uacpi_namespace_node *node, uacpi_u32 depth
+    void *ptr, uacpi_namespace_node *node, uacpi_u32 depth
 )
 {
     struct uacpi_namespace_node_info *info;
     uacpi_status ret = uacpi_get_namespace_node_info(node, &info);
     const char *path;
+
+    UACPI_UNUSED(ptr);
 
     if (uacpi_unlikely_error(ret)) {
         uacpi_object_name name = uacpi_namespace_node_name(node);
@@ -271,10 +273,12 @@ static uacpi_table_installation_disposition handle_table_install(
 }
 
 static uacpi_status handle_notify(
-    UNUSED uacpi_handle handle, uacpi_namespace_node *node, uacpi_u64 value
+    uacpi_handle handle, uacpi_namespace_node *node, uacpi_u64 value
 )
 {
     const char *path = uacpi_namespace_node_generate_absolute_path(node);
+
+    UACPI_UNUSED(handle);
 
     printf("Received a notification from %s %" PRIx64 "\n", path, value);
 
@@ -289,7 +293,7 @@ static uacpi_status handle_ec(uacpi_region_op op, uacpi_handle op_data)
         uacpi_region_rw_data *rw_data = (uacpi_region_rw_data *)op_data;
 
         rw_data->value = 0;
-        FALLTHROUGH
+        UACPI_FALLTHROUGH;
     }
     case UACPI_REGION_OP_ATTACH:
     case UACPI_REGION_OP_DETACH:
@@ -301,10 +305,13 @@ static uacpi_status handle_ec(uacpi_region_op op, uacpi_handle op_data)
 }
 
 static uacpi_interrupt_ret handle_gpe(
-    UNUSED uacpi_handle handle, UNUSED uacpi_namespace_node *node,
-    UNUSED uint16_t idx
+    uacpi_handle handle, uacpi_namespace_node *node, uint16_t idx
 )
 {
+    UACPI_UNUSED(handle);
+    UACPI_UNUSED(node);
+    UACPI_UNUSED(idx);
+
     return UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
 }
 

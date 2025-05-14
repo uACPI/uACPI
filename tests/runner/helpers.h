@@ -6,17 +6,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <uacpi/acpi.h>
+#include <uacpi/internal/helpers.h> // for UACPI_UNUSED
 #include <uacpi/status.h>
 #include <uacpi/uacpi.h>
 
 #ifdef __GNUC__
-#define FALLTHROUGH __attribute__((__fallthrough__));
 #define NORETURN __attribute__((__noreturn__))
-#define UNUSED __attribute__((__unused__))
 #else
-#define FALLTHROUGH
 #define NORETURN
-#define UNUSED
 #endif
 
 NORETURN static inline void error(const char *format, ...)

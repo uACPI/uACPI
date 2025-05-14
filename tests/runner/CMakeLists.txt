@@ -31,7 +31,19 @@ macro (define_test_runner NAME)
         ${UACPI_INCLUDES}
     )
 
-    if (MSVC)
+    if (WATCOM)
+        # Address sanitizer doesn't exist on Watcom.
+        target_compile_definitions(
+            ${NAME}
+            PRIVATE
+            _LINUX_SOURCE
+        )
+        target_compile_options(
+            ${NAME}
+            PRIVATE
+            -we -wx
+        )
+    elseif (MSVC)
         # Address sanitizer on MSVC depends on a dynamic library that is not present in
         # PATH by default. Lets just not enable it here.
         target_compile_options(

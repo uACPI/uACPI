@@ -12,13 +12,17 @@ void uacpi_kernel_log(enum uacpi_log_level lvl, const char *text)
     printf("[%s] %s", uacpi_log_level_to_string(lvl), text);
 }
 
-void *uacpi_kernel_map(uacpi_phys_addr addr, UNUSED uacpi_size len)
+void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
 {
+    UACPI_UNUSED(len);
+
     return (void *)(uintptr_t)addr;
 }
 
-void uacpi_kernel_unmap(UNUSED void *ptr, UNUSED uacpi_size len)
+void uacpi_kernel_unmap(void *ptr, uacpi_size len)
 {
+    UACPI_UNUSED(ptr);
+    UACPI_UNUSED(len);
 }
 
 uacpi_phys_addr g_rsdp;

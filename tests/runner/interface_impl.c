@@ -37,15 +37,18 @@ void uacpi_kernel_deinitialize(void)
 #endif
 
 uacpi_status uacpi_kernel_io_map(
-    uacpi_io_addr base, UNUSED uacpi_size len, uacpi_handle *out_handle
+    uacpi_io_addr base, uacpi_size len, uacpi_handle *out_handle
 )
 {
+    UACPI_UNUSED(len);
+
     *out_handle = (uacpi_handle)(uintptr_t)base;
     return UACPI_STATUS_OK;
 }
 
-void uacpi_kernel_io_unmap(UNUSED uacpi_handle handle)
+void uacpi_kernel_io_unmap(uacpi_handle handle)
 {
+    UACPI_UNUSED(handle);
 }
 
 #define UACPI_IO_READ(bits)                                              \
@@ -77,23 +80,28 @@ void uacpi_kernel_io_unmap(UNUSED uacpi_handle handle)
         return UACPI_STATUS_OK;                                         \
     }
 
-#define UACPI_PCI_READ(bits)                                  \
-    uacpi_status uacpi_kernel_pci_read##bits(                 \
-        UNUSED uacpi_handle handle, UNUSED uacpi_size offset, \
-        uacpi_u##bits *value                                  \
-    )                                                         \
-    {                                                         \
-        *value = (uacpi_u##bits)0xFFFFFFFFFFFFFFFF;           \
-        return UACPI_STATUS_OK;                               \
+#define UACPI_PCI_READ(bits)                                         \
+    uacpi_status uacpi_kernel_pci_read##bits(                        \
+        uacpi_handle handle, uacpi_size offset, uacpi_u##bits *value \
+    )                                                                \
+    {                                                                \
+        UACPI_UNUSED(handle);                                        \
+        UACPI_UNUSED(offset);                                        \
+                                                                     \
+        *value = (uacpi_u##bits)0xFFFFFFFFFFFFFFFF;                  \
+        return UACPI_STATUS_OK;                                      \
     }
 
-#define UACPI_PCI_WRITE(bits)                                 \
-    uacpi_status uacpi_kernel_pci_write##bits(                \
-        UNUSED uacpi_handle handle, UNUSED uacpi_size offset, \
-        UNUSED uacpi_u##bits value                            \
-    )                                                         \
-    {                                                         \
-        return UACPI_STATUS_OK;                               \
+#define UACPI_PCI_WRITE(bits)                                       \
+    uacpi_status uacpi_kernel_pci_write##bits(                      \
+        uacpi_handle handle, uacpi_size offset, uacpi_u##bits value \
+    )                                                               \
+    {                                                               \
+        UACPI_UNUSED(handle);                                       \
+        UACPI_UNUSED(offset);                                       \
+        UACPI_UNUSED(value);                                        \
+                                                                    \
+        return UACPI_STATUS_OK;                                     \
     }
 
 UACPI_IO_READ(8)
@@ -113,15 +121,18 @@ UACPI_PCI_WRITE(16)
 UACPI_PCI_WRITE(32)
 
 uacpi_status uacpi_kernel_pci_device_open(
-    UNUSED uacpi_pci_address address, uacpi_handle *out_handle
+    uacpi_pci_address address, uacpi_handle *out_handle
 )
 {
+    UACPI_UNUSED(address);
+
     *out_handle = NULL;
     return UACPI_STATUS_OK;
 }
 
-void uacpi_kernel_pci_device_close(UNUSED uacpi_handle handle)
+void uacpi_kernel_pci_device_close(uacpi_handle handle)
 {
+    UACPI_UNUSED(handle);
 }
 
 bool g_expect_virtual_addresses = true;
@@ -544,17 +555,25 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req)
 }
 
 uacpi_status uacpi_kernel_install_interrupt_handler(
-    UNUSED uacpi_u32 irq, UNUSED uacpi_interrupt_handler handler,
-    UNUSED uacpi_handle ctx, UNUSED uacpi_handle *out_irq_handle
+    uacpi_u32 irq, uacpi_interrupt_handler handler, uacpi_handle ctx,
+    uacpi_handle *out_irq_handle
 )
 {
+    UACPI_UNUSED(irq);
+    UACPI_UNUSED(handler);
+    UACPI_UNUSED(ctx);
+    UACPI_UNUSED(out_irq_handle);
+
     return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_uninstall_interrupt_handler(
-    UNUSED uacpi_interrupt_handler handler, UNUSED uacpi_handle irq_handle
+    uacpi_interrupt_handler handler, uacpi_handle irq_handle
 )
 {
+    UACPI_UNUSED(handler);
+    UACPI_UNUSED(irq_handle);
+
     return UACPI_STATUS_OK;
 }
 
@@ -574,17 +593,19 @@ uacpi_cpu_flags uacpi_kernel_lock_spinlock(uacpi_handle handle)
     return 0;
 }
 
-void uacpi_kernel_unlock_spinlock(
-    uacpi_handle handle, UNUSED uacpi_cpu_flags flags
-)
+void uacpi_kernel_unlock_spinlock(uacpi_handle handle, uacpi_cpu_flags flags)
 {
+    UACPI_UNUSED(flags);
+
     uacpi_kernel_release_mutex(handle);
 }
 
 uacpi_status uacpi_kernel_schedule_work(
-    UNUSED uacpi_work_type type, uacpi_work_handler handler, uacpi_handle ctx
+    uacpi_work_type type, uacpi_work_handler handler, uacpi_handle ctx
 )
 {
+    UACPI_UNUSED(type);
+
     handler(ctx);
     return UACPI_STATUS_OK;
 }
