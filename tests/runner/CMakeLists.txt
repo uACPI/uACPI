@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(TestRunner C CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+project(TestRunner C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -44,6 +41,11 @@ macro (define_test_runner NAME)
             /wd4200 /wd4267 /wd4244
         )
     else ()
+        target_compile_definitions(
+            ${NAME}
+            PRIVATE
+            _GNU_SOURCE
+        )
         target_compile_options(
             ${NAME}
             PRIVATE
@@ -62,19 +64,19 @@ endmacro ()
 
 define_test_runner(
     test-runner
-    test_runner.cpp
-    helpers.cpp
-    interface_impl.cpp
-    resource_tests.cpp
-    api_tests.cpp
+    test_runner.c
+    helpers.c
+    interface_impl.c
+    resource_tests.c
+    api_tests.c
 )
 find_package(Threads REQUIRED)
 target_link_libraries(test-runner PRIVATE Threads::Threads)
 
 define_test_runner(
     barebones-test-runner
-    helpers.cpp
-    barebones_runner.cpp
+    helpers.c
+    barebones_runner.c
 )
 target_compile_definitions(
     barebones-test-runner

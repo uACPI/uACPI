@@ -1,25 +1,29 @@
-#include <string.h>
-#include <unordered_map>
-
-#include "helpers.h"
 #include "argparser.h"
-
-#include <uacpi/uacpi.h>
-#include <uacpi/tables.h>
-#include <uacpi/kernel_api.h>
+#include "helpers.h"
+#include <stdio.h>
+#include <string.h>
 #include <uacpi/acpi.h>
+#include <uacpi/kernel_api.h>
+#include <uacpi/tables.h>
+#include <uacpi/uacpi.h>
 
 void uacpi_kernel_log(enum uacpi_log_level lvl, const char *text)
 {
-    std::printf("[%s] %s", uacpi_log_level_to_string(lvl), text);
+    printf("[%s] %s", uacpi_log_level_to_string(lvl), text);
 }
 
-void* uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size)
+void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
 {
-    return reinterpret_cast<void*>(addr);
+    UACPI_UNUSED(len);
+
+    return (void*)((uintptr_t)addr);
 }
 
-void uacpi_kernel_unmap(void*, uacpi_size) { }
+void uacpi_kernel_unmap(void *ptr, uacpi_size len)
+{
+    UACPI_UNUSED(ptr);
+    UACPI_UNUSED(len);
+}
 
 uacpi_phys_addr g_rsdp;
 
@@ -55,15 +59,9 @@ static void ensure_signature_is(const char *signature, uacpi_table tbl)
     if (strncmp(tbl.hdr->signature, signature, 4) == 0)
         return;
 
-    char actual_signature[5]{ };
-    std::memcpy(
-        actual_signature, tbl.hdr->signature,
-        sizeof(uacpi_object_name)
-    );
-
-    throw std::runtime_error(
-        std::string("incorrect table signature: ") +
-        "expected " + signature + " got " + actual_signature
+    error(
+        "incorrect table signature: expected %s got %.4s\n", signature,
+        tbl.hdr->signature
     );
 }
 
@@ -77,17 +75,17 @@ static void find_one_table(const char *signature)
 
     ensure_signature_is(signature, tbl);
 
-    std::printf("%4.4s OK\n", signature);
+    printf("%4.4s OK\n", signature);
     uacpi_table_unref(&tbl);
-};
+}
 
-static void test_basic_operation()
+static void test_basic_operation(void)
 {
     find_one_table(ACPI_FADT_SIGNATURE);
     find_one_table(ACPI_DSDT_SIGNATURE);
 }
 
-static void test_table_installation()
+static void test_table_installation(void)
 {
     uacpi_status st;
     uacpi_table tbl;
@@ -107,48 +105,66 @@ static void test_table_installation()
     uacpi_table_unref(&tbl);
 }
 
-static std::unordered_map<std::string, void(*)()> test_cases = {
+static struct {
+    const char *name;
+    void (*func)(void);
+} test_cases[] = {
     { "basic-operation", test_basic_operation },
     { "table-installation", test_table_installation },
 };
 
-int main(int argc, char** argv)
+static arg_spec_t TEST_CASE_ARG = ARG_POS("test-case", "name of the test case");
+
+static arg_spec_t HELP_ARG = ARG_HELP(
+    "help", 'h', "Display this menu and exit"
+);
+
+static arg_spec_t *const POSITIONAL_ARGS[] = {
+    &TEST_CASE_ARG,
+};
+
+static arg_spec_t *const OPTION_ARGS[] = {
+    &HELP_ARG,
+};
+
+static const arg_parser_t PARSER = {
+    .positional_args = POSITIONAL_ARGS,
+    .num_positional_args = UACPI_ARRAY_SIZE(POSITIONAL_ARGS),
+    .option_args = OPTION_ARGS,
+    .num_option_args = UACPI_ARRAY_SIZE(OPTION_ARGS),
+};
+
+int main(int argc, char *argv[])
 {
-    auto args = ArgParser{};
-    args.add_positional(
-        "test-case", "name of the test case"
-    )
-    .add_help(
-        "help", 'h', "Display this menu and exit",
-        [&]() { std::cout << "uACPI test runner:\n" << args; }
+    static uint8_t early_table_buf[4096];
+    struct acpi_rsdp rsdp = { 0 };
+    struct full_xsdt *xsdt;
+    uacpi_status st;
+    const char *test_case;
+    size_t i;
+
+    parse_args(&PARSER, argc, argv);
+
+    xsdt = make_xsdt_blob(&rsdp, test_dsdt, sizeof(test_dsdt));
+
+    g_rsdp = (uacpi_phys_addr)((uintptr_t)&rsdp);
+
+    st = uacpi_setup_early_table_access(
+        early_table_buf, sizeof(early_table_buf)
     );
+    ensure_ok_status(st);
 
-    try {
-        args.parse(argc, argv);
+    test_case = get(&TEST_CASE_ARG);
 
-        acpi_rsdp rsdp{};
-
-        auto *xsdt = make_xsdt(rsdp, std::span(test_dsdt), {});
-        auto cleanup = ScopeGuard(
-            [&xsdt] {
-                uacpi_state_reset();
-                delete_xsdt(*xsdt, 0);
-            }
-        );
-
-        g_rsdp = reinterpret_cast<uacpi_phys_addr>(&rsdp);
-
-        static uint8_t early_table_buf[4096];
-        auto st = uacpi_setup_early_table_access(
-            early_table_buf, sizeof(early_table_buf)
-        );
-        ensure_ok_status(st);
-
-        test_cases[args.get("test-case")]();
-    } catch (std::exception& ex) {
-        std::cerr << "Test error: " << ex.what() << "\n";
-        return 1;
+    for (i = 0; i < UACPI_ARRAY_SIZE(test_cases); i++) {
+        if (strcmp(test_case, test_cases[i].name) == 0) {
+            test_cases[i].func();
+            uacpi_state_reset();
+            delete_xsdt(xsdt, 0);
+            return 0;
+        }
     }
 
-    return 0;
+    error("unknown test case '%s'", test_case);
+    return 1;
 }
