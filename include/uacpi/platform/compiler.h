@@ -65,6 +65,23 @@
     #define UACPI_COMPILER_HAS_BUILTIN_MEMMOVE
     #define UACPI_COMPILER_HAS_BUILTIN_MEMSET
     #define UACPI_COMPILER_HAS_BUILTIN_MEMCMP
+#elif defined(__WATCOMC__)
+    #define uacpi_unlikely(expr) expr
+    #define uacpi_likely(expr) expr
+
+    /*
+     * The OpenWatcom documentation suggests this should be done using
+     * _Pragma("off (unreferenced)") and _Pragma("pop (unreferenced)"),
+     * but these pragmas appear to be no-ops. Use inline as the next best thing.
+     * Note that OpenWatcom accepts redundant modifiers without a warning,
+     * so UACPI_MAYBE_UNUSED inline still works.
+     */
+    #define UACPI_MAYBE_UNUSED inline
+
+    #define UACPI_NO_UNUSED_PARAMETER_WARNINGS_BEGIN
+    #define UACPI_NO_UNUSED_PARAMETER_WARNINGS_END
+
+    #define UACPI_PRINTF_DECL(fmt_idx, args_idx)
 #else
     #define uacpi_unlikely(expr) expr
     #define uacpi_likely(expr)   expr
