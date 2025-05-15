@@ -249,7 +249,7 @@ static void uacpi_do_atomic_inc64_asm(volatile uint64_t *ptr, uint64_t *out);
     modify [ eax ebx ecx edx ]          \
     parm [ esi ] [ edi ]
 
-static uint64_t uacpi_do_atomic_inc64(volatile uint64_t *ptr) {
+static inline uint64_t uacpi_do_atomic_inc64(volatile uint64_t *ptr) {
     uint64_t value;
     uacpi_do_atomic_inc64_asm(ptr, &value);
     return value;
@@ -295,7 +295,7 @@ static void uacpi_do_atomic_dec64_asm(volatile uint64_t *ptr, uint64_t *out);
     modify [ eax ebx ecx edx ]          \
     parm [ esi ] [ edi ]
 
-static uint64_t uacpi_do_atomic_dec64(volatile uint64_t *ptr) {
+static inline uint64_t uacpi_do_atomic_dec64(volatile uint64_t *ptr) {
     uint64_t value;
     uacpi_do_atomic_dec64_asm(ptr, &value);
     return value;
