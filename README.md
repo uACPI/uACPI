@@ -289,6 +289,7 @@ If you want to contribute:
 | [davix](https://github.com/dbstream/davix) | Yet another unix-like by some bored nerd | 6,364,623 | Intel Core i7-13700K |
 | [ilobilix](https://github.com/ilobilo/ilobilix) | Yet another monolithic Linux clone wannabe. Currently under a rewrite | 5,960,392 | Intel Core i9-13900KS |
 | [Managarm](https://github.com/managarm/managarm)  | Pragmatic microkernel-based OS with fully asynchronous I/O | 5,618,646 | Intel Core i7-14700K |
+| [ChronOS](https://gitlab.com/BUGO07/chronos) | Another basic hobby os held together by duct tape, made in rust | 5,416,703 | Intel Core Ultra 7 265KF |
 | [pmOS](https://gitlab.com/mishakov/pmos) | Microkernel-based operating system written from scratch with uACPI running in userspace | 5,354,445 | AMD Ryzen 9 5900X |
 | [menix](https://github.com/menix-os/menix) | A minimal and expandable Unix-like operating system | 5,239,043 | Intel Core Ultra 7 265KF |
 | [Ironclad](https://ironclad.nongnu.org) | Formally verified, hard real-time capable kernel written in SPARK and Ada | 4,802,816 | Intel Core i9-13900KS |
