@@ -16,8 +16,6 @@ foreach(CONF_TYPE ${CMAKE_CONFIGURATION_TYPES})
 endforeach(CONF_TYPE ${CMAKE_CONFIGURATION_TYPES})
 
 macro (define_test_runner NAME)
-    message("ADDING EXEC ${NAME} ${NAME}.cpp ${ARGN} ${UACPI_SOURCES}")
-
     add_executable(
         ${NAME}
         ${ARGN}
