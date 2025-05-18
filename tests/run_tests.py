@@ -334,8 +334,12 @@ def barebones_test_runner_binary() -> str:
     return platform_name_for_binary("barebones-test-runner")
 
 
-def build_test_runner(bitness: int) -> Tuple[str, str]:
+def build_test_runner(bitness: int, watcom: bool) -> Tuple[str, str]:
     build_dir = f"build-{platform.system().lower()}-{bitness}bits"
+
+    if watcom:
+        build_dir = f"{build_dir}-watcom"
+
     runner_build_dir = test_relpath("runner", build_dir)
     runner_exe = os.path.join(runner_build_dir, test_runner_binary())
     barebones_runner_exe = os.path.join(
@@ -353,12 +357,14 @@ def build_test_runner(bitness: int) -> Tuple[str, str]:
 
     cmake_args: List[str] = ["cmake"]
 
-    if use_ninja:
+    if watcom:
+        cmake_args.extend(["-G", "Watcom WMake"])
+    elif use_ninja:
         cmake_args.extend(["-G", "Ninja"])
 
     cmake_args.append("..")
 
-    if bitness == 32:
+    if not watcom and bitness == 32:
         if platform.system() == "Windows":
             cmake_args.extend(["-A", "Win32"])
         else:
@@ -405,7 +411,12 @@ def main() -> int:
     parser.add_argument("--parallelism", type=int,
                         default=os.cpu_count() or 1,
                         help="Number of test runners to run in parallel")
+    parser.add_argument("--watcom", action="store_true",
+                        help="Use OpenWatcom to build test runners")
     args = parser.parse_args()
+
+    if args.watcom:
+        args.bitness = 32
 
     test_compiler = args.asl_compiler
     test_dir = args.test_dir
@@ -413,7 +424,8 @@ def main() -> int:
     bare_test_runner = args.barebones_test_runner
 
     if test_runner is None or (args.barebones and bare_test_runner is None):
-        bare_runner_default, runner_default = build_test_runner(args.bitness)
+        bare_runner_default, runner_default = build_test_runner(args.bitness,
+                                                                args.watcom)
 
         if bare_test_runner is None:
             bare_test_runner = bare_runner_default

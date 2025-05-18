@@ -8,7 +8,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
-#if defined(__APPLE__)
+#ifdef __WATCOMC__
+#include <process.h> // provides gettid
+#elif defined(__APPLE__)
 #include <mach/mach_time.h>
 #endif
 #include <errno.h>
@@ -25,7 +27,7 @@ typedef CONDITION_VARIABLE condvar_t;
 typedef pthread_mutex_t mutex_t;
 typedef pthread_cond_t condvar_t;
 
-#if defined(__APPLE__)
+#if defined(__WATCOMC__) || defined(__APPLE__)
 #define HAVE_TIMED_WAIT 0
 #else
 #define HAVE_TIMED_WAIT 1
