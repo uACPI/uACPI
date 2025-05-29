@@ -300,6 +300,7 @@ If you want to contribute:
 | [imaginarium](https://github.com/Khitiara/imaginarium) | Ziggy osdev experiments inspired by the NT kernel (using the zig general purpose allocator) | 1,504,436 | AMD Ryzen 7 3700X |
 | [BadgerOS](https://github.com/badgeteam/BadgerOS) | A monolithic lightweight UNIX clone | 1,018,518 | AMD Ryzen 5 3600 |
 | [NyauxKC](https://github.com/rayanmargham/NyauxKC) | Monolithic UNIX-like multi-architecture kernel | 985,988 | Intel Core Ultra 7 265K |
+| [Hyra](https://github.com/sigsegv7/Hyra) | Monolithic UNIX-like OS by [OSMORA.ORG](https://osmora.org) | 199,873 | Intel Core i3-3220 |
 
 ## License
 
