@@ -642,7 +642,20 @@ typedef struct uacpi_resource {
     ((uacpi_resource*)((uacpi_u8*)(cur) + (cur)->length))
 
 typedef struct uacpi_resources {
+    /*
+     * Length of the 'entries' array in BYTES (NOT the count of resources),
+     * see comment above 'entries' for more information.
+     */
     uacpi_size length;
+
+    /*
+     * Resources are variable length! See UACPI_NEXT_RESOURCE to see how to
+     * retrieve the next resource. You can alternatively use
+     * uacpi_for_each_resource instead of iterating manually.
+     *
+     * Resources are guaranteed to be naturally aligned and are always
+     * terminated by a resource of type UACPI_RESOURCE_TYPE_END_TAG.
+     */
     uacpi_resource *entries;
 } uacpi_resources;
 void uacpi_free_resources(uacpi_resources*);
@@ -654,7 +667,11 @@ typedef uacpi_iteration_decision (*uacpi_resource_iteration_callback)
  * Evaluate the _CRS method for a 'device' and get the returned resource list
  * via 'out_resources'.
  *
- * NOTE: the returned buffer must be released via a uacpi_free_resources()
+ * NOTE: the returned buffer must be released via uacpi_free_resources()
+ *
+ * If you don't need to keep the resource array for later use you can
+ * uacpi_for_each_device_resource(device, "_CRS", ...) instead, which takes
+ * care of iteration & memory management on its own.
  */
 uacpi_status uacpi_get_current_resources(
     uacpi_namespace_node *device, uacpi_resources **out_resources
@@ -665,6 +682,10 @@ uacpi_status uacpi_get_current_resources(
  * via 'out_resources'.
  *
  * NOTE: the returned buffer must be released via uacpi_free_resources()
+ *
+ * If you don't need to keep the resource array for later use you can
+ * uacpi_for_each_device_resource(device, "_PRS", ...) instead, which takes
+ * care of iteration & memory management on its own.
  */
 uacpi_status uacpi_get_possible_resources(
     uacpi_namespace_node *device, uacpi_resources **out_resources
@@ -675,6 +696,10 @@ uacpi_status uacpi_get_possible_resources(
  * buffer for a 'device' and get the returned resource list via 'out_resources'.
  *
  * NOTE: the returned buffer must be released via uacpi_free_resources()
+ *
+ * If you don't need to keep the resource array for later use you can
+ * uacpi_for_each_device_resource(device, method, ...) instead, which takes
+ * care of iteration & memory management on its own.
  */
 uacpi_status uacpi_get_device_resources(
     uacpi_namespace_node *device, const uacpi_char *method,
