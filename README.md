@@ -16,7 +16,7 @@ A portable and easy-to-integrate implementation of the Advanced Configuration an
 - Sleep state management (transition to any S state, wake vector programming)
 - PCI routing table retrieval & interrupt model API
 - Device search API
-- Resource subsystem supporting every resource defined by ACPI 6.5
+- Resource subsystem supporting every resource defined by ACPI 6.6
 - Interface & feature management exposed via _OSI
 - Client-defined Notify() handlers
 - Firmware global lock management (_GL, locked fields, public API)
@@ -27,7 +27,93 @@ A portable and easy-to-integrate implementation of the Advanced Configuration an
 
 ## Why would I use this over ACPICA?
 
-### 1. NT-compatible from the ground up
+### 1. Performance
+
+uACPI shows a consistent speedup of about **3.5x** over ACPICA in synthetic AML tests.
+
+<details><summary>More details</summary>
+
+Code that was tested:
+```asl
+Method (TOMS, 2, NotSerialized) {
+    Return ((Arg1 - Arg0) / 10000)
+}
+
+Method (ADDM, 1, NotSerialized) {
+    Local0 = 0
+
+    While (Arg0) {
+        Local0 += Arg0 + Arg0
+        Arg0--
+    }
+
+    Return (Local0)
+}
+
+// Record start time
+Local0 = Timer
+
+// Run 10 million additions
+Local1 = ADDM(10000000)
+
+// Make sure the answer matches expected
+If (Local1 != 0x5AF31112D680) {
+    Printf("Bad test result %o", Local1)
+    Return (1)
+}
+
+// Record end time
+Local2 = Timer
+
+Printf("10,000,000 additions took %o ms",
+       ToDecimalString(TOMS(Local0, Local2)))
+```
+
+Compile options (acpiexec and uACPI's test-runner): `-O3 -flto -march=znver4 -mtune=znver4`  
+CPU: AMD Ryzen 9 9950X3D  
+Raw test scores (~average over 10 runs):
+- ACPICA: 16661 ms
+- uACPI: 4753 ms
+
+**Raw difference: 3.5053x**
+
+</details>
+
+Real hardware tests of the same operating system using uACPI vs ACPICA show
+at least a **1.75-2x speedup** while measuring the time it takes to load the initial
+AML namespace.
+
+<details><summary>More details</summary>
+
+OS: [proxima](https://github.com/proxima-os)
+
+Compile options: `-O3 -flto`
+
+### Test Subject 1
+
+Specs: Gigabyte B550M S2H, AMD Ryzen 5800X, 64GB RAM  
+Firmware: F19d (10097 AML opcodes)
+
+Results:
+- ACPICA: 3,936,953 ns
+- uACPI: 1,902,077 ns
+
+**Raw difference: 2.0698x**
+
+### Test Subject 2
+
+Specs: Toshiba Portege R30-A, Intel Core i5-4200M, 4GB RAM   
+Firmware: 4.40 (4962 AML opcodes)
+
+Results:
+- ACPICA: 10,899,233 ns
+- uACPI: 6,227,036 ns
+
+**Raw difference: 1.7503x**
+
+</details>
+
+### 2. NT-compatible from the ground up
                               
 Over the decades of development, ACPICA has accumulated a lot of workarounds for
 AML expecting NT-specific behaviors, and is still missing compatibility in a lot
@@ -42,7 +128,7 @@ Some specific highlights include:
 - Object mutability
 - Named object resolution, especially for named objects inside packages
                              
-### 2. Fundamental safety
+### 3. Fundamental safety
              
 uACPI is built to always assume the worst about the AML byte code it's executing,
 and as such, has a more sophisticated object lifetime tracking system, as well
@@ -54,7 +140,7 @@ interpreters.
 While a permanent fuzzing solution for uACPI is currently WIP, it has already
 been fuzzed quite extensively and all known issues have been fixed.
 
-### 3. No recursion
+### 4. No recursion
 
 Running at kernel level has a lot of very strict limitations, one of which is a
 tiny stack size, which can sometimes be only a few pages in length.
@@ -284,11 +370,12 @@ If you want to contribute:
 
 |  Project | Description | (qemu w/ Q35 + KVM) ops/s  | CPU |
 |---  |--- |--- |--- |
-| [proxima](https://github.com/proxima-os/proxima) | A monolithic Unix-like operating system | 8,468,599 | Intel Core i9-13900KS |
+| [proxima](https://github.com/proxima-os/) | Unix-like microkernel-based operating system with uACPI running in userspace | 10,454,158 | AMD Ryzen 9 9950X3D |
+| [ilobilix](https://github.com/ilobilo/ilobilix) | Yet another monolithic Linux clone wannabe. Currently under a rewrite | 8,703,286 | AMD Ryzen 9 9950X3D |
 | [Crescent2](https://github.com/Qwinci/crescent2) | An NT driver compatible kernel and userspace | 6,818,418 | Intel Core i5-13600K |
 | [davix](https://github.com/dbstream/davix) | Yet another unix-like by some bored nerd | 6,364,623 | Intel Core i7-13700K |
-| [ilobilix](https://github.com/ilobilo/ilobilix) | Yet another monolithic Linux clone wannabe. Currently under a rewrite | 5,960,392 | Intel Core i9-13900KS |
 | [Managarm](https://github.com/managarm/managarm)  | Pragmatic microkernel-based OS with fully asynchronous I/O | 5,618,646 | Intel Core i7-14700K |
+| [ChronOS](https://github.com/BUGO07/chronos) | Another basic hobby os held together by duct tape, made in rust | 5,416,703 | Intel Core Ultra 7 265KF |
 | [pmOS](https://gitlab.com/mishakov/pmos) | Microkernel-based operating system written from scratch with uACPI running in userspace | 5,354,445 | AMD Ryzen 9 5900X |
 | [menix](https://github.com/menix-os/menix) | A minimal and expandable Unix-like operating system | 5,239,043 | Intel Core Ultra 7 265KF |
 | [Ironclad](https://ironclad.nongnu.org) | Formally verified, hard real-time capable kernel written in SPARK and Ada | 4,802,816 | Intel Core i9-13900KS |
@@ -296,10 +383,11 @@ If you want to contribute:
 | [Keyronex](https://github.com/Keyronex/Keyronex) | Layered kernel with fundamentally asynchronous I/O and working set model-based memory management | 4,013,691 | AMD Ryzen 5800X |
 | [Orange](https://github.com/cppLover0/Orange) | x86_64 Unix-like OS | 2,377,330 | AMD Ryzen 5 3600 |
 | [OBOS](https://github.com/OBOS-dev/obos) | Hybrid Kernel with advanced driver loading | 2,141,179 | Intel Core i5-13600K |
+| [NyauxKC](https://github.com/rayanmargham/NyauxKC) | Monolithic UNIX-like multi-architecture kernel | 1,966,580 | Intel Core i7-13700K |
 | [ElysiumOS](https://github.com/imwux/elysium-os) | Hybrid Unix-like kernel | 1,737,654 | AMD Ryzen 7 5800X3D |
 | [imaginarium](https://github.com/Khitiara/imaginarium) | Ziggy osdev experiments inspired by the NT kernel (using the zig general purpose allocator) | 1,504,436 | AMD Ryzen 7 3700X |
 | [BadgerOS](https://github.com/badgeteam/BadgerOS) | A monolithic lightweight UNIX clone | 1,018,518 | AMD Ryzen 5 3600 |
-| [NyauxKC](https://github.com/rayanmargham/NyauxKC) | Monolithic UNIX-like multi-architecture kernel | 985,988 | Intel Core Ultra 7 265K |
+| [Hyra](https://github.com/sigsegv7/Hyra) | Monolithic UNIX-like OS by [OSMORA.ORG](https://osmora.org) | 199,873 | Intel Core i3-3220 |
 
 ## License
 
