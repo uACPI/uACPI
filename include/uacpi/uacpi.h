@@ -5,9 +5,9 @@
 #include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
 
-#define UACPI_MAJOR 2
-#define UACPI_MINOR 1
-#define UACPI_PATCH 1
+#define UACPI_MAJOR 3
+#define UACPI_MINOR 0
+#define UACPI_PATCH 0
 
 #ifdef UACPI_REDUCED_HARDWARE
 #define UACPI_MAKE_STUB_FOR_REDUCED_HARDWARE(fn, ret) \
