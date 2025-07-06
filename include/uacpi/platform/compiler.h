@@ -40,8 +40,10 @@
     #define uacpi_unlikely(expr) __builtin_expect(!!(expr), 0)
     #define uacpi_likely(expr)   __builtin_expect(!!(expr), 1)
 
-    #if __has_attribute(__fallthrough__)
-        #define UACPI_FALLTHROUGH __attribute__((__fallthrough__))
+    #ifdef __has_attribute
+        #if __has_attribute(__fallthrough__)
+            #define UACPI_FALLTHROUGH __attribute__((__fallthrough__))
+        #endif
     #endif
 
     #define UACPI_MAYBE_UNUSED __attribute__ ((unused))
