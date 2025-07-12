@@ -47,8 +47,12 @@ uacpi_status uacpi_find_devices(
 
 typedef enum uacpi_interrupt_model {
     UACPI_INTERRUPT_MODEL_PIC = 0,
-    UACPI_INTERRUPT_MODEL_IOAPIC = 1,
-    UACPI_INTERRUPT_MODEL_IOSAPIC = 2,
+    UACPI_INTERRUPT_MODEL_IOAPIC,
+    UACPI_INTERRUPT_MODEL_IOSAPIC,
+    UACPI_INTERRUPT_MODEL_PLATFORM_SPECIFIC,
+    UACPI_INTERRUPT_MODEL_GIC,
+    UACPI_INTERRUPT_MODEL_LPIC,
+    UACPI_INTERRUPT_MODEL_RINTC,
 } uacpi_interrupt_model;
 
 uacpi_status uacpi_set_interrupt_model(uacpi_interrupt_model);
