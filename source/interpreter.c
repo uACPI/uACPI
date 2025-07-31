@@ -1255,13 +1255,17 @@ static uacpi_bool is_dynamic_table_load(enum uacpi_table_load_cause cause)
     return cause != UACPI_TABLE_LOAD_CAUSE_INIT;
 }
 
-static void prepare_table_load(
-    void *ptr, enum uacpi_table_load_cause cause, uacpi_control_method *in_method
+static uacpi_status prepare_table_load(
+    void *ptr, enum uacpi_table_load_cause cause,
+    uacpi_control_method *in_method
 )
 {
     struct acpi_dsdt *dsdt = ptr;
-    enum uacpi_log_level log_level = UACPI_LOG_TRACE;
+    uacpi_log_level log_level = UACPI_LOG_TRACE;
     const uacpi_char *log_prefix = "load of";
+
+    if (uacpi_unlikely(dsdt->hdr.length < sizeof(dsdt->hdr)))
+        return UACPI_STATUS_INVALID_TABLE_LENGTH;
 
     if (is_dynamic_table_load(cause)) {
         log_prefix = cause == UACPI_TABLE_LOAD_CAUSE_HOST ?
@@ -1277,6 +1281,8 @@ static void prepare_table_load(
     in_method->code = dsdt->definition_block;
     in_method->size = dsdt->hdr.length - sizeof(dsdt->hdr);
     in_method->named_objects_persist = UACPI_TRUE;
+
+    return UACPI_STATUS_OK;
 }
 
 static uacpi_status do_load_table(
@@ -1287,7 +1293,9 @@ static uacpi_status do_load_table(
     struct uacpi_control_method method = { 0 };
     uacpi_status ret;
 
-    prepare_table_load(tbl, cause, &method);
+    ret = prepare_table_load(tbl, cause, &method);
+    if (uacpi_unlikely_error(ret))
+        return ret;
 
     ret = uacpi_execute_control_method(parent, &method, UACPI_NULL, UACPI_NULL);
     if (uacpi_unlikely_error(ret))
@@ -1373,10 +1381,6 @@ static uacpi_status handle_load_table(struct execution_context *ctx)
         root_node = uacpi_namespace_root();
     }
 
-    root_node_item->node = root_node;
-    root_node_item->type = ITEM_NAMESPACE_NODE;
-    uacpi_shareable_ref(root_node);
-
     if (param_path->size > 1) {
         struct item *param_item;
 
@@ -1403,11 +1407,22 @@ static uacpi_status handle_load_table(struct execution_context *ctx)
         report_table_id_find_error("LoadTable", &table_id, ret);
         return ret;
     }
-    uacpi_table_mark_as_loaded(table.index);
 
-    item_array_at(items, 2)->immediate = table.index;
     method = item_array_at(items, 1)->obj->method;
-    prepare_table_load(table.hdr, UACPI_TABLE_LOAD_CAUSE_LOAD_TABLE_OP, method);
+    ret = prepare_table_load(
+        table.hdr, UACPI_TABLE_LOAD_CAUSE_LOAD_TABLE_OP, method
+    );
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_table_unref(&table);
+        return ret;
+    }
+
+    uacpi_table_mark_as_loaded(table.index);
+    item_array_at(items, 2)->immediate = table.index;
+
+    root_node_item->node = root_node;
+    root_node_item->type = ITEM_NAMESPACE_NODE;
+    uacpi_shareable_ref(root_node);
 
     return UACPI_STATUS_OK;
 }
@@ -1558,14 +1573,18 @@ static uacpi_status handle_load(struct execution_context *ctx)
         if (ret != UACPI_STATUS_OVERRIDDEN)
             goto error_out;
     }
+
+    method = item_array_at(items, 1)->obj->method;
+    ret = prepare_table_load(table.ptr, UACPI_TABLE_LOAD_CAUSE_LOAD_OP, method);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_table_unref(&table);
+        goto error_out;
+    }
+
     uacpi_table_mark_as_loaded(table.index);
     item_array_at(items, 2)->immediate = table.index;
 
     item_array_at(items, 0)->node = uacpi_namespace_root();
-
-    method = item_array_at(items, 1)->obj->method;
-    prepare_table_load(table.ptr, UACPI_TABLE_LOAD_CAUSE_LOAD_OP, method);
-
     return UACPI_STATUS_OK;
 
 error_out:
