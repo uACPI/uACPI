@@ -169,17 +169,7 @@ uacpi_u8 uacpi_load_table_op_decode_ops[] = {
         UACPI_PARSE_OP_JMP, 8,
     UACPI_PARSE_OP_TERM_ARG_UNWRAP_INTERNAL,
 
-    /*
-     * Invoke the handler here to initialize the table. If this fails, it's
-     * expected to keep the item 0 as NULL, which is checked below to return
-     * false to the caller of Load.
-     */
     UACPI_PARSE_OP_INVOKE_HANDLER,
-    UACPI_PARSE_OP_IF_NULL, 0, 3,
-        UACPI_PARSE_OP_LOAD_FALSE_OBJECT,
-        UACPI_PARSE_OP_OBJECT_TRANSFER_TO_PREV,
-        UACPI_PARSE_OP_END,
-
     UACPI_PARSE_OP_LOAD_TRUE_OBJECT,
     UACPI_PARSE_OP_DISPATCH_TABLE_LOAD,
 
