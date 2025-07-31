@@ -663,9 +663,10 @@ static uacpi_status table_install_physical_with_origin_unlocked(
         return ret;
 
     if (uacpi_unlikely(hdr.length < sizeof(struct acpi_sdt_hdr))) {
-        uacpi_error("invalid table '%.4s' (0x%016"UACPI_PRIX64") size: %u\n",
-                    hdr.signature, UACPI_FMT64(phys), hdr.length);
-        return UACPI_STATUS_INVALID_TABLE_LENGTH;
+        uacpi_warn(
+            "bogus table '%.4s' (0x%016"UACPI_PRIX64") size: %u bytes\n",
+            hdr.signature, UACPI_FMT64(phys), hdr.length
+        );
     }
 
     if (expected_signature != UACPI_NULL) {
