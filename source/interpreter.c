@@ -1454,6 +1454,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
             op_region->space != UACPI_ADDRESS_SPACE_SYSTEM_MEMORY
         )) {
             uacpi_error("Load: operation region is not SystemMemory\n");
+            ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
             goto error_out;
         }
 
@@ -1462,6 +1463,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
                 "Load: operation region is too small: %"UACPI_PRIu64"\n",
                 UACPI_FMT64(op_region->length)
             );
+            ret = UACPI_STATUS_AML_BAD_ENCODING;
             goto error_out;
         }
 
@@ -1473,6 +1475,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
                 UACPI_FMT64(op_region->offset),
                 UACPI_FMT64(op_region->offset + op_region->length)
             );
+            ret = UACPI_STATUS_MAPPING_FAILED;
             goto error_out;
         }
 
@@ -1490,6 +1493,8 @@ static uacpi_status handle_load(struct execution_context *ctx)
                 "Load: buffer is too small: %zu\n",
                 buffer->size
             );
+
+            ret = UACPI_STATUS_AML_BAD_ENCODING;
             goto error_out;
         }
 
@@ -1504,6 +1509,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
             "Buffer/Field/OperationRegion\n",
             uacpi_object_type_to_string(src->type)
         );
+        ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
         goto error_out;
     }
 
@@ -1512,17 +1518,21 @@ static uacpi_status handle_load(struct execution_context *ctx)
             "Load: table size %u is larger than the declared size %zu\n",
             src_table->length, declared_size
         );
+        ret = UACPI_STATUS_AML_BAD_ENCODING;
         goto error_out;
     }
 
     if (uacpi_unlikely(src_table->length < sizeof(struct acpi_sdt_hdr))) {
         uacpi_error("Load: table size %u is too small\n", src_table->length);
+        ret = UACPI_STATUS_INVALID_TABLE_LENGTH;
         goto error_out;
     }
 
     table_buffer = uacpi_kernel_alloc(src_table->length);
-    if (uacpi_unlikely(table_buffer == UACPI_NULL))
+    if (uacpi_unlikely(table_buffer == UACPI_NULL)) {
+        ret = UACPI_STATUS_OUT_OF_MEMORY;
         goto error_out;
+    }
 
     uacpi_memcpy(table_buffer, src_table, src_table->length);
 
@@ -1536,6 +1546,14 @@ static uacpi_status handle_load(struct execution_context *ctx)
     );
     if (uacpi_unlikely_error(ret)) {
         uacpi_free(table_buffer, src_table->length);
+
+        /*
+         * Treat DENIED as a soft error, that is, fail the Load but don't abort
+         * the currently running method. We simply return False to the caller
+         * to signify an error in this case.
+         */
+        if (uacpi_unlikely(ret == UACPI_STATUS_DENIED))
+            ret = UACPI_STATUS_OK;
 
         if (ret != UACPI_STATUS_OVERRIDDEN)
             goto error_out;
@@ -1553,7 +1571,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
 error_out:
     if (unmap_src && src_table)
         uacpi_kernel_unmap(src_table, declared_size);
-    return UACPI_STATUS_OK;
+    return ret;
 }
 
 uacpi_status uacpi_execute_table(void *tbl, enum uacpi_table_load_cause cause)
