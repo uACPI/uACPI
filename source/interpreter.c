@@ -1430,13 +1430,20 @@ static uacpi_status handle_load(struct execution_context *ctx)
      * detect new AML GPE handlers that might've been loaded.
      * We do this only if table load was successful though.
      */
-    if (item_array_size(items) == 5) {
-        if (item_array_at(items, 4)->obj->integer != 0)
+    if (item_array_size(items) == 6) {
+        uacpi_size idx;
+        uacpi_table tmp_table = { 0 };
+
+        idx = item_array_at(items, 2)->immediate;
+        tmp_table.index = idx;
+        uacpi_table_unref(&tmp_table);
+
+        if (item_array_at(items, 5)->obj->integer != 0)
             uacpi_events_match_post_dynamic_table_load();
         return UACPI_STATUS_OK;
     }
 
-    src = item_array_at(items, 2)->obj;
+    src = item_array_at(items, 3)->obj;
 
     switch (src->type) {
     case UACPI_OBJECT_OPERATION_REGION: {
@@ -1534,6 +1541,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
             goto error_out;
     }
     uacpi_table_mark_as_loaded(table.index);
+    item_array_at(items, 2)->immediate = table.index;
 
     item_array_at(items, 0)->node = uacpi_namespace_root();
 

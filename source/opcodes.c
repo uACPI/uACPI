@@ -124,6 +124,9 @@ uacpi_u8 uacpi_load_op_decode_ops[] = {
     // Storage for the scope pointer, this is left as 0 in case of errors
     UACPI_PARSE_OP_LOAD_ZERO_IMM,
     UACPI_PARSE_OP_OBJECT_ALLOC_TYPED, UACPI_OBJECT_METHOD,
+    // Index of the table we are going to be loading to unref it later
+    UACPI_PARSE_OP_LOAD_ZERO_IMM,
+
     UACPI_PARSE_OP_TERM_ARG_UNWRAP_INTERNAL,
     UACPI_PARSE_OP_TARGET,
 
@@ -135,7 +138,7 @@ uacpi_u8 uacpi_load_op_decode_ops[] = {
     UACPI_PARSE_OP_INVOKE_HANDLER,
     UACPI_PARSE_OP_IF_NULL, 0, 3,
         UACPI_PARSE_OP_LOAD_FALSE_OBJECT,
-        UACPI_PARSE_OP_JMP, 15,
+        UACPI_PARSE_OP_JMP, 16,
 
     UACPI_PARSE_OP_LOAD_TRUE_OBJECT,
     UACPI_PARSE_OP_DISPATCH_TABLE_LOAD,
@@ -145,7 +148,7 @@ uacpi_u8 uacpi_load_op_decode_ops[] = {
      * might've been loaded from this table.
      */
     UACPI_PARSE_OP_INVOKE_HANDLER,
-    UACPI_PARSE_OP_STORE_TO_TARGET, 3,
+    UACPI_PARSE_OP_STORE_TO_TARGET, 4,
     UACPI_PARSE_OP_OBJECT_TRANSFER_TO_PREV,
     UACPI_PARSE_OP_END,
 };
@@ -154,7 +157,7 @@ uacpi_u8 uacpi_load_table_op_decode_ops[] = {
     // Storage for the scope pointer, this is left as 0 in case of errors
     UACPI_PARSE_OP_LOAD_ZERO_IMM,
     UACPI_PARSE_OP_OBJECT_ALLOC_TYPED, UACPI_OBJECT_METHOD,
-    // Index of the table we are going to be loaded to unref it later
+    // Index of the table we are going to be loading to unref it later
     UACPI_PARSE_OP_LOAD_ZERO_IMM,
     // Storage for the target pointer, this is left as 0 if none was requested
     UACPI_PARSE_OP_LOAD_ZERO_IMM,
