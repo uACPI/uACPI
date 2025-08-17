@@ -20,6 +20,8 @@ NORETURN static inline void error(const char *format, ...)
 {
     va_list args;
 
+    fflush(stdout);
+
     fprintf(stderr, "unexpected error: ");
     va_start(args, format);
     vfprintf(stderr, format, args);
