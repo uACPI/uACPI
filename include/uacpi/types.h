@@ -29,7 +29,13 @@ typedef enum uacpi_iteration_decision {
     UACPI_ITERATION_DECISION_CONTINUE = 0,
     UACPI_ITERATION_DECISION_BREAK,
 
-    // Only applicable for uacpi_namespace_for_each_child
+    /*
+     * Ignore all of the children of the current node and proceed directly to
+     * its peer nodes.
+     *
+     * Only applicable for API that interacts with the AML namespace such as
+     * uacpi_namespace_for_each_child, uacpi_find_deivces, etc.
+     */
     UACPI_ITERATION_DECISION_NEXT_PEER,
 } uacpi_iteration_decision;
 
