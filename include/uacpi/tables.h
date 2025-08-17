@@ -9,6 +9,8 @@ extern "C" {
 
 // Forward-declared to avoid including the entire acpi.h here
 struct acpi_fadt;
+struct acpi_entry_hdr;
+struct acpi_sdt_hdr;
 
 typedef struct uacpi_table_identifiers {
     uacpi_object_name signature;
@@ -134,6 +136,30 @@ typedef uacpi_table_installation_disposition (*uacpi_table_installation_handler)
  */
 uacpi_status uacpi_set_table_installation_handler(
     uacpi_table_installation_handler handler
+);
+
+typedef uacpi_iteration_decision (*uacpi_subtable_iteration_callback)
+    (uacpi_handle, struct acpi_entry_hdr*);
+
+/*
+ * Iterate every subtable of a table such as MADT or SRAT.
+ *
+ * 'hdr' is the pointer to the main table, 'hdr_size' is the number of bytes in
+ * the table before the beginning of the subtable records. 'cb' is the callback
+ * invoked for each subtable with the 'user' context pointer passed for every
+ * invocation.
+ *
+ * Example usage:
+ *    uacpi_table tbl;
+ *
+ *    uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &tbl);
+ *    uacpi_for_each_subtable(
+ *        tbl.hdr, sizeof(struct acpi_madt), parse_madt, NULL
+ *    );
+ */
+uacpi_status uacpi_for_each_subtable(
+    struct acpi_sdt_hdr *hdr, size_t hdr_size,
+    uacpi_subtable_iteration_callback cb, void *user
 );
 
 #ifdef __cplusplus
