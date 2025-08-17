@@ -374,11 +374,12 @@ If you want to contribute:
 | [ilobilix](https://github.com/ilobilo/ilobilix) | Yet another monolithic Linux clone wannabe. Currently under a rewrite | 8,703,286 | AMD Ryzen 9 9950X3D |
 | [Crescent2](https://github.com/Qwinci/crescent2) | An NT driver compatible kernel and userspace | 6,818,418 | Intel Core i5-13600K |
 | [davix](https://github.com/dbstream/davix) | Yet another unix-like by some bored nerd | 6,364,623 | Intel Core i7-13700K |
+| [Ironclad](https://ironclad-os.org) | Formally verified, hard real-time capable kernel written in SPARK and Ada | 6,196,937 | Intel Core i9-13900KS |
 | [Managarm](https://github.com/managarm/managarm)  | Pragmatic microkernel-based OS with fully asynchronous I/O | 5,618,646 | Intel Core i7-14700K |
 | [ChronOS](https://github.com/BUGO07/chronos) | Another basic hobby os held together by duct tape, made in rust | 5,416,703 | Intel Core Ultra 7 265KF |
 | [pmOS](https://gitlab.com/mishakov/pmos) | Microkernel-based operating system written from scratch with uACPI running in userspace | 5,354,445 | AMD Ryzen 9 5900X |
 | [menix](https://github.com/menix-os/menix) | A minimal and expandable Unix-like operating system | 5,239,043 | Intel Core Ultra 7 265KF |
-| [Ironclad](https://ironclad.nongnu.org) | Formally verified, hard real-time capable kernel written in SPARK and Ada | 4,802,816 | Intel Core i9-13900KS |
+| [Orange](https://github.com/cpplover0/orange) | Unix-like x86_64 OS with some microkernel features | 4,204,053 | AMD Ryzen 5 3600 |
 | [Astral](https://github.com/mathewnd/astral) | Operating system written in C which aims be POSIX-compliant | 4,189,189 | Intel Core i5-13600K |
 | [Keyronex](https://github.com/Keyronex/Keyronex) | Layered kernel with fundamentally asynchronous I/O and working set model-based memory management | 4,013,691 | AMD Ryzen 5800X |
 | [Orange](https://github.com/cppLover0/Orange) | x86_64 Unix-like OS | 2,377,330 | AMD Ryzen 5 3600 |
@@ -387,6 +388,7 @@ If you want to contribute:
 | [ElysiumOS](https://github.com/imwux/elysium-os) | Hybrid Unix-like kernel | 1,737,654 | AMD Ryzen 7 5800X3D |
 | [imaginarium](https://github.com/Khitiara/imaginarium) | Ziggy osdev experiments inspired by the NT kernel (using the zig general purpose allocator) | 1,504,436 | AMD Ryzen 7 3700X |
 | [BadgerOS](https://github.com/badgeteam/BadgerOS) | A monolithic lightweight UNIX clone | 1,018,518 | AMD Ryzen 5 3600 |
+| [Retro Rocket](https://github.com/brainboxdotcc/retro-rocket) | A BASIC _powered_ 64-bit SMP multitasking OS | 441,329 | Intel Xeon E5-2680 |
 | [Hyra](https://github.com/sigsegv7/Hyra) | Monolithic UNIX-like OS by [OSMORA.ORG](https://osmora.org) | 199,873 | Intel Core i3-3220 |
 
 ## License
