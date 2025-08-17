@@ -1398,3 +1398,52 @@ uacpi_status uacpi_table_fadt(struct acpi_fadt **out_fadt)
     *out_fadt = &g_uacpi_rt_ctx.fadt;
     return UACPI_STATUS_OK;
 }
+
+uacpi_status uacpi_for_each_subtable(
+    struct acpi_sdt_hdr *hdr, size_t hdr_size,
+    uacpi_subtable_iteration_callback cb, void *user
+)
+{
+    void *cursor;
+    size_t bytes_left;
+
+    cursor = UACPI_PTR_ADD(hdr, hdr_size);
+    bytes_left = hdr->length - hdr_size;
+
+    if (uacpi_unlikely(bytes_left > hdr->length))
+        return UACPI_STATUS_INVALID_TABLE_LENGTH;
+
+    while (bytes_left > sizeof(struct acpi_entry_hdr)) {
+        struct acpi_entry_hdr *subtable_hdr = cursor;
+
+        if (uacpi_unlikely(subtable_hdr->length > bytes_left ||
+                           subtable_hdr->length < sizeof(*subtable_hdr))) {
+            uacpi_error(
+                "corrupted '%.4s' subtable length: %u (%zu bytes left)\n",
+                hdr->signature, subtable_hdr->length, bytes_left
+            );
+            return UACPI_STATUS_INVALID_TABLE_LENGTH;
+        }
+
+        switch (cb(user, subtable_hdr)) {
+        case UACPI_ITERATION_DECISION_CONTINUE:
+            break;
+        case UACPI_ITERATION_DECISION_BREAK:
+            return UACPI_STATUS_OK;
+        default:
+            return UACPI_STATUS_INVALID_ARGUMENT;
+        }
+
+        cursor = UACPI_PTR_ADD(cursor, subtable_hdr->length);
+        bytes_left -= subtable_hdr->length;
+    }
+
+    if (uacpi_unlikely(bytes_left != 0)) {
+        uacpi_warn(
+            "found %zu stray bytes in table '%.4s'\n",
+            bytes_left, hdr->signature
+        );
+    }
+
+    return UACPI_STATUS_OK;
+}
