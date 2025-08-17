@@ -54,6 +54,33 @@ static uint8_t test_mcfg[] = {
     0x00, 0x00, 0x00, 0x00
 };
 
+/*
+ * 4 Local APICs [0, 1, 2, 3]
+ * 2 IOAPICs [4, 5]
+ * 2 ISOs [0->2, 9->9]
+ * 4 NMIs [0, 1, 2, 3]
+ */
+static uint8_t test_apic[] = {
+    0x41, 0x50, 0x49, 0x43, 0x90, 0x00, 0x00, 0x00,
+    0x03, 0x1a, 0x48, 0x50, 0x51, 0x4f, 0x45, 0x4d,
+    0x53, 0x4c, 0x49, 0x43, 0x2d, 0x4d, 0x50, 0x43,
+    0x01, 0x00, 0x00, 0x00, 0x48, 0x50, 0x20, 0x20,
+    0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xe0, 0xfe,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x01, 0x01,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x02, 0x02,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x03, 0x03,
+    0x01, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x04, 0x00,
+    0x00, 0x00, 0xc0, 0xfe, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x0c, 0x05, 0x00, 0x00, 0x10, 0xc0, 0xfe,
+    0x18, 0x00, 0x00, 0x00, 0x02, 0x0a, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x0a,
+    0x00, 0x09, 0x09, 0x00, 0x00, 0x00, 0x0f, 0x00,
+    0x04, 0x06, 0x00, 0x05, 0x00, 0x01, 0x04, 0x06,
+    0x01, 0x05, 0x00, 0x01, 0x04, 0x06, 0x02, 0x05,
+    0x00, 0x01, 0x04, 0x06, 0x03, 0x05, 0x00, 0x01
+};
+
 static void ensure_signature_is(const char *signature, uacpi_table tbl)
 {
     if (strncmp(tbl.hdr->signature, signature, 4) == 0)
@@ -105,12 +132,123 @@ static void test_table_installation(void)
     uacpi_table_unref(&tbl);
 }
 
+static uacpi_iteration_decision check_madt(
+    uacpi_handle user, struct acpi_entry_hdr *hdr
+)
+{
+    size_t *idx = user;
+    struct acpi_madt_lapic *lapic;
+    struct acpi_madt_ioapic *ioapic;
+    struct acpi_madt_interrupt_source_override *iso;
+    struct acpi_madt_lapic_nmi *nmi;
+
+    switch (*idx) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+        if (hdr->type != ACPI_MADT_ENTRY_TYPE_LAPIC)
+            goto out_unexpected;
+        lapic = (struct acpi_madt_lapic*)hdr;
+        if (lapic->id != *idx)
+            error("unexpected LAPIC id %d (idx %d)\n", lapic->id, *idx);
+        break;
+    case 4:
+    case 5:
+        if (hdr->type != ACPI_MADT_ENTRY_TYPE_IOAPIC)
+            goto out_unexpected;
+        ioapic = (struct acpi_madt_ioapic*)hdr;
+        if (ioapic->id != *idx)
+            error("unexpected IOAPIC id %d (idx %d)\n", ioapic->id, *idx);
+        break;
+    case 6:
+    case 7:
+        if (hdr->type != ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE)
+            goto out_unexpected;
+        iso = (struct acpi_madt_interrupt_source_override*)hdr;
+        if ((*idx == 6 && iso->source != 0) ||
+            (*idx == 7 && iso->source != 9))
+            error("unexpected ISO source %d (idx %d)\n", iso->source, *idx);
+        break;
+    case 8:
+    case 9:
+    case 10:
+    case 11:
+        if (hdr->type != ACPI_MADT_ENTRY_TYPE_LAPIC_NMI)
+            goto out_unexpected;
+        nmi = (struct acpi_madt_lapic_nmi*)hdr;
+        if (nmi->uid != (*idx - 8))
+            error("unexpected LAPIC NMI uid %d (idx %d)\n", nmi->uid, *idx);
+        break;
+    default:
+        goto out_unexpected;
+    }
+
+    (*idx)++;
+    return UACPI_ITERATION_DECISION_CONTINUE;
+
+out_unexpected:
+    error("unexpected MADT entry type %d (idx = %zu)\n", hdr->type, *idx);
+    return UACPI_ITERATION_DECISION_BREAK;
+}
+
+#define CHECK_SUBTEST_FAILED                                         \
+    if (st != UACPI_STATUS_INVALID_TABLE_LENGTH)                     \
+        error("unexpected status %s\n", uacpi_status_to_string(st));
+
+#define CHECK_SUBTEST_SUCCEEDED                            \
+    if (idx != 12)                                         \
+        error("invalid number of iterations: %zu\n", idx);
+
+#define FOREACH_SUBTEST(check_cond)                         \
+    idx = 0;                                                \
+    st = uacpi_for_each_subtable(                           \
+        tbl.hdr, sizeof(struct acpi_madt), check_madt, &idx \
+    );                                                      \
+    check_cond;                                             \
+
+static void test_foreach_subtable(void)
+{
+    uacpi_status st;
+    uacpi_table tbl;
+    size_t idx = 0;
+
+    st = uacpi_table_install(test_apic, &tbl);
+    ensure_ok_status(st);
+    ensure_signature_is(ACPI_MADT_SIGNATURE, tbl);
+    uacpi_table_unref(&tbl);
+
+    FOREACH_SUBTEST(CHECK_SUBTEST_SUCCEEDED);
+
+    // Make the size slightly larger, make sure we don't crash
+    test_apic[4] += 1;
+    FOREACH_SUBTEST(CHECK_SUBTEST_SUCCEEDED);
+
+    // Change the size to 1 byte and make sure we don't crash
+    test_apic[4] = 1;
+    FOREACH_SUBTEST(CHECK_SUBTEST_FAILED);
+
+    // Cutoff subtable
+    test_apic[4] = sizeof(struct acpi_madt) + sizeof(struct acpi_entry_hdr) + 1;
+    FOREACH_SUBTEST(CHECK_SUBTEST_FAILED);
+
+    test_apic[4] = sizeof(test_apic);
+    // Out-of-bounds subtable
+    test_apic[sizeof(test_apic) - 5]++;
+    FOREACH_SUBTEST(CHECK_SUBTEST_FAILED);
+
+    // all pass
+    test_apic[sizeof(test_apic) - 5]--;
+    uacpi_table_unref(&tbl);
+}
+
 static struct {
     const char *name;
     void (*func)(void);
 } test_cases[] = {
     { "basic-operation", test_basic_operation },
     { "table-installation", test_table_installation },
+    { "foreach-subtable", test_foreach_subtable },
 };
 
 static arg_spec_t TEST_CASE_ARG = ARG_POS("test-case", "name of the test case");

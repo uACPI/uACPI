@@ -464,6 +464,7 @@ def main() -> int:
         bare_cases: List[TestCase] = [
             BarebonesTestCase("basic-operation"),
             BarebonesTestCase("table-installation"),
+            BarebonesTestCase("foreach-subtable"),
         ]
 
         with TestHeaderFooter("Barebones Mode Tests"):
