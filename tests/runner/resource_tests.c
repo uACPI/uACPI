@@ -2397,7 +2397,7 @@ void run_resource_tests(void)
         uint8_t *bytes;
         uacpi_status ret;
         uacpi_object *resource_template = NULL;
-        size_t i;
+        size_t j;
 
         printf("Running resource test '%s'...", test->name);
 
@@ -2421,16 +2421,16 @@ void run_resource_tests(void)
         }
 
         bytes = (uint8_t*)resources->entries;
-        for (i = 0; i < resources->length; ++i) {
-            if ((i & (sizeof(void*) - 1)) == 0 && have_offset(test, i)) {
-                i += sizeof(void*) - 1;
+        for (j = 0; j < resources->length; ++j) {
+            if ((j & (sizeof(void*) - 1)) == 0 && have_offset(test, j)) {
+                j += sizeof(void*) - 1;
                 continue;
             }
 
-            if (bytes[i] != test->native_bytes[i]) {
+            if (bytes[j] != test->native_bytes[j]) {
                 printf(
                     "native byte[%zu] mismatch, expected 0x%02X, got 0x%02X\n",
-                    i, test->native_bytes[i], bytes[i]
+                    j, test->native_bytes[j], bytes[j]
                 );
                 fail_count++;
                 goto next_test;
@@ -2453,12 +2453,12 @@ void run_resource_tests(void)
             goto next_test;
         }
 
-        for (i = 0; i < resource_template->buffer->size; ++i)
-            if (resource_template->buffer->byte_data[i] != test->aml_bytes[i]) {
+        for (j = 0; j < resource_template->buffer->size; ++j)
+            if (resource_template->buffer->byte_data[j] != test->aml_bytes[j]) {
                 printf(
                     "AML byte[%zu] mismatch, expected 0x%02X, got 0x%02X\n",
-                    i, test->aml_bytes[i],
-                    resource_template->buffer->byte_data[i]
+                    j, test->aml_bytes[j],
+                    resource_template->buffer->byte_data[j]
                 );
                 fail_count++;
                 goto next_test;
