@@ -174,7 +174,7 @@ static inline hash_node_t *hash_table_get_or_add(
 
             while (current != NULL) {
                 hash_node_t *next = current->next;
-                size_t bucket = make_hash(current->key) % new_cap;
+                bucket = make_hash(current->key) % new_cap;
 
                 current->prev = NULL;
                 current->next = new_entries[bucket];

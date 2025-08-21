@@ -5839,16 +5839,16 @@ static uacpi_status exec_op(struct execution_context *ctx)
         }
 
         case UACPI_PARSE_OP_SWITCH_TO_NEXT_IF_EQUALS: {
-            uacpi_aml_op op, target_op;
+            uacpi_aml_op next_op, target_op;
             uacpi_u32 cur_offset;
             uacpi_u8 op_length;
 
             cur_offset = frame->code_offset;
             apply_tracked_pkg(frame, op_ctx);
-            op_length = peek_next_op(frame, &op);
+            op_length = peek_next_op(frame, &next_op);
 
             target_op = op_decode_aml_op(op_ctx);
-            if (op_length == 0 || op != target_op) {
+            if (op_length == 0 || next_op != target_op) {
                 // Revert tracked package
                 frame->code_offset = cur_offset;
                 break;
