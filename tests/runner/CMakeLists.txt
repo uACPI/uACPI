@@ -59,7 +59,7 @@ macro (define_test_runner NAME)
         target_compile_options(
             ${NAME}
             PRIVATE
-            -fsanitize=address,undefined -g3 -Wall -Wextra -Werror
+            -fsanitize=address,undefined -g3 -Wall -Wextra -Wshadow -Werror
         )
         target_link_options(
             ${NAME}
