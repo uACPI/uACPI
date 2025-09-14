@@ -1003,6 +1003,100 @@ UACPI_PACKED(struct acpi_ecdt {
 })
 UACPI_EXPECT_SIZEOF(struct acpi_ecdt, 65);
 
+// acpi_dbg2_device_info->port_type
+enum acpi_dbg2_type {
+    ACPI_DBG2_TYPE_SERIAL = 0x8000,
+    ACPI_DBG2_TYPE_1394 = 0x8001,
+    ACPI_DBG2_TYPE_USB = 0x8002,
+    ACPI_DBG2_TYPE_NET = 0x8003,
+};
+
+/*
+ * Constants for:
+ * - acpi_dbg2_device_info->port_subtype
+ *   if acpi_dbg2_device_info->port_type == ACPI_DBG2_TYPE_SERIAL.
+ * - acpi_spcr->interface_type (there is no type/subtype distinction in SPCR).
+ */
+enum acpi_dbg2_serial_subtype {
+    ACPI_DBG2_SUBTYPE_SERIAL_NS16550 = 0x0,
+    ACPI_DBG2_SUBTYPE_SERIAL_NS16550_DBGP1 = 0x1,
+    ACPI_DBG2_SUBTYPE_SERIAL_MAX311XE_SPI = 0x2,
+    ACPI_DBG2_SUBTYPE_SERIAL_PL011 = 0x3,
+    ACPI_DBG2_SUBTYPE_SERIAL_MSM8X60 = 0x4,
+    ACPI_DBG2_SUBTYPE_SERIAL_NS16550_NVIDIA = 0x5,
+    ACPI_DBG2_SUBTYPE_SERIAL_TI_OMAP = 0x6,
+    ACPI_DBG2_SUBTYPE_SERIAL_APM88XXXX = 0x8,
+    ACPI_DBG2_SUBTYPE_SERIAL_MSM8974 = 0x9,
+    ACPI_DBG2_SUBTYPE_SERIAL_SAM5250 = 0xA,
+    ACPI_DBG2_SUBTYPE_SERIAL_INTEL_USIF = 0xB,
+    ACPI_DBG2_SUBTYPE_SERIAL_IMX6 = 0xC,
+    ACPI_DBG2_SUBTYPE_SERIAL_ARM_SBSA_32BIT = 0xD,
+    ACPI_DBG2_SUBTYPE_SERIAL_ARM_SBSA_GENERIC = 0xE,
+    ACPI_DBG2_SUBTYPE_SERIAL_ARM_DCC = 0xF,
+    ACPI_DBG2_SUBTYPE_SERIAL_BCM2835 = 0x10,
+    ACPI_DBG2_SUBTYPE_SERIAL_SDM845_1_8432MHZ = 0x11,
+    ACPI_DBG2_SUBTYPE_SERIAL_NS16550_GAS = 0x12,
+    ACPI_DBG2_SUBTYPE_SERIAL_SDM845_7_372MHZ = 0x13,
+    ACPI_DBG2_SUBTYPE_SERIAL_INTEL_LPSS = 0x14,
+    ACPI_DBG2_SUBTYPE_SERIAL_RISCV_SBI = 0x15,
+};
+
+/*
+ * Constants for acpi_dbg2_device_info->port_subtype
+ * if acpi_dbg2_device_info->port_type == ACPI_DBG2_TYPE_1394.
+ */
+enum acpi_dbg2_1394_subtype {
+    ACPI_DBG2_SUBTYPE_1394_STANDARD = 0x0,
+};
+
+/*
+ * Constants for acpi_dbg2_device_info->port_subtype
+ * if acpi_dbg2_device_info->port_type == ACPI_DBG2_TYPE_USB.
+ */
+enum acpi_dbg2_usb_subtype {
+    ACPI_DBG2_SUBTYPE_USB_XHCI_DEBUG = 0x0,
+    ACPI_DBG2_SUBTYPE_USB_EHCI_DEBUG = 0x1,
+};
+
+UACPI_PACKED(struct acpi_dbg2 {
+    struct acpi_sdt_hdr hdr;
+    uacpi_u32 offset_dbg_device_info;
+    uacpi_u32 number_dbg_device_info;
+    /*
+     *  Variable length fields below:
+     *  At ->offset_dbg_device_info:
+     *    struct acpi_dbg2_dbg_device_info dbg_devices[number_dbg_device_info];
+     */
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dbg2, 44);
+
+UACPI_PACKED(struct acpi_dbg2_dbg_device_info {
+    uacpi_u8 revision;
+    uacpi_u16 length;
+    uacpi_u8 number_generic_address_registers;
+    uacpi_u16 namespace_string_length;
+    uacpi_u16 namespace_string_offset;
+    uacpi_u16 oem_data_length;
+    uacpi_u16 oem_data_offset;
+    uacpi_u16 port_type;
+    uacpi_u16 port_subtype;
+    uacpi_u16 rsvd;
+    uacpi_u16 base_address_register_offset;
+    uacpi_u16 address_size_offset;
+    /*
+     * Variable length fields below:
+     * At ->base_address_register_offset:
+     *     struct acpi_gas base_address_register[number_generic_address_registers];
+     * At ->address_size_offset
+     *     u32 address_size[number_generic_address_registers];
+     * At ->namespace_string_offset:
+     *     char namespace_string[namespace_string_length];
+     * At ->oem_data_offset:
+     *     char oem_data[oem_data_length];
+     */
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dbg2_dbg_device_info, 22);
+
 UACPI_PACKED(struct acpi_rhct_hdr {
     uacpi_u16 type;
     uacpi_u16 length;
