@@ -1097,6 +1097,56 @@ UACPI_PACKED(struct acpi_dbg2_dbg_device_info {
 })
 UACPI_EXPECT_SIZEOF(struct acpi_dbg2_dbg_device_info, 22);
 
+// acpi_scpr->interrupt_type
+#define ACPI_SPCR_INTERRUPT_TYPE_8259 0x1
+#define ACPI_SPCR_INTERRUPT_TYPE_IOAPIC 0x2
+#define ACPI_SPCR_INTERRUPT_TYPE_IOSAPIC 0x4
+#define ACPI_SPCR_INTERRUPT_TYPE_GIC 0x8
+#define ACPI_SPCR_INTERRUPT_TYPE_PLIC_APLIC 0x10
+
+// acpi_spcr->pci_flags
+#define ACPI_SPCR_PCI_FLAGS_DO_NOT_DISABLE 0x1
+
+// acpi_spcr->terminal_type
+enum acpi_spcr_terminal_type {
+    ACPI_SPCR_TERMINAL_TYPE_VT100 = 0,
+    ACPI_SPCR_TERMINAL_TYPE_EXTENDED_VT100 = 1,
+    ACPI_SPCR_TERMINAL_TYPE_VT_UTF8 = 2,
+    ACPI_SPCR_TERMINAL_TYPE_ANSI = 3,
+};
+
+UACPI_PACKED(struct acpi_spcr {
+    struct acpi_sdt_hdr hdr;
+    uacpi_u8 interface_type;
+    uacpi_u8 rsvd[3];
+    struct acpi_gas base_address;
+    uacpi_u8 interrupt_type;
+    uacpi_u8 irq;
+    uacpi_u32 gsi;
+    uacpi_u8 configured_baud_rate;
+    uacpi_u8 parity;
+    uacpi_u8 stop_bits;
+    uacpi_u8 flow_control;
+    uacpi_u8 terminal_type;
+    uacpi_u8 language;
+    uacpi_u16 pci_device_id;
+    uacpi_u16 pci_vendor_id;
+    uacpi_u8 pci_bus_number;
+    uacpi_u8 pci_device_number;
+    uacpi_u8 pci_function_number;
+    uacpi_u32 pci_flags;
+    uacpi_u8 pci_segment;
+    uacpi_u32 uart_clock_frequency;
+    uacpi_u32 precise_baud_rate;
+    uacpi_u16 namespace_string_length;
+    uacpi_u16 namespace_string_offset;
+    /*
+     * At ->namespace_string_offset:
+     *    char namespace_string[namespace_string_length];
+     */
+})
+UACPI_EXPECT_SIZEOF(struct acpi_spcr, 88);
+
 UACPI_PACKED(struct acpi_rhct_hdr {
     uacpi_u16 type;
     uacpi_u16 length;
