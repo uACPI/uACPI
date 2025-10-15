@@ -2418,11 +2418,7 @@ static uacpi_status handle_ref_or_deref_of(struct execution_context *ctx)
         dst = item_array_at(&op_ctx->items, 1)->obj;
 
     if (op_ctx->op->code == UACPI_AML_OP_DerefOfOp) {
-        uacpi_bool was_a_reference = UACPI_FALSE;
-
         if (src->type == UACPI_OBJECT_REFERENCE) {
-            was_a_reference = UACPI_TRUE;
-
             /*
              * Explicit dereferencing [DerefOf] behavior:
              * Simply grabs the bottom-most object that is not a reference.
@@ -2442,14 +2438,6 @@ static uacpi_status handle_ref_or_deref_of(struct execution_context *ctx)
                 sizeof(dst->integer), 1
             );
             return UACPI_STATUS_OK;
-        }
-
-        if (!was_a_reference) {
-            uacpi_error(
-                "invalid DerefOf argument: %s, expected a reference\n",
-                uacpi_object_type_to_string(src->type)
-            );
-            return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
         }
 
         return uacpi_object_assign(dst, src,
