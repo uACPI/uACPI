@@ -2405,7 +2405,7 @@ static uacpi_status store_to_reference(
     );
 }
 
-static uacpi_status handle_ref_or_deref_of(struct execution_context *ctx)
+static uacpi_status handle_ref_of(struct execution_context *ctx)
 {
     struct op_context *op_ctx = ctx->cur_op_ctx;
     uacpi_object *dst, *src;
@@ -2416,33 +2416,6 @@ static uacpi_status handle_ref_or_deref_of(struct execution_context *ctx)
         dst = item_array_at(&op_ctx->items, 2)->obj;
     else
         dst = item_array_at(&op_ctx->items, 1)->obj;
-
-    if (op_ctx->op->code == UACPI_AML_OP_DerefOfOp) {
-        if (src->type == UACPI_OBJECT_REFERENCE) {
-            /*
-             * Explicit dereferencing [DerefOf] behavior:
-             * Simply grabs the bottom-most object that is not a reference.
-             * This mimics the behavior of NT Acpi.sys: any DerfOf fetches
-             * the bottom-most reference. Note that this is different from
-             * ACPICA where DerefOf dereferences one level.
-             */
-            src = reference_unwind(src)->inner_object;
-        }
-
-        if (src->type == UACPI_OBJECT_BUFFER_INDEX) {
-            uacpi_buffer_index *buf_idx = &src->buffer_index;
-
-            dst->type = UACPI_OBJECT_INTEGER;
-            uacpi_memcpy_zerout(
-                &dst->integer, buffer_index_cursor(buf_idx),
-                sizeof(dst->integer), 1
-            );
-            return UACPI_STATUS_OK;
-        }
-
-        return uacpi_object_assign(dst, src,
-                                   UACPI_ASSIGN_BEHAVIOR_SHALLOW_COPY);
-    }
 
     dst->type = UACPI_OBJECT_REFERENCE;
     dst->inner_object = src;
@@ -3879,6 +3852,39 @@ static uacpi_status field_byte_size(
     return UACPI_STATUS_OK;
 }
 
+static uacpi_status handle_deref_of(struct execution_context *ctx)
+{
+    uacpi_object *src, *dst;
+    struct op_context *op_ctx = ctx->cur_op_ctx;
+
+    src = item_array_at(&op_ctx->items, 0)->obj;
+    dst = item_array_at(&op_ctx->items, 1)->obj;
+
+    if (src->type == UACPI_OBJECT_REFERENCE) {
+        /*
+         * Explicit dereferencing [DerefOf] behavior:
+         * Simply grabs the bottom-most object that is not a reference.
+         * This mimics the behavior of NT Acpi.sys: any DerfOf fetches
+         * the bottom-most reference. Note that this is different from
+         * ACPICA where DerefOf dereferences one level.
+         */
+        src = reference_unwind(src)->inner_object;
+    }
+
+    if (src->type == UACPI_OBJECT_BUFFER_INDEX) {
+        uacpi_buffer_index *buf_idx = &src->buffer_index;
+
+        dst->type = UACPI_OBJECT_INTEGER;
+        uacpi_memcpy_zerout(
+            &dst->integer, buffer_index_cursor(buf_idx),
+            sizeof(dst->integer), 1
+        );
+        return UACPI_STATUS_OK;
+    }
+
+    return uacpi_object_assign(dst, src, UACPI_ASSIGN_BEHAVIOR_SHALLOW_COPY);
+}
+
 static uacpi_status handle_field_read(struct execution_context *ctx)
 {
     uacpi_status ret;
@@ -4898,7 +4904,8 @@ enum op_handler {
     OP_HANDLER_CREATE_METHOD,
     OP_HANDLER_COPY_OBJECT_OR_STORE,
     OP_HANDLER_INC_DEC,
-    OP_HANDLER_REF_OR_DEREF_OF,
+    OP_HANDLER_REF_OF,
+    OP_HANDLER_DEREF_OF,
     OP_HANDLER_LOGICAL_NOT,
     OP_HANDLER_BINARY_LOGIC,
     OP_HANDLER_NAMED_OBJECT,
@@ -4952,7 +4959,8 @@ static uacpi_status (*op_handlers[])(struct execution_context *ctx) = {
     [OP_HANDLER_CREATE_MUTEX_OR_EVENT] = handle_create_mutex_or_event,
     [OP_HANDLER_COPY_OBJECT_OR_STORE] = handle_copy_object_or_store,
     [OP_HANDLER_INC_DEC] = handle_inc_dec,
-    [OP_HANDLER_REF_OR_DEREF_OF] = handle_ref_or_deref_of,
+    [OP_HANDLER_REF_OF] = handle_ref_of,
+    [OP_HANDLER_DEREF_OF] = handle_deref_of,
     [OP_HANDLER_LOGICAL_NOT] = handle_logical_not,
     [OP_HANDLER_BINARY_LOGIC] = handle_binary_logic,
     [OP_HANDLER_BUFFER] = handle_buffer,
@@ -5037,8 +5045,8 @@ static uacpi_u8 handler_idx_of_op[0x100] = {
     [UACPI_AML_OP_IncrementOp] = OP_HANDLER_INC_DEC,
     [UACPI_AML_OP_DecrementOp] = OP_HANDLER_INC_DEC,
 
-    [UACPI_AML_OP_RefOfOp] = OP_HANDLER_REF_OR_DEREF_OF,
-    [UACPI_AML_OP_DerefOfOp] = OP_HANDLER_REF_OR_DEREF_OF,
+    [UACPI_AML_OP_RefOfOp] = OP_HANDLER_REF_OF,
+    [UACPI_AML_OP_DerefOfOp] = OP_HANDLER_DEREF_OF,
 
     [UACPI_AML_OP_LnotOp] = OP_HANDLER_LOGICAL_NOT,
 
@@ -5100,7 +5108,7 @@ static uacpi_u8 handler_idx_of_op[0x100] = {
 
 static uacpi_u8 handler_idx_of_ext_op[0x100] = {
     [EXT_OP_IDX(UACPI_AML_OP_CreateFieldOp)] = OP_HANDLER_CREATE_BUFFER_FIELD,
-    [EXT_OP_IDX(UACPI_AML_OP_CondRefOfOp)] = OP_HANDLER_REF_OR_DEREF_OF,
+    [EXT_OP_IDX(UACPI_AML_OP_CondRefOfOp)] = OP_HANDLER_REF_OF,
     [EXT_OP_IDX(UACPI_AML_OP_OpRegionOp)] = OP_HANDLER_CREATE_OP_REGION,
     [EXT_OP_IDX(UACPI_AML_OP_DeviceOp)] = OP_HANDLER_CODE_BLOCK,
     [EXT_OP_IDX(UACPI_AML_OP_ProcessorOp)] = OP_HANDLER_CODE_BLOCK,
