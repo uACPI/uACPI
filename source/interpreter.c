@@ -3854,22 +3854,15 @@ static uacpi_status field_byte_size(
 
 static uacpi_status handle_deref_of(struct execution_context *ctx)
 {
-    uacpi_object *src, *dst;
+    uacpi_object *src, *unwound_src, *dst;
+    uacpi_object_type read_type;
+    bool is_field;
+    uacpi_status ret;
+
     struct op_context *op_ctx = ctx->cur_op_ctx;
 
     src = item_array_at(&op_ctx->items, 0)->obj;
     dst = item_array_at(&op_ctx->items, 1)->obj;
-
-    if (src->type == UACPI_OBJECT_REFERENCE) {
-        /*
-         * Explicit dereferencing [DerefOf] behavior:
-         * Simply grabs the bottom-most object that is not a reference.
-         * This mimics the behavior of NT Acpi.sys: any DerfOf fetches
-         * the bottom-most reference. Note that this is different from
-         * ACPICA where DerefOf dereferences one level.
-         */
-        src = reference_unwind(src)->inner_object;
-    }
 
     if (src->type == UACPI_OBJECT_BUFFER_INDEX) {
         uacpi_buffer_index *buf_idx = &src->buffer_index;
@@ -3882,21 +3875,95 @@ static uacpi_status handle_deref_of(struct execution_context *ctx)
         return UACPI_STATUS_OK;
     }
 
-    return uacpi_object_assign(dst, src, UACPI_ASSIGN_BEHAVIOR_SHALLOW_COPY);
+    /*
+     * Explicit dereferencing [DerefOf] behavior:
+     * Simply grabs the bottom-most object that is not a reference.
+     * This mimics the behavior of NT Acpi.sys: any DerfOf fetches
+     * the bottom-most reference. Note that this is different from
+     * ACPICA where DerefOf dereferences one level.
+     */
+    unwound_src = reference_unwind(src)->inner_object;
+    is_field = uacpi_object_is_one_of(
+        unwound_src,
+        UACPI_OBJECT_BUFFER_FIELD_BIT | UACPI_OBJECT_FIELD_UNIT_BIT
+    );
+
+    /*
+     * If the object is a field, find out how to read it and transform this
+     * DerefOf into a field read op. Otherwise, simply assign this object to the
+     * destination.
+     */
+    if (is_field) {
+        uacpi_aml_op new_op;
+
+        ret = field_get_read_type(unwound_src, &read_type);
+        if (uacpi_unlikely_error(ret)) {
+            uacpi_error(
+                "unable to perform a read from field %p: "
+                "parent opregion gone\n", unwound_src
+            );
+            return ret;
+        }
+
+        switch (read_type) {
+        case UACPI_OBJECT_BUFFER:
+            new_op = UACPI_AML_OP_InternalOpReadFieldAsBuffer;
+            break;
+        case UACPI_OBJECT_INTEGER:
+            new_op = UACPI_AML_OP_InternalOpReadFieldAsInteger;
+            break;
+        default:
+            return UACPI_STATUS_INVALID_ARGUMENT;
+        }
+
+        op_ctx->op = uacpi_get_op_spec(new_op);
+        op_ctx->pc = 0;
+
+        uacpi_object_ref(unwound_src);
+        item_array_at(&op_ctx->items, 0)->obj = unwound_src;
+        uacpi_object_unref(src);
+
+        /*
+         * A proper destination object will be allocated by the op we have just
+         * switched to. This one is not needed anymore.
+         */
+        uacpi_object_unref(dst);
+        item_array_pop(&op_ctx->items);
+
+        return UACPI_STATUS_OK;
+    }
+
+    return uacpi_object_assign(
+        dst, unwound_src,
+        UACPI_ASSIGN_BEHAVIOR_SHALLOW_COPY
+    );
 }
 
 static uacpi_status handle_field_read(struct execution_context *ctx)
 {
     uacpi_status ret;
     struct op_context *op_ctx = ctx->cur_op_ctx;
-    struct uacpi_namespace_node *node;
+    struct item *src_item;
     uacpi_object *src_obj, *dst_obj;
     uacpi_size dst_size;
     void *dst = UACPI_NULL;
     uacpi_data_view wtr_response = { 0 };
 
-    node = item_array_at(&op_ctx->items, 0)->node;
-    src_obj = uacpi_namespace_node_get_object(node);
+    src_item = item_array_at(&op_ctx->items, 0);
+
+    /*
+     * Source may be a namespace node or an object depending on how we ended up
+     * here, check explicitly.
+     */
+    if (src_item->type == ITEM_NAMESPACE_NODE) {
+        uacpi_namespace_node *node;
+
+        node = item_array_at(&op_ctx->items, 0)->node;
+        src_obj = uacpi_namespace_node_get_object(node);
+    } else {
+        src_obj = src_item->obj;
+    }
+
     dst_obj = item_array_at(&op_ctx->items, 1)->obj;
 
     if (op_ctx->op->code == UACPI_AML_OP_InternalOpReadFieldAsBuffer) {
