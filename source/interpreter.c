@@ -4636,6 +4636,8 @@ static uacpi_aml_op op_decode_aml_op(struct op_context *op_ctx)
 #define EXEC_OP_DO_ERR(reason, ...) EXEC_OP_DO_LVL(error, reason, __VA_ARGS__)
 #define EXEC_OP_DO_WARN(reason, ...) EXEC_OP_DO_LVL(warn, reason, __VA_ARGS__)
 
+#define EXEC_OP_ERR_3(reason, arg0, arg1, arg2) \
+    EXEC_OP_DO_ERR(reason, ,arg0, arg1, arg2)
 #define EXEC_OP_ERR_2(reason, arg0, arg1) EXEC_OP_DO_ERR(reason, ,arg0, arg1)
 #define EXEC_OP_ERR_1(reason, arg0) EXEC_OP_DO_ERR(reason, ,arg0)
 #define EXEC_OP_ERR(reason) EXEC_OP_DO_ERR(reason)
@@ -5428,7 +5430,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
             break;
 
         case UACPI_PARSE_OP_TYPECHECK: {
-            enum uacpi_object_type expected_type;
+            uacpi_object_type expected_type;
 
             expected_type = op_decode_byte(op_ctx);
 
@@ -5439,6 +5441,44 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
             }
 
+            break;
+        }
+
+        case UACPI_PARSE_OP_TYPECHECK_ONE_OF: {
+            uacpi_object_type_bits expected_mask = 0;
+            uacpi_bool one_of;
+            uacpi_object_type type, types[4];
+            uacpi_u8 num_types, i;
+
+            num_types = op_decode_byte(op_ctx);
+            for (i = 0; i < num_types; i++) {
+                type = op_decode_byte(op_ctx);
+                if (i < UACPI_ARRAY_SIZE(types))
+                    types[i] = type;
+
+                expected_mask |= 1u << type;
+            }
+
+            one_of = uacpi_object_is_one_of(item->obj, expected_mask);
+            if (uacpi_likely(one_of))
+                break;
+
+            ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
+
+            if (i == 2) {
+                EXEC_OP_ERR_3(
+                    "bad object type: expected one of %s/%s, got %s!",
+                    uacpi_object_type_to_string(types[0]),
+                    uacpi_object_type_to_string(types[1]),
+                    uacpi_object_type_to_string(item->obj->type)
+                );
+                break;
+            }
+
+            EXEC_OP_ERR_2(
+                "bad object type: expected one of 0x%08X, got %s!",
+                 expected_mask, uacpi_object_type_to_string(item->obj->type)
+            );
             break;
         }
 
