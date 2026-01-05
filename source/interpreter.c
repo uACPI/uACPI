@@ -1791,7 +1791,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
             field->byte_offset = UACPI_ALIGN_DOWN(
                 bit_offset / 8,
                 field->access_width_bytes,
-                uacpi_u32
+                uacpi_size
             );
 
             field->bit_offset_within_first_byte = bit_offset;
