@@ -1,4 +1,4 @@
-project('uacpi', 'c')
+project('uacpi', version: '3.2.0')
 
 sources = files(
     'source/tables.c',
