@@ -1351,7 +1351,7 @@ static uacpi_status initialize_fadt(const void *virt)
 
     uacpi_memcpy(fadt, hdr, UACPI_MIN(sizeof(*fadt), hdr->length));
 
-#if !defined(UACPI_REDUCED_HARDWARE) && !defined(UACPI_BAREBONES_MODE)
+#ifndef UACPI_REDUCED_HARDWARE
     g_uacpi_rt_ctx.is_hardware_reduced = fadt->flags & ACPI_HW_REDUCED_ACPI;
 #endif
 
