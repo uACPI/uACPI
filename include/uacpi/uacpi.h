@@ -58,6 +58,13 @@ uacpi_status uacpi_setup_early_table_access(
 );
 
 /*
+ * Returns UACPI_TRUE if the table subsystem is available for use by the kernel.
+ * This happens after a successful call to either uacpi_initialize(...) or
+ * uacpi_setup_early_table_access(...).
+ */
+uacpi_bool uacpi_table_subsystem_available(void);
+
+/*
  * Bad table checksum should be considered a fatal error
  * (table load is fully aborted in this case)
  */
