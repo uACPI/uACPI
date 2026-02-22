@@ -7,6 +7,11 @@
 #include <uacpi/tables.h>
 #include <uacpi/uacpi.h>
 
+#ifndef __WATCOMC__
+_Alignas(void*)
+#endif
+static uint8_t g_early_table_buf[4096];
+
 void uacpi_kernel_log(enum uacpi_log_level lvl, const char *text)
 {
     printf("[%s] %s", uacpi_log_level_to_string(lvl), text);
@@ -274,7 +279,6 @@ static const arg_parser_t PARSER = {
 
 int main(int argc, char *argv[])
 {
-    static uint8_t early_table_buf[4096];
     struct acpi_rsdp rsdp = { 0 };
     struct full_xsdt *xsdt;
     uacpi_status st;
@@ -288,7 +292,7 @@ int main(int argc, char *argv[])
     g_rsdp = (uacpi_phys_addr)((uintptr_t)&rsdp);
 
     st = uacpi_setup_early_table_access(
-        early_table_buf, sizeof(early_table_buf)
+        g_early_table_buf, sizeof(g_early_table_buf)
     );
     ensure_ok_status(st);
 
