@@ -45,6 +45,10 @@ extern "C" {
  *   uacpi_kernel_alloc() after the call to uacpi_initialize() and can therefore
  *   be reclaimed by the kernel.
  *
+ * The 'temporary_buffer' is expected to be aligned on the native pointer size
+ * boundary (4 on a 32-bit system, 8 on a 64-bit system), although any
+ * misalignment is handled gracefully and does not result in an error.
+ *
  * The approximate overhead per table is 56 bytes, so a buffer of 4096 bytes
  * yields about 73 tables in terms of capacity. uACPI also has an internal
  * static buffer for tables, "UACPI_STATIC_TABLE_ARRAY_LEN", which is configured

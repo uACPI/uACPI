@@ -213,6 +213,7 @@ uacpi_status uacpi_setup_early_table_access(
 )
 {
     uacpi_status ret;
+    uacpi_virt_addr buffer_addr, aligned_buffer_addr;
 
 #ifndef UACPI_BAREBONES_MODE
     UACPI_ENSURE_INIT_LEVEL_IS(UACPI_INIT_LEVEL_EARLY);
@@ -220,10 +221,27 @@ uacpi_status uacpi_setup_early_table_access(
     if (uacpi_unlikely(early_table_access))
         return UACPI_STATUS_INIT_LEVEL_MISMATCH;
 
+    uacpi_logger_initialize();
+
+    buffer_addr = UACPI_PTR_TO_VIRT_ADDR(temporary_buffer);
+    aligned_buffer_addr = UACPI_ALIGN_UP(
+        buffer_addr, UACPI_POINTER_SIZE, uacpi_virt_addr
+    );
+    if (buffer_addr != aligned_buffer_addr) {
+        uacpi_size stripped_bytes;
+
+        stripped_bytes = aligned_buffer_addr - buffer_addr;
+        uacpi_warn(
+            "fixed up misaligned early tables buffer (%zu bytes stripped)\n",
+            stripped_bytes
+        );
+
+        buffer_size -= UACPI_MIN(stripped_bytes, buffer_size);
+        temporary_buffer = UACPI_VIRT_ADDR_TO_PTR(aligned_buffer_addr);
+    }
+
     if (uacpi_unlikely(buffer_size < sizeof(struct uacpi_installed_table)))
         return UACPI_STATUS_INVALID_ARGUMENT;
-
-    uacpi_logger_initialize();
 
     tables.dynamic_storage = temporary_buffer;
     tables.dynamic_capacity = buffer_size / sizeof(struct uacpi_installed_table);
