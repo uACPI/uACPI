@@ -35,6 +35,28 @@ void uacpi_kernel_deinitialize(void)
 }
 #endif
 
+static uacpi_interrupt_state int_state = 1000000;
+
+uacpi_interrupt_state uacpi_kernel_disable_interrupts(void)
+{
+    uacpi_interrupt_state prev_state = int_state;
+
+    int_state--;
+    return prev_state;
+}
+
+void uacpi_kernel_restore_interrupts(uacpi_interrupt_state state)
+{
+    if (state != (int_state - 1)) {
+        error(
+            "interrupt state mismatch: tried to set %d (expected %d)\n",
+            state, int_state - 1
+        );
+    }
+
+    int_state++;
+}
+
 uacpi_status uacpi_kernel_io_map(
     uacpi_io_addr base, uacpi_size len, uacpi_handle *out_handle
 )
