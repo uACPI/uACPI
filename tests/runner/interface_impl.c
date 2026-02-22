@@ -122,7 +122,8 @@ uacpi_status uacpi_kernel_pci_device_open(
     uacpi_pci_address address, uacpi_handle *out_handle
 )
 {
-    UACPI_UNUSED(address);
+    if (address.segment == 0xDEAD)
+        return UACPI_STATUS_NOT_FOUND;
 
     *out_handle = NULL;
     return UACPI_STATUS_OK;
