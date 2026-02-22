@@ -332,10 +332,16 @@ int main(int argc, char *argv[])
 
     g_rsdp = (uacpi_phys_addr)((uintptr_t)&rsdp);
 
+    if (uacpi_table_subsystem_available())
+        error("table subsystem should not be available at this point!\n");
+
     st = uacpi_setup_early_table_access(
         g_early_table_buf, sizeof(g_early_table_buf)
     );
     ensure_ok_status(st);
+
+    if (!uacpi_table_subsystem_available())
+        error("table subsystem must be available at this point!\n");
 
     test_case = get(&TEST_CASE_ARG);
 
