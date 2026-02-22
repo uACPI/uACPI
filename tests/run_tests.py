@@ -466,6 +466,7 @@ def main() -> int:
             BarebonesTestCase("table-installation"),
             BarebonesTestCase("foreach-subtable"),
             BarebonesTestCase("reduced-hardware"),
+            BarebonesTestCase("misaligned-early-tables-buffer"),
         ]
 
         with TestHeaderFooter("Barebones Mode Tests"):

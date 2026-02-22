@@ -287,6 +287,30 @@ static void test_reduced_hardware(void)
     check_hw_reduced(UACPI_TRUE);
 }
 
+static void test_misaligned_early_tables_buffer(void)
+{
+    static const size_t misalignment_addend = 3;
+    uacpi_status st;
+
+    // Case 1: misalignment causes the buffer size to drop to 0
+    uacpi_state_reset();
+    st = uacpi_setup_early_table_access(
+        g_early_table_buf + misalignment_addend,
+        misalignment_addend
+    );
+    if (st != UACPI_STATUS_INVALID_ARGUMENT)
+        error("Unexpected status: %s\n", uacpi_status_to_string(st));
+
+    // Case 2: there's still a lot of space left after alignment fixup
+    st = uacpi_setup_early_table_access(
+        g_early_table_buf + misalignment_addend,
+        sizeof(g_early_table_buf) - misalignment_addend
+    );
+    ensure_ok_status(st);
+
+    test_basic_operation();
+}
+
 static struct {
     const char *name;
     void (*func)(void);
@@ -295,6 +319,7 @@ static struct {
     { "table-installation", test_table_installation },
     { "foreach-subtable", test_foreach_subtable },
     { "reduced-hardware", test_reduced_hardware },
+    { "misaligned-early-tables-buffer", test_misaligned_early_tables_buffer },
 };
 
 static arg_spec_t TEST_CASE_ARG = ARG_POS("test-case", "name of the test case");
