@@ -47,6 +47,7 @@ uacpi_status uacpi_set_waking_vector(
 static uacpi_status enter_sleep_state_hw_full(uacpi_u8 state)
 {
     uacpi_status ret;
+    uacpi_interrupt_state int_state;
     uacpi_u64 wake_status, pm1a, pm1b;
 
     ret = uacpi_write_register_field(
@@ -77,13 +78,15 @@ static uacpi_status enter_sleep_state_hw_full(uacpi_u8 state)
     pm1a |= g_uacpi_rt_ctx.last_sleep_typ_a << ACPI_PM1_CNT_SLP_TYP_IDX;
     pm1b |= g_uacpi_rt_ctx.last_sleep_typ_b << ACPI_PM1_CNT_SLP_TYP_IDX;
 
+    int_state = uacpi_kernel_disable_interrupts();
+
     /*
      * Just like ACPICA, split writing SLP_TYP and SLP_EN to work around
      * buggy firmware that can't handle both written at the same time.
      */
     ret = uacpi_write_registers(UACPI_REGISTER_PM1_CNT, pm1a, pm1b);
     if (uacpi_unlikely_error(ret))
-        return ret;
+        goto out;
 
     pm1a |= ACPI_PM1_CNT_SLP_EN_MASK;
     pm1b |= ACPI_PM1_CNT_SLP_EN_MASK;
@@ -93,7 +96,7 @@ static uacpi_status enter_sleep_state_hw_full(uacpi_u8 state)
 
     ret = uacpi_write_registers(UACPI_REGISTER_PM1_CNT, pm1a, pm1b);
     if (uacpi_unlikely_error(ret))
-        return ret;
+        goto out;
 
     if (state > UACPI_SLEEP_STATE_S3) {
         /*
@@ -111,10 +114,11 @@ static uacpi_status enter_sleep_state_hw_full(uacpi_u8 state)
         // Try one more time
         ret = uacpi_write_registers(UACPI_REGISTER_PM1_CNT, pm1a, pm1b);
         if (uacpi_unlikely_error(ret))
-            return ret;
+            goto out;
 
         // Nothing we can do here, give up
-        return UACPI_STATUS_HARDWARE_TIMEOUT;
+        ret = UACPI_STATUS_HARDWARE_TIMEOUT;
+        goto out;
     }
 
     do {
@@ -122,10 +126,12 @@ static uacpi_status enter_sleep_state_hw_full(uacpi_u8 state)
             UACPI_REGISTER_FIELD_WAK_STS, &wake_status
         );
         if (uacpi_unlikely_error(ret))
-            return ret;
+            goto out;
     } while (wake_status != 1);
 
-    return UACPI_STATUS_OK;
+out:
+    uacpi_kernel_restore_interrupts(int_state);
+    return ret;
 }
 
 static uacpi_status prepare_for_wake_from_sleep_state_hw_full(uacpi_u8 state)
@@ -401,17 +407,20 @@ static uacpi_status enter_sleep_state_hw_reduced(uacpi_u8 state)
     uacpi_status ret;
     uacpi_u8 sleep_control;
     uacpi_u64 wake_status;
+    uacpi_interrupt_state int_state;
     struct acpi_fadt *fadt = &g_uacpi_rt_ctx.fadt;
 
     if (!fadt->sleep_control_reg.address || !fadt->sleep_status_reg.address)
         return UACPI_STATUS_NOT_FOUND;
+
+    int_state = uacpi_kernel_disable_interrupts();
 
     ret = uacpi_write_register_field(
         UACPI_REGISTER_FIELD_HWR_WAK_STS,
         ACPI_SLP_STS_CLEAR
     );
     if (uacpi_unlikely_error(ret))
-        return ret;
+        goto out;
 
     sleep_control = make_hw_reduced_sleep_control(
         g_uacpi_rt_ctx.last_sleep_typ_a
@@ -427,7 +436,7 @@ static uacpi_status enter_sleep_state_hw_reduced(uacpi_u8 state)
      */
     ret = uacpi_write_register(UACPI_REGISTER_SLP_CNT, sleep_control);
     if (uacpi_unlikely_error(ret))
-        return ret;
+        goto out;
 
     /*
      * The OSPM then polls the WAK_STS bit of the SLEEP_STATUS_REG waiting for
@@ -439,10 +448,12 @@ static uacpi_status enter_sleep_state_hw_reduced(uacpi_u8 state)
             UACPI_REGISTER_FIELD_HWR_WAK_STS, &wake_status
         );
         if (uacpi_unlikely_error(ret))
-            return ret;
+            goto out;
     } while (wake_status != 1);
 
-    return UACPI_STATUS_OK;
+out:
+    uacpi_kernel_restore_interrupts(int_state);
+    return ret;
 }
 
 static uacpi_status prepare_for_wake_from_sleep_state_hw_reduced(uacpi_u8 state)

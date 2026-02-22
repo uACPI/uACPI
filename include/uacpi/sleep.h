@@ -33,25 +33,21 @@ typedef enum uacpi_sleep_state {
 
 /*
  * Prepare for a given sleep state.
- * Must be caled with interrupts ENABLED.
  */
 uacpi_status uacpi_prepare_for_sleep_state(uacpi_sleep_state);
 
 /*
  * Enter the given sleep state after preparation.
- * Must be called with interrupts DISABLED.
  */
 uacpi_status uacpi_enter_sleep_state(uacpi_sleep_state);
 
 /*
  * Prepare to leave the given sleep state.
- * Must be called with interrupts DISABLED.
  */
 uacpi_status uacpi_prepare_for_wake_from_sleep_state(uacpi_sleep_state);
 
 /*
  * Wake from the given sleep state.
- * Must be called with interrupts ENABLED.
  */
 uacpi_status uacpi_wake_from_sleep_state(uacpi_sleep_state);
 
