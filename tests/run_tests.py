@@ -465,6 +465,7 @@ def main() -> int:
             BarebonesTestCase("basic-operation"),
             BarebonesTestCase("table-installation"),
             BarebonesTestCase("foreach-subtable"),
+            BarebonesTestCase("reduced-hardware"),
         ]
 
         with TestHeaderFooter("Barebones Mode Tests"):
