@@ -974,6 +974,9 @@ void uacpi_events_match_post_dynamic_table_load(void)
     };
     struct gpe_interrupt_ctx *irq_ctx;
 
+    if (uacpi_is_hardware_reduced())
+        return;
+
     uacpi_namespace_write_unlock();
 
     if (uacpi_unlikely_error(uacpi_recursive_lock_acquire(&g_event_lock)))
@@ -1368,6 +1371,9 @@ uacpi_status uacpi_finalize_gpe_initialization(void)
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_is_hardware_reduced())
+        return UACPI_STATUS_OK;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -1416,6 +1422,9 @@ static uacpi_status do_install_gpe_handler(
     uacpi_bool did_mask;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
+
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
 
     if (uacpi_unlikely(triggering > UACPI_GPE_TRIGGERING_MAX))
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -1512,6 +1521,9 @@ uacpi_status uacpi_uninstall_gpe_handler(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -1565,6 +1577,9 @@ uacpi_status uacpi_enable_gpe(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -1599,6 +1614,9 @@ uacpi_status uacpi_disable_gpe(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -1622,6 +1640,9 @@ uacpi_status uacpi_clear_gpe(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -1644,6 +1665,9 @@ static uacpi_status gpe_suspend_resume(
     struct gp_event *event;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
+
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
 
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
@@ -1683,6 +1707,9 @@ uacpi_status uacpi_finish_handling_gpe(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -1712,6 +1739,9 @@ static uacpi_status gpe_get_mask_unmask(
     struct gp_event *event;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
+
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
 
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
@@ -1752,6 +1782,9 @@ uacpi_status uacpi_setup_gpe_for_wake(
     uacpi_bool did_mask;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
+
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
 
     if (wake_device != UACPI_NULL) {
         uacpi_bool is_dev = wake_device == uacpi_namespace_root();
@@ -1866,6 +1899,9 @@ static uacpi_status gpe_enable_disable_for_wake(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -1929,6 +1965,9 @@ static uacpi_status for_all_gpes_locked(struct do_for_all_gpes_ctx *ctx)
     uacpi_status ret;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
+
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
 
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
@@ -2028,6 +2067,9 @@ uacpi_status uacpi_install_gpe_block(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_namespace_node_is(gpe_device, UACPI_OBJECT_DEVICE, &is_dev);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -2064,6 +2106,9 @@ uacpi_status uacpi_uninstall_gpe_block(
     search_ctx.gpe_device = gpe_device;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
+
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
 
     ret = uacpi_namespace_node_is(gpe_device, UACPI_OBJECT_DEVICE, &is_dev);
     if (uacpi_unlikely_error(ret))
@@ -2202,6 +2247,9 @@ void uacpi_deinitialize_events(void)
 {
     struct gpe_interrupt_ctx *ctx, *next_ctx = g_gpe_interrupt_head;
     uacpi_size i;
+
+    if (uacpi_is_hardware_reduced())
+        return;
 
     g_gpes_finalized = UACPI_FALSE;
 
@@ -2371,6 +2419,9 @@ uacpi_status uacpi_gpe_info(
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_NOT_FOUND;
+
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -2429,6 +2480,9 @@ uacpi_status uacpi_clear_all_events(void)
     };
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
+
+    if (uacpi_unlikely(uacpi_is_hardware_reduced()))
+        return UACPI_STATUS_OK;
 
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
