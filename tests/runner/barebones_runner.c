@@ -111,8 +111,25 @@ static void find_one_table(const char *signature)
     uacpi_table_unref(&tbl);
 }
 
+static void check_hw_reduced(uacpi_bool expected)
+{
+    uacpi_bool is_hw_reduced;
+    uacpi_status ret;
+
+    ret = uacpi_is_platform_reduced_hardware(&is_hw_reduced);
+    ensure_ok_status(ret);
+
+    if (expected != is_hw_reduced) {
+        error(
+            "unexpected hardware reduced value: %d, expected %d\n",
+             is_hw_reduced, expected
+        );
+    }
+}
+
 static void test_basic_operation(void)
 {
+    check_hw_reduced(UACPI_FALSE);
     find_one_table(ACPI_FADT_SIGNATURE);
     find_one_table(ACPI_DSDT_SIGNATURE);
 }
@@ -247,6 +264,29 @@ static void test_foreach_subtable(void)
     uacpi_table_unref(&tbl);
 }
 
+static void test_reduced_hardware(void)
+{
+    uacpi_status st;
+    uacpi_table tbl;
+    struct acpi_fadt *fadt;
+
+    check_hw_reduced(UACPI_FALSE);
+
+    st = uacpi_table_find_by_signature(ACPI_FADT_SIGNATURE, &tbl);
+    ensure_ok_status(st);
+
+    fadt = tbl.ptr;
+    fadt->flags |= ACPI_HW_REDUCED_ACPI;
+    uacpi_table_unref(&tbl);
+
+    uacpi_state_reset();
+    uacpi_setup_early_table_access(
+        g_early_table_buf, sizeof(g_early_table_buf)
+    );
+
+    check_hw_reduced(UACPI_TRUE);
+}
+
 static struct {
     const char *name;
     void (*func)(void);
@@ -254,6 +294,7 @@ static struct {
     { "basic-operation", test_basic_operation },
     { "table-installation", test_table_installation },
     { "foreach-subtable", test_foreach_subtable },
+    { "reduced-hardware", test_reduced_hardware },
 };
 
 static arg_spec_t TEST_CASE_ARG = ARG_POS("test-case", "name of the test case");
