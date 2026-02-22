@@ -16,6 +16,15 @@
 
 struct uacpi_runtime_context g_uacpi_rt_ctx = { 0 };
 
+uacpi_status uacpi_is_platform_reduced_hardware(uacpi_bool *out_value)
+{
+    if (!uacpi_table_subsystem_available())
+        return UACPI_STATUS_INIT_LEVEL_MISMATCH;
+
+    *out_value = uacpi_is_hardware_reduced();
+    return UACPI_STATUS_OK;
+}
+
 void uacpi_context_set_log_level(uacpi_log_level lvl)
 {
     if (lvl == 0)

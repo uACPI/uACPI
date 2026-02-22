@@ -102,6 +102,15 @@ uacpi_bool uacpi_table_subsystem_available(void);
  */
 #define UACPI_FLAG_PROACTIVE_TBL_CSUM (1ull << 5)
 
+/*
+ * Returns UACPI_TRUE via 'out_value' if the current platform is reduced ACPI
+ * hardware, UACPI_FALSE otherwise.
+ *
+ * This getter becomes available along with the table subsystem, use
+ * uacpi_table_subsystem_available() to check.
+ */
+uacpi_status uacpi_is_platform_reduced_hardware(uacpi_bool *out_value);
+
 #ifndef UACPI_BAREBONES_MODE
 
 /*
