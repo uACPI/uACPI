@@ -19,6 +19,13 @@ static uacpi_table_installation_handler installation_handler;
 
 static uacpi_handle table_mutex;
 
+uacpi_bool uacpi_table_subsystem_available(void)
+{
+    return early_table_access ||
+        g_uacpi_rt_ctx.init_level >= UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED;
+
+}
+
 #define ENSURE_TABLES_ONLINE()                         \
     do {                                               \
         if (!early_table_access)                       \
@@ -28,6 +35,11 @@ static uacpi_handle table_mutex;
     } while (0)
 
 #else
+
+uacpi_bool uacpi_table_subsystem_available(void)
+{
+    return early_table_access;
+}
 
 /*
  * Use a dummy function instead of a macro to prevent the following error:
