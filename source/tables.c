@@ -23,7 +23,6 @@ uacpi_bool uacpi_table_subsystem_available(void)
 {
     return early_table_access ||
         g_uacpi_rt_ctx.init_level >= UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED;
-
 }
 
 #define ENSURE_TABLES_ONLINE()                         \
