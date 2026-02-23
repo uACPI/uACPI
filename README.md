@@ -382,11 +382,11 @@ If you want to contribute:
 | [Orange](https://github.com/cpplover0/orange) | Unix-like x86_64 OS with some microkernel features | 4,204,053 | AMD Ryzen 5 3600 |
 | [Astral](https://github.com/mathewnd/astral) | Operating system written in C which aims be POSIX-compliant | 4,189,189 | Intel Core i5-13600K |
 | [Keyronex](https://github.com/Keyronex/Keyronex) | Layered kernel with fundamentally asynchronous I/O and working set model-based memory management | 4,013,691 | AMD Ryzen 5800X |
-| [Orange](https://github.com/cppLover0/Orange) | x86_64 Unix-like OS | 2,377,330 | AMD Ryzen 5 3600 |
-| [OBOS](https://github.com/OBOS-dev/obos) | Hybrid Kernel with advanced driver loading | 2,141,179 | Intel Core i5-13600K |
+| [OBOS](https://github.com/OBOS-dev/obos) | Hybrid kernel with module loading | 4,003,820 | Intel Core Ultra 7 265F |
+| [bentobox](https://github.com/9xbt/bentobox) | 64-bit SMP-enabled operating system targeting x86_64 and aarch64 | 3,709,263 | AMD Ryzen 7 5800X |
 | [NyauxKC](https://github.com/rayanmargham/NyauxKC) | Monolithic UNIX-like multi-architecture kernel | 1,966,580 | Intel Core i7-13700K |
+| [imaginarium](https://codeberg.org/Khitiara/imaginarium) | 64-bit os in zig supporting aarch64 and x86_64 | 1,908,315 | AMD Ryzen 7 3700X |
 | [ElysiumOS](https://github.com/imwux/elysium-os) | Hybrid Unix-like kernel | 1,737,654 | AMD Ryzen 7 5800X3D |
-| [imaginarium](https://github.com/Khitiara/imaginarium) | Ziggy osdev experiments inspired by the NT kernel (using the zig general purpose allocator) | 1,504,436 | AMD Ryzen 7 3700X |
 | [BadgerOS](https://github.com/badgeteam/BadgerOS) | A monolithic lightweight UNIX clone | 1,018,518 | AMD Ryzen 5 3600 |
 | [Retro Rocket](https://github.com/brainboxdotcc/retro-rocket) | A BASIC _powered_ 64-bit SMP multitasking OS | 441,329 | Intel Xeon E5-2680 |
 | [Hyra](https://github.com/sigsegv7/Hyra) | Monolithic UNIX-like OS by [OSMORA.ORG](https://osmora.org) | 199,873 | Intel Core i3-3220 |
