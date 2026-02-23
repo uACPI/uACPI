@@ -5,8 +5,8 @@
 #include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
 
-#define UACPI_MAJOR 3
-#define UACPI_MINOR 2
+#define UACPI_MAJOR 4
+#define UACPI_MINOR 0
 #define UACPI_PATCH 0
 
 #ifdef UACPI_REDUCED_HARDWARE
