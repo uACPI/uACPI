@@ -25,6 +25,7 @@
 #define ACPI_PSDT_SIGNATURE "PSDT"
 #define ACPI_ECDT_SIGNATURE "ECDT"
 #define ACPI_RHCT_SIGNATURE "RHCT"
+#define ACPI_DMAR_SIGNATURE "DMAR"
 
 #define ACPI_AS_ID_SYS_MEM       0x00
 #define ACPI_AS_ID_SYS_IO        0x01
@@ -1572,3 +1573,130 @@ UACPI_PACKED(struct acpi_resource_clock_input {
     uacpi_u8 source_index;
 })
 UACPI_EXPECT_SIZEOF(struct acpi_resource_clock_input, 13);
+
+// acpi_dmar->flags
+#define ACPI_DMAR_INTR_REMAP (1 << 0)
+#define ACPI_DMAR_X2APIC_OPT_OUT (1 << 1)
+#define ACPI_DMAR_DMA_CTRL_PLATFORM_OPT_IN_FLAG (1 << 2)
+
+UACPI_PACKED(struct acpi_dmar_entry_hdr {
+    uacpi_u16 type;
+    uacpi_u16 length;
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_entry_hdr, 4);
+
+// acpi_dmar_entry_hdr->type
+enum acpi_dmar_entry_type {
+    ACPI_DMAR_ENTRY_TYPE_DRHD = 0,
+    ACPI_DMAR_ENTRY_TYPE_RMRR = 1,
+    ACPI_DMAR_ENTRY_TYPE_ATSR = 2,
+    ACPI_DMAR_ENTRY_TYPE_RHSA = 3,
+    ACPI_DMAR_ENTRY_TYPE_ANDD = 4,
+    ACPI_DMAR_ENTRY_TYPE_SATC = 5,
+    ACPI_DMAR_ENTRY_TYPE_SIDP = 6,
+};
+
+UACPI_PACKED(struct acpi_dmar {
+    struct acpi_sdt_hdr hdr;
+    uacpi_u8 haw;
+    uacpi_u8 flags;
+    uacpi_u8 rsvd[10];
+    struct acpi_dmar_entry_hdr entries[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar, 48);
+
+// acpi_dmar_dss->type
+#define ACPI_DSS_PCI_ENDPOINT 0x01
+#define ACPI_DSS_PCI_BRIDGE 0x02
+#define ACPI_DSS_IOAPIC 0x03
+#define ACPI_DSS_MSI_CAPABLE_HPET 0x04
+#define ACPI_DSS_ACPI_NAMESPACE_DEVICE 0x05
+
+// acpi_dmar_dss->flags
+#define ACPI_DSS_REQ_WO_PASID_NESTED_NOTALLOWED (1 << 0)
+#define ACPI_DSS_REQ_WO_PASID_PWSNP_NOTALLOWED (1 << 1)
+#define ACPI_DSS_REQ_WO_PASID_PGSNP_NOTALLOWED (1 << 2)
+#define ACPI_DSS_ATC_HARDENED (1 << 3)
+#define ACPI_DSS_ATC_REQUIRED (1 << 4)
+
+UACPI_PACKED(struct acpi_dmar_dss {
+    uacpi_u8 type;
+    uacpi_u8 length;
+    uacpi_u8 flags;
+    uacpi_u8 rsvd;
+    uacpi_u8 enumeration_id;
+    uacpi_u8 start_bus;
+    uacpi_u16 path[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_dss, 6);
+
+// acpi_dmar_drhd->flags
+#define ACPI_INCLUDE_PCI_ALL (1 << 0)
+
+UACPI_PACKED(struct acpi_dmar_drhd {
+    struct acpi_dmar_entry_hdr hdr;
+    uacpi_u8 flags;
+    uacpi_u8 size;
+    uacpi_u16 segment;
+    uacpi_u64 address;
+    struct acpi_dmar_dss entries[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_drhd, 16);
+
+UACPI_PACKED(struct acpi_dmar_rmrr {
+    struct acpi_dmar_entry_hdr hdr;
+    uacpi_u16 rsvd;
+    uacpi_u16 segment;
+    uacpi_u64 base;
+    uacpi_u64 limit;
+    struct acpi_dmar_dss entries[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_rmrr, 24);
+
+// acpi_dmar_atsr->flags
+#define ACPI_ATSR_ALL_PORTS (1 << 0)
+
+UACPI_PACKED(struct acpi_dmar_atsr {
+    struct acpi_dmar_entry_hdr hdr;
+    uacpi_u8 flags;
+    uacpi_u8 rsvd;
+    uacpi_u16 segment;
+    struct acpi_dmar_dss entries[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_atsr, 8);
+
+UACPI_PACKED(struct acpi_dmar_rhsa {
+    struct acpi_dmar_entry_hdr hdr;
+    uacpi_u32 rsvd;
+    uacpi_u64 base;
+    uacpi_u32 proximity_domain;
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_rhsa, 20);
+
+UACPI_PACKED(struct acpi_dmar_andd {
+    struct acpi_dmar_entry_hdr hdr;
+    uacpi_u8 rsvd[3];
+    uacpi_u8 device_id;
+    uacpi_char name[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_andd, 8);
+
+// acpi_dmar_satc->flags
+#define ACPI_SATC_ATC_REQUIRED 0x01
+
+UACPI_PACKED(struct acpi_dmar_satc {
+    struct acpi_dmar_entry_hdr hdr;
+    uacpi_u8 flags;
+    uacpi_u8 rsvd;
+    uacpi_u16 segment;
+    struct acpi_dmar_dss entries[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_satc, 8);
+
+UACPI_PACKED(struct acpi_dmar_sidp {
+    struct acpi_dmar_entry_hdr hdr;
+    uacpi_u16 rsvd;
+    uacpi_u16 segment;
+    struct acpi_dmar_dss entries[];
+})
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_sidp, 8);
