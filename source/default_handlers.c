@@ -103,7 +103,7 @@ static uacpi_status pci_region_attach(uacpi_region_attach_data *data)
     );
 
     ctx = uacpi_kernel_alloc_zeroed(sizeof(*ctx));
-    if (uacpi_unlikely(ctx == NULL))
+    if (uacpi_unlikely(ctx == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
     data->out_region_context = ctx;
