@@ -1626,9 +1626,11 @@ UACPI_PACKED(struct acpi_dmar_dss {
     uacpi_u8 rsvd;
     uacpi_u8 enumeration_id;
     uacpi_u8 start_bus;
-    uacpi_u16 path[];
+
+    // The actual number of bytes here depends on the type
+    uacpi_u16 path[1];
 })
-UACPI_EXPECT_SIZEOF(struct acpi_dmar_dss, 6);
+UACPI_EXPECT_SIZEOF(struct acpi_dmar_dss, 8);
 
 // acpi_dmar_drhd->flags
 #define ACPI_INCLUDE_PCI_ALL (1 << 0)
