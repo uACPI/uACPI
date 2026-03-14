@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-/*
+/**
  * Set up early access to the table subsystem. What this means is:
  * - uacpi_table_find() and similar API becomes usable before the call to
  *   uacpi_initialize().
@@ -61,52 +61,52 @@ uacpi_status uacpi_setup_early_table_access(
     void *temporary_buffer, uacpi_size buffer_size
 );
 
-/*
+/**
  * Returns UACPI_TRUE if the table subsystem is available for use by the kernel.
  * This happens after a successful call to either uacpi_initialize(...) or
  * uacpi_setup_early_table_access(...).
  */
 uacpi_bool uacpi_table_subsystem_available(void);
 
-/*
+/**
  * Bad table checksum should be considered a fatal error
  * (table load is fully aborted in this case)
  */
 #define UACPI_FLAG_BAD_CSUM_FATAL (1ull << 0)
 
-/*
+/**
  * Unexpected table signature should be considered a fatal error
  * (table load is fully aborted in this case)
  */
 #define UACPI_FLAG_BAD_TBL_SIGNATURE_FATAL (1ull << 1)
 
-/*
+/**
  * Force uACPI to use RSDT even for later revisions
  */
 #define UACPI_FLAG_BAD_XSDT (1ull << 2)
 
-/*
+/**
  * If this is set, ACPI mode is not entered during the call to
  * uacpi_initialize. The caller is expected to enter it later at their own
  * discretion by using uacpi_enter_acpi_mode().
  */
 #define UACPI_FLAG_NO_ACPI_MODE (1ull << 3)
 
-/*
+/**
  * Don't create the \_OSI method when building the namespace.
  * Only enable this if you're certain that having this method breaks your AML
  * blob, a more atomic/granular interface management is available via osi.h
  */
 #define UACPI_FLAG_NO_OSI (1ull << 4)
 
-/*
+/**
  * Validate table checksums at installation time instead of first use.
  * Note that this makes uACPI map the entire table at once, which not all
  * hosts are able to handle at early init.
  */
 #define UACPI_FLAG_PROACTIVE_TBL_CSUM (1ull << 5)
 
-/*
+/**
  * Returns UACPI_TRUE via 'out_value' if the current platform is reduced ACPI
  * hardware, UACPI_FALSE otherwise.
  *
@@ -117,7 +117,7 @@ uacpi_status uacpi_is_platform_reduced_hardware(uacpi_bool *out_value);
 
 #ifndef UACPI_BAREBONES_MODE
 
-/*
+/**
  * Initializes the uACPI subsystem, iterates & records all relevant RSDT/XSDT
  * tables. Enters ACPI mode.
  *
@@ -125,13 +125,13 @@ uacpi_status uacpi_is_platform_reduced_hardware(uacpi_bool *out_value);
  */
 uacpi_status uacpi_initialize(uacpi_u64 flags);
 
-/*
+/**
  * Parses & executes all of the DSDT/SSDT tables.
  * Initializes the event subsystem.
  */
 uacpi_status uacpi_namespace_load(void);
 
-/*
+/**
  * Initializes all the necessary objects in the namespaces by calling
  * _STA/_INI etc.
  */
@@ -140,7 +140,7 @@ uacpi_status uacpi_namespace_initialize(void);
 // Returns the current subsystem initialization level
 uacpi_init_level uacpi_get_current_init_level(void);
 
-/*
+/**
  * Evaluate an object within the namespace and get back its value.
  * Either root or path must be valid.
  * A value of NULL for 'parent' implies uacpi_namespace_root() relative
@@ -154,7 +154,7 @@ uacpi_status uacpi_eval_simple(
     uacpi_namespace_node *parent, const uacpi_char *path, uacpi_object **ret
 );
 
-/*
+/**
  * Same as uacpi_eval() but without a return value.
  */
 uacpi_status uacpi_execute(
@@ -165,7 +165,7 @@ uacpi_status uacpi_execute_simple(
     uacpi_namespace_node *parent, const uacpi_char *path
 );
 
-/*
+/**
  * Same as uacpi_eval, but the return value type is validated against
  * the 'ret_mask'. UACPI_STATUS_TYPE_MISMATCH is returned on error.
  */
@@ -179,7 +179,7 @@ uacpi_status uacpi_eval_simple_typed(
     uacpi_object_type_bits ret_mask, uacpi_object **ret
 );
 
-/*
+/**
  * A shorthand for uacpi_eval_typed with UACPI_OBJECT_INTEGER_BIT.
  */
 uacpi_status uacpi_eval_integer(
@@ -190,7 +190,7 @@ uacpi_status uacpi_eval_simple_integer(
     uacpi_namespace_node *parent, const uacpi_char *path, uacpi_u64 *out_value
 );
 
-/*
+/**
  * A shorthand for uacpi_eval_typed with
  *     UACPI_OBJECT_BUFFER_BIT | UACPI_OBJECT_STRING_BIT
  *
@@ -204,7 +204,7 @@ uacpi_status uacpi_eval_simple_buffer_or_string(
     uacpi_namespace_node *parent, const uacpi_char *path, uacpi_object **ret
 );
 
-/*
+/**
  * A shorthand for uacpi_eval_typed with UACPI_OBJECT_STRING_BIT.
  *
  * Use uacpi_object_get_string to retrieve the resulting buffer data.
@@ -217,7 +217,7 @@ uacpi_status uacpi_eval_simple_string(
     uacpi_namespace_node *parent, const uacpi_char *path, uacpi_object **ret
 );
 
-/*
+/**
  * A shorthand for uacpi_eval_typed with UACPI_OBJECT_BUFFER_BIT.
  *
  * Use uacpi_object_get_buffer to retrieve the resulting buffer data.
@@ -230,7 +230,7 @@ uacpi_status uacpi_eval_simple_buffer(
     uacpi_namespace_node *parent, const uacpi_char *path, uacpi_object **ret
 );
 
-/*
+/**
  * A shorthand for uacpi_eval_typed with UACPI_OBJECT_PACKAGE_BIT.
  *
  * Use uacpi_object_get_package to retrieve the resulting object array.
@@ -243,14 +243,14 @@ uacpi_status uacpi_eval_simple_package(
     uacpi_namespace_node *parent, const uacpi_char *path, uacpi_object **ret
 );
 
-/*
+/**
  * Get the bitness of the currently loaded AML code according to the DSDT.
  *
  * Returns either 32 or 64.
  */
 uacpi_status uacpi_get_aml_bitness(uacpi_u8 *out_bitness);
 
-/*
+/**
  * Helpers for entering & leaving ACPI mode. Note that ACPI mode is entered
  * automatically during the call to uacpi_initialize().
  */
@@ -261,7 +261,7 @@ UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
     uacpi_status uacpi_leave_acpi_mode(void)
 )
 
-/*
+/**
  * Attempt to acquire the global lock for 'timeout' milliseconds.
  * 0xFFFF implies infinite wait.
  *
@@ -273,7 +273,7 @@ uacpi_status uacpi_release_global_lock(uacpi_u32 seq);
 
 #endif // !UACPI_BAREBONES_MODE
 
-/*
+/**
  * Reset the global uACPI state by freeing all internally allocated data
  * structures & resetting any global variables. After this call, uACPI must be
  * re-initialized from scratch to be used again.

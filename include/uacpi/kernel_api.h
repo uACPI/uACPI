@@ -10,7 +10,7 @@ extern "C" {
 // Returns the PHYSICAL address of the RSDP structure via *out_rsdp_address.
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address);
 
-/*
+/**
  * Map a physical memory range starting at 'addr' with length 'len', and return
  * a virtual address that can be used to access it.
  *
@@ -36,7 +36,7 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address);
  */
 void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len);
 
-/*
+/**
  * Unmap a virtual memory range at 'addr' with a length of 'len' bytes.
  *
  * NOTE: 'addr' may be misaligned, see the comment above 'uacpi_kernel_map'.
@@ -54,18 +54,18 @@ void uacpi_kernel_log(uacpi_log_level, const uacpi_char*, ...);
 void uacpi_kernel_vlog(uacpi_log_level, const uacpi_char*, uacpi_va_list);
 #endif
 
-/*
+/**
  * Only the above ^^^ API may be used by early table access and
  * UACPI_BAREBONES_MODE.
  */
 #ifndef UACPI_BAREBONES_MODE
 
-/*
+/**
  * Convenience initialization/deinitialization hooks that will be called by
  * uACPI automatically when appropriate if compiled-in.
  */
 #ifdef UACPI_KERNEL_INITIALIZATION
-/*
+/**
  * This API is invoked for each initialization level so that appropriate parts
  * of the host kernel and/or glue code can be initialized at different stages.
  *
@@ -80,7 +80,7 @@ uacpi_status uacpi_kernel_initialize(uacpi_init_level current_init_lvl);
 void uacpi_kernel_deinitialize(void);
 #endif
 
-/*
+/**
  * Open a PCI device at 'address' for reading & writing.
  *
  * The device at 'address' might not actually exist on the system, in this case
@@ -97,7 +97,7 @@ uacpi_status uacpi_kernel_pci_device_open(
 );
 void uacpi_kernel_pci_device_close(uacpi_handle);
 
-/*
+/**
  * Read & write the configuration space of a previously open PCI device.
  */
 uacpi_status uacpi_kernel_pci_read8(
@@ -120,7 +120,7 @@ uacpi_status uacpi_kernel_pci_write32(
     uacpi_handle device, uacpi_size offset, uacpi_u32 value
 );
 
-/*
+/**
  * Map a SystemIO address at [base, base + len) and return a kernel-implemented
  * handle that can be used for reading and writing the IO range.
  *
@@ -132,7 +132,7 @@ uacpi_status uacpi_kernel_io_map(
 );
 void uacpi_kernel_io_unmap(uacpi_handle handle);
 
-/*
+/**
  * Read/Write the IO range mapped via uacpi_kernel_io_map
  * at a 0-based 'offset' within the range.
  *
@@ -163,21 +163,21 @@ uacpi_status uacpi_kernel_io_write32(
     uacpi_handle, uacpi_size offset, uacpi_u32 in_value
 );
 
-/*
+/**
  * Allocate a block of memory of 'size' bytes.
  * The contents of the allocated memory are unspecified.
  */
 void *uacpi_kernel_alloc(uacpi_size size);
 
 #ifdef UACPI_NATIVE_ALLOC_ZEROED
-/*
+/**
  * Allocate a block of memory of 'size' bytes.
  * The returned memory block is expected to be zero-filled.
  */
 void *uacpi_kernel_alloc_zeroed(uacpi_size size);
 #endif
 
-/*
+/**
  * Free a previously allocated memory block.
  *
  * 'mem' might be a NULL pointer. In this case, the call is assumed to be a
@@ -193,42 +193,42 @@ void uacpi_kernel_free(void *mem);
 void uacpi_kernel_free(void *mem, uacpi_size size_hint);
 #endif
 
-/*
+/**
  * Returns the number of nanosecond ticks elapsed since boot,
  * strictly monotonic.
  */
 uacpi_u64 uacpi_kernel_get_nanoseconds_since_boot(void);
 
-/*
+/**
  * Spin for N microseconds.
  */
 void uacpi_kernel_stall(uacpi_u8 usec);
 
-/*
+/**
  * Sleep for N milliseconds.
  */
 void uacpi_kernel_sleep(uacpi_u64 msec);
 
-/*
+/**
  * Create/free an opaque non-recursive kernel mutex object.
  */
 uacpi_handle uacpi_kernel_create_mutex(void);
 void uacpi_kernel_free_mutex(uacpi_handle);
 
-/*
+/**
  * Create/free an opaque kernel (semaphore-like) event object.
  */
 uacpi_handle uacpi_kernel_create_event(void);
 void uacpi_kernel_free_event(uacpi_handle);
 
-/*
+/**
  * Returns a unique identifier of the currently executing thread.
  *
  * The returned thread id cannot be UACPI_THREAD_ID_NONE.
  */
 uacpi_thread_id uacpi_kernel_get_thread_id(void);
 
-/*
+/**
  * Disable interrupts and return an kernel-defined value representing the
  * "before" state. This value is used in the subsequent call to restore the
  * prior state.
@@ -239,13 +239,13 @@ uacpi_thread_id uacpi_kernel_get_thread_id(void);
  */
 uacpi_interrupt_state uacpi_kernel_disable_interrupts(void);
 
-/*
+/**
  * Restore the state of the interrupt flags to the kernel-defined value provided
  * in 'state'.
  */
 void uacpi_kernel_restore_interrupts(uacpi_interrupt_state state);
 
-/*
+/**
  * Try to acquire the mutex with a millisecond timeout.
  *
  * The timeout value has the following meanings:
@@ -264,7 +264,7 @@ void uacpi_kernel_restore_interrupts(uacpi_interrupt_state state);
 uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle, uacpi_u16);
 void uacpi_kernel_release_mutex(uacpi_handle);
 
-/*
+/**
  * Try to wait for an event (counter > 0) with a millisecond timeout.
  * A timeout value of 0xFFFF implies infinite wait.
  *
@@ -274,26 +274,26 @@ void uacpi_kernel_release_mutex(uacpi_handle);
  */
 uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle, uacpi_u16);
 
-/*
+/**
  * Signal the event object by incrementing its internal counter by 1.
  *
  * This function may be used in interrupt contexts.
  */
 void uacpi_kernel_signal_event(uacpi_handle);
 
-/*
+/**
  * Reset the event counter to 0.
  */
 void uacpi_kernel_reset_event(uacpi_handle);
 
-/*
+/**
  * Handle a firmware request.
  *
  * Currently either a Breakpoint or Fatal operators.
  */
 uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request*);
 
-/*
+/**
  * Install an interrupt handler at 'irq', 'ctx' is passed to the provided
  * handler for every invocation.
  *
@@ -305,7 +305,7 @@ uacpi_status uacpi_kernel_install_interrupt_handler(
     uacpi_handle *out_irq_handle
 );
 
-/*
+/**
  * Uninstall an interrupt handler. 'irq_handle' is the value returned via
  * 'out_irq_handle' during installation.
  */
@@ -313,7 +313,7 @@ uacpi_status uacpi_kernel_uninstall_interrupt_handler(
     uacpi_interrupt_handler, uacpi_handle irq_handle
 );
 
-/*
+/**
  * Create/free a kernel spinlock object.
  *
  * Unlike other types of locks, spinlocks may be used in interrupt contexts.
@@ -321,7 +321,7 @@ uacpi_status uacpi_kernel_uninstall_interrupt_handler(
 uacpi_handle uacpi_kernel_create_spinlock(void);
 void uacpi_kernel_free_spinlock(uacpi_handle);
 
-/*
+/**
  * Lock/unlock helpers for spinlocks.
  *
  * These are expected to disable interrupts, returning the previous state of cpu
@@ -334,14 +334,14 @@ uacpi_cpu_flags uacpi_kernel_lock_spinlock(uacpi_handle);
 void uacpi_kernel_unlock_spinlock(uacpi_handle, uacpi_cpu_flags);
 
 typedef enum uacpi_work_type {
-    /*
+    /**
      * Schedule a GPE handler method for execution.
      * This should be scheduled to run on CPU0 to avoid potential SMI-related
      * firmware bugs.
      */
     UACPI_WORK_GPE_EXECUTION,
 
-    /*
+    /**
      * Schedule a Notify(device) firmware request for execution.
      * This can run on any CPU.
      */
@@ -350,7 +350,7 @@ typedef enum uacpi_work_type {
 
 typedef void (*uacpi_work_handler)(uacpi_handle);
 
-/*
+/**
  * Schedules deferred work for execution.
  * Might be invoked from an interrupt context.
  */
@@ -358,7 +358,7 @@ uacpi_status uacpi_kernel_schedule_work(
     uacpi_work_type, uacpi_work_handler, uacpi_handle ctx
 );
 
-/*
+/**
  * Waits for two types of work to finish:
  * 1. All in-flight interrupts installed via uacpi_kernel_install_interrupt_handler
  * 2. All work scheduled via uacpi_kernel_schedule_work
