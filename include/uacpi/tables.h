@@ -33,7 +33,7 @@ typedef struct uacpi_table {
     uacpi_size index;
 } uacpi_table;
 
-/*
+/**
  * Install a table from either a virtual or a physical address.
  * The table is simply stored in the internal table array, and not loaded by
  * the interpreter (see uacpi_table_load).
@@ -51,13 +51,13 @@ uacpi_status uacpi_table_install_physical(
 );
 
 #ifndef UACPI_BAREBONES_MODE
-/*
+/**
  * Load a previously installed table by feeding it to the interpreter.
  */
 uacpi_status uacpi_table_load(uacpi_size index);
 #endif // !UACPI_BAREBONES_MODE
 
-/*
+/**
  * Helpers for finding tables.
  *
  * for find_by_signature:
@@ -86,14 +86,14 @@ uacpi_status uacpi_table_find(
     const uacpi_table_identifiers *id, uacpi_table *out_table
 );
 
-/*
+/**
  * Increment/decrement a table's reference count.
  * The table is unmapped when the reference count drops to 0.
  */
 uacpi_status uacpi_table_ref(uacpi_table*);
 uacpi_status uacpi_table_unref(uacpi_table*);
 
-/*
+/**
  * Returns the pointer to a sanitized internal version of FADT.
  *
  * The revision is guaranteed to be correct. All of the registers are converted
@@ -105,20 +105,20 @@ typedef enum uacpi_table_installation_disposition {
     // Allow the table to be installed as-is
     UACPI_TABLE_INSTALLATION_DISPOSITON_ALLOW = 0,
 
-    /*
+    /**
      * Deny the table from being installed completely. This is useful for
      * debugging various problems, e.g. AML loading bad SSDTs that cause the
      * system to hang or enter an undesired state.
      */
     UACPI_TABLE_INSTALLATION_DISPOSITON_DENY,
 
-    /*
+    /**
      * Override the table being installed with the table at the virtual address
      * returned in 'out_override_address'.
      */
     UACPI_TABLE_INSTALLATION_DISPOSITON_VIRTUAL_OVERRIDE,
 
-    /*
+    /**
      * Override the table being installed with the table at the physical address
      * returned in 'out_override_address'.
      */
@@ -128,7 +128,7 @@ typedef enum uacpi_table_installation_disposition {
 typedef uacpi_table_installation_disposition (*uacpi_table_installation_handler)
     (struct acpi_sdt_hdr *hdr, uacpi_u64 *out_override_address);
 
-/*
+/**
  * Set a handler that is invoked for each table before it gets installed.
  *
  * Depending on the return value, the table is either allowed to be installed
@@ -141,7 +141,7 @@ uacpi_status uacpi_set_table_installation_handler(
 typedef uacpi_iteration_decision (*uacpi_subtable_iteration_callback)
     (uacpi_handle, struct acpi_entry_hdr*);
 
-/*
+/**
  * Iterate every subtable of a table such as MADT or SRAT.
  *
  * 'hdr' is the pointer to the main table, 'hdr_size' is the number of bytes in

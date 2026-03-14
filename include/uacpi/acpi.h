@@ -4,7 +4,7 @@
 #include <uacpi/helpers.h>
 #include <uacpi/types.h>
 
-/*
+/**
  * -----------------------------------------------------
  * Common structures provided by the ACPI specification
  * -----------------------------------------------------
@@ -96,7 +96,7 @@ UACPI_PACKED(struct acpi_xsdt {
 })
 
 UACPI_PACKED(struct acpi_entry_hdr {
-    /*
+    /**
      * - acpi_madt_entry_type for the APIC table
      * - acpi_srat_entry_type for the SRAT table
      */
@@ -148,7 +148,7 @@ UACPI_PACKED(struct acpi_madt {
 })
 UACPI_EXPECT_SIZEOF(struct acpi_madt, 44);
 
-/*
+/**
  * - acpi_madt_lapic->flags
  * - acpi_madt_lsapic->flags
  * - acpi_madt_x2apic->flags
@@ -173,7 +173,7 @@ UACPI_PACKED(struct acpi_madt_ioapic {
 })
 UACPI_EXPECT_SIZEOF(struct acpi_madt_ioapic, 12);
 
-/*
+/**
  * - acpi_madt_interrupt_source_override->flags
  * - acpi_madt_nmi_source->flags
  * - acpi_madt_lapic_nmi->flags
@@ -499,7 +499,7 @@ UACPI_PACKED(struct acpi_srat {
 })
 UACPI_EXPECT_SIZEOF(struct acpi_srat, 48);
 
-/*
+/**
  * acpi_srat_processor_affinity->flags
  * acpi_srat_x2apic_affinity->flags
  */
@@ -599,7 +599,7 @@ UACPI_PACKED(struct acpi_slit {
 })
 UACPI_EXPECT_SIZEOF(struct acpi_slit, 44);
 
-/*
+/**
  * acpi_gtdt->el*_flags
  * acpi_gtdt_timer_entry->physical_flags
  * acpi_gtdt_timer_entry->virtual_flags
@@ -609,7 +609,7 @@ UACPI_EXPECT_SIZEOF(struct acpi_slit, 44);
 #define ACPI_GTDT_TRIGGERING_EDGE 1
 #define ACPI_GTDT_TRIGGERING_LEVEL 0
 
-/*
+/**
  * acpi_gtdt->el*_flags
  * acpi_gtdt_timer_entry->physical_flags
  * acpi_gtdt_timer_entry->virtual_flags
@@ -913,7 +913,7 @@ UACPI_EXPECT_SIZEOF(struct acpi_hpet, 56);
 #define ACPI_PM1_CNT_SLP_TYP_MASK (ACPI_SLP_TYP_MAX << ACPI_PM1_CNT_SLP_TYP_IDX)
 #define ACPI_PM1_CNT_SLP_EN_MASK (1 << ACPI_PM1_CNT_SLP_EN_IDX)
 
-/*
+/**
  * SCI_EN is not in this mask even though the spec says it must be preserved.
  * This is because it's known to be bugged on some hardware that relies on
  * software writing 1 to it after resume (as indicated by a similar comment in
@@ -976,7 +976,7 @@ UACPI_PACKED(struct acpi_ssdt {
     uacpi_u8 definition_block[];
 })
 
-/*
+/**
  * ACPI 6.5 specification:
  * Bit [0] - Set if the device is present.
  * Bit [1] - Set if the device is enabled and decoding its resources.
@@ -1012,7 +1012,7 @@ enum acpi_dbg2_type {
     ACPI_DBG2_TYPE_NET = 0x8003,
 };
 
-/*
+/**
  * Constants for:
  * - acpi_dbg2_device_info->port_subtype
  *   if acpi_dbg2_device_info->port_type == ACPI_DBG2_TYPE_SERIAL.
@@ -1042,7 +1042,7 @@ enum acpi_dbg2_serial_subtype {
     ACPI_DBG2_SUBTYPE_SERIAL_RISCV_SBI = 0x15,
 };
 
-/*
+/**
  * Constants for acpi_dbg2_device_info->port_subtype
  * if acpi_dbg2_device_info->port_type == ACPI_DBG2_TYPE_1394.
  */
@@ -1050,7 +1050,7 @@ enum acpi_dbg2_1394_subtype {
     ACPI_DBG2_SUBTYPE_1394_STANDARD = 0x0,
 };
 
-/*
+/**
  * Constants for acpi_dbg2_device_info->port_subtype
  * if acpi_dbg2_device_info->port_type == ACPI_DBG2_TYPE_USB.
  */
@@ -1063,7 +1063,7 @@ UACPI_PACKED(struct acpi_dbg2 {
     struct acpi_sdt_hdr hdr;
     uacpi_u32 offset_dbg_device_info;
     uacpi_u32 number_dbg_device_info;
-    /*
+    /**
      *  Variable length fields below:
      *  At ->offset_dbg_device_info:
      *    struct acpi_dbg2_dbg_device_info dbg_devices[number_dbg_device_info];
@@ -1084,7 +1084,7 @@ UACPI_PACKED(struct acpi_dbg2_dbg_device_info {
     uacpi_u16 rsvd;
     uacpi_u16 base_address_register_offset;
     uacpi_u16 address_size_offset;
-    /*
+    /**
      * Variable length fields below:
      * At ->base_address_register_offset:
      *     struct acpi_gas base_address_register[number_generic_address_registers];
@@ -1141,7 +1141,7 @@ UACPI_PACKED(struct acpi_spcr {
     uacpi_u32 precise_baud_rate;
     uacpi_u16 namespace_string_length;
     uacpi_u16 namespace_string_offset;
-    /*
+    /**
      * At ->namespace_string_offset:
      *    char namespace_string[namespace_string_length];
      */
@@ -1251,7 +1251,7 @@ UACPI_EXPECT_SIZEOF(struct acpi_rhct_hart_info, 12);
 #define ACPI_RESOURCE_PIN_GROUP_CONFIGURATION 0x12
 #define ACPI_RESOURCE_CLOCK_INPUT 0x13
 
-/*
+/**
  * Resources as encoded by the raw AML byte stream.
  * For decode API & human usable structures refer to uacpi/resources.h
  */
