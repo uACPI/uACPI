@@ -1483,7 +1483,7 @@ static uacpi_status handle_load(struct execution_context *ctx)
         }
 
         src_table = uacpi_kernel_map(op_region->offset, op_region->length);
-        if (uacpi_unlikely(src_table == UACPI_NULL)) {
+        if (uacpi_unlikely(src_table == UACPI_MAP_FAILED)) {
             uacpi_error(
                 "Load: failed to map operation region "
                 "0x%016"UACPI_PRIX64" -> 0x%016"UACPI_PRIX64"\n",

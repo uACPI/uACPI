@@ -10,9 +10,12 @@ extern "C" {
 // Returns the PHYSICAL address of the RSDP structure via *out_rsdp_address.
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address);
 
+#define UACPI_MAP_FAILED ((void*)-1)
+
 /**
  * Map a physical memory range starting at 'addr' with length 'len', and return
- * a virtual address that can be used to access it.
+ * a virtual address that can be used to access it. UACPI_MAP_FAILED is returned
+ * in case the operation wasn't successful.
  *
  * NOTE: 'addr' may be misaligned, in this case the host is expected to round it
  *       down to the nearest page-aligned boundary and map that, while making

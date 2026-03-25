@@ -194,7 +194,7 @@ static uacpi_status memory_region_attach(uacpi_region_attach_data *data)
     ctx->phys = data->generic_info.base;
     ctx->virt = uacpi_kernel_map(ctx->phys, ctx->size);
 
-    if (uacpi_unlikely(ctx->virt == UACPI_NULL)) {
+    if (uacpi_unlikely(ctx->virt == UACPI_MAP_FAILED)) {
         ret = UACPI_STATUS_MAPPING_FAILED;
         uacpi_trace_region_error(data->region_node, "unable to map", ret);
         uacpi_free(ctx, sizeof(*ctx));

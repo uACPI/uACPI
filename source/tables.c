@@ -116,7 +116,7 @@ static uacpi_status initialize_from_rxsdt(uacpi_phys_addr rxsdt_addr,
     uacpi_status ret;
 
     rxsdt = uacpi_kernel_map(rxsdt_addr, map_len);
-    if (rxsdt == UACPI_NULL)
+    if (rxsdt == UACPI_MAP_FAILED)
         return UACPI_STATUS_MAPPING_FAILED;
 
     dump_table_header(rxsdt_addr, rxsdt);
@@ -137,7 +137,7 @@ static uacpi_status initialize_from_rxsdt(uacpi_phys_addr rxsdt_addr,
     entry_bytes &= ~(entry_size - 1);
 
     rxsdt = uacpi_kernel_map(rxsdt_addr, map_len);
-    if (uacpi_unlikely(rxsdt == UACPI_NULL))
+    if (uacpi_unlikely(rxsdt == UACPI_MAP_FAILED))
         return UACPI_STATUS_MAPPING_FAILED;
 
     ret = uacpi_verify_table_checksum(rxsdt, map_len);
@@ -182,7 +182,7 @@ static uacpi_status initialize_from_rsdp(void)
         return ret;
 
     rsdp = uacpi_kernel_map(rsdp_phys, sizeof(struct acpi_rsdp));
-    if (rsdp == UACPI_NULL)
+    if (rsdp == UACPI_MAP_FAILED)
         return UACPI_STATUS_MAPPING_FAILED;
 
     dump_table_header(rsdp_phys, rsdp);
@@ -497,7 +497,7 @@ static uacpi_status get_external_table_header(
     void *virt;
 
     virt = uacpi_kernel_map(phys_addr, sizeof(*out_hdr));
-    if (uacpi_unlikely(virt == UACPI_NULL))
+    if (uacpi_unlikely(virt == UACPI_MAP_FAILED))
         return UACPI_STATUS_MAPPING_FAILED;
 
     uacpi_memcpy(out_hdr, virt, sizeof(*out_hdr));
@@ -520,7 +520,7 @@ static uacpi_status table_ref_unlocked(struct uacpi_installed_table *tbl)
             break;
 
         tbl->ptr = uacpi_kernel_map(tbl->phys_addr, tbl->hdr.length);
-        if (uacpi_unlikely(tbl->ptr == UACPI_NULL))
+        if (uacpi_unlikely(tbl->ptr == UACPI_MAP_FAILED))
             return UACPI_STATUS_MAPPING_FAILED;
 
         if (!(tbl->flags & UACPI_TABLE_CSUM_VERIFIED)) {
@@ -608,7 +608,7 @@ static uacpi_status verify_and_install_table(
         // We may already have a valid mapping, reuse it if we do
         if (mapping == UACPI_NULL)
             mapping = uacpi_kernel_map(phys_addr, hdr->length);
-        if (uacpi_unlikely(mapping == UACPI_NULL))
+        if (uacpi_unlikely(mapping == UACPI_MAP_FAILED))
             return UACPI_STATUS_MAPPING_FAILED;
 
         ret = uacpi_verify_table_checksum(mapping, hdr->length);
@@ -706,7 +706,7 @@ static uacpi_status table_install_physical_with_origin_unlocked(
 
     if (installation_handler != UACPI_NULL || out_table != UACPI_NULL) {
         virt = uacpi_kernel_map(phys, hdr.length);
-        if (uacpi_unlikely(!virt))
+        if (uacpi_unlikely(virt == UACPI_MAP_FAILED))
             return UACPI_STATUS_MAPPING_FAILED;
     }
 
