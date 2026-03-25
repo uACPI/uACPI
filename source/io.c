@@ -851,7 +851,7 @@ uacpi_status uacpi_map_gas_noalloc(
 
     if (gas->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_MEMORY) {
         out_mapped->mapping = uacpi_kernel_map(gas->address, total_width / 8);
-        if (uacpi_unlikely(out_mapped->mapping == UACPI_NULL))
+        if (uacpi_unlikely(out_mapped->mapping == UACPI_MAP_FAILED))
             return UACPI_STATUS_MAPPING_FAILED;
 
         out_mapped->read = uacpi_system_memory_read;
