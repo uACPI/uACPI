@@ -707,7 +707,7 @@ void uacpi_log(uacpi_log_level lvl, const uacpi_char *str, ...)
 
     ret = uacpi_vsnprintf(buf, sizeof(buf), str, vlist);
     if (uacpi_unlikely(ret < 0))
-        return;
+        goto out;
 
     /*
      * If this log message is too large for the configured buffer size, cut off
@@ -723,6 +723,7 @@ void uacpi_log(uacpi_log_level lvl, const uacpi_char *str, ...)
 
     uacpi_kernel_log(lvl, buf);
 
+out:
     uacpi_va_end(vlist);
 }
 #endif
