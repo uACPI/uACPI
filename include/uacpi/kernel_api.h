@@ -54,7 +54,6 @@ void uacpi_kernel_log(uacpi_log_level, const uacpi_char*);
 #else
 UACPI_PRINTF_DECL(2, 3)
 void uacpi_kernel_log(uacpi_log_level, const uacpi_char*, ...);
-void uacpi_kernel_vlog(uacpi_log_level, const uacpi_char*, uacpi_va_list);
 #endif
 
 /**

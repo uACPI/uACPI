@@ -371,20 +371,13 @@ void *uacpi_kernel_alloc_zeroed(uacpi_size size)
 
 #ifdef UACPI_FORMATTED_LOGGING
 
-void uacpi_kernel_vlog(
-    uacpi_log_level level, const uacpi_char *format, va_list args
-)
-{
-    printf("[uACPI][%s] ", uacpi_log_level_to_string(level));
-    vprintf(format, args);
-}
-
 void uacpi_kernel_log(uacpi_log_level level, const uacpi_char *format, ...)
 {
     va_list args;
     va_start(args, format);
 
-    uacpi_kernel_vlog(level, format, args);
+    printf("[uACPI][%s] ", uacpi_log_level_to_string(level));
+    vprintf(format, args);
 
     va_end(args);
 }
