@@ -38,7 +38,7 @@ void uacpi_trace_region_error(
         space_string = uacpi_address_space_to_string(obj->op_region->space);
 
     uacpi_error(
-        "%s (%s) operation region %s: %s\n",
+        "%s (%s) operation region %s: %s",
         message, space_string, path, uacpi_status_to_string(ret)
     );
     uacpi_free_dynamic_string(path);
@@ -74,7 +74,7 @@ static void trace_region_io(
     case UACPI_ADDRESS_SPACE_FFIXEDHW:
         uacpi_trace(
             "write-then-read from [%s] %s[0x%016"UACPI_PRIX64"] = "
-            "<buffer of %zu bytes>\n", path,
+            "<buffer of %zu bytes>", path,
             uacpi_address_space_to_string(space),
             UACPI_FMT64(offset), data.buffer.length
         );
@@ -83,14 +83,14 @@ static void trace_region_io(
     case UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS:
         uacpi_trace(
             "%s [%s] %s[0x%016"UACPI_PRIX64"] = "
-            "<buffer of %zu bytes>\n", type_str, path,
+            "<buffer of %zu bytes>", type_str, path,
             uacpi_address_space_to_string(space),
             UACPI_FMT64(offset), data.buffer.length
         );
         break;
     case UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO:
         uacpi_trace(
-            "%s [%s] %s pins[%u..%u] = 0x%"UACPI_PRIX64"\n",
+            "%s [%s] %s pins[%u..%u] = 0x%"UACPI_PRIX64,
             type_str, path, uacpi_address_space_to_string(space),
             field->pin_offset, (field->pin_offset + field->bit_length) - 1,
             UACPI_FMT64(*data.integer)
@@ -98,7 +98,7 @@ static void trace_region_io(
         break;
     default:
         uacpi_trace(
-            "%s [%s] (%d bytes) %s[0x%016"UACPI_PRIX64"] = 0x%"UACPI_PRIX64"\n",
+            "%s [%s] (%d bytes) %s[0x%016"UACPI_PRIX64"] = 0x%"UACPI_PRIX64,
             type_str, path, field->access_width_bytes,
             uacpi_address_space_to_string(space),
             UACPI_FMT64(offset), UACPI_FMT64(*data.integer)
@@ -336,7 +336,7 @@ static void region_uninstall_handler(
 
     link = find_previous_region_link(region);
     if (uacpi_unlikely(link == UACPI_NULL)) {
-        uacpi_error("operation region @%p not in the handler@%p list(?)\n",
+        uacpi_error("operation region @%p not in the handler@%p list(?)",
                     region, handler);
         goto out;
     } else if (link == region) {
@@ -554,7 +554,7 @@ static uacpi_status reg_or_unreg_all_opregions(
 
     uacpi_trace(
         "%sactivated all '%s' opregions controlled by '%.4s', "
-        "%zu _REG() calls (%zu errors)\n",
+        "%zu _REG() calls (%zu errors)",
         connection_code == ACPI_REG_CONNECT ? "" : "de",
         uacpi_address_space_to_string(space),
         device_node->name.text, ctx.reg_executed, ctx.reg_errors
@@ -904,7 +904,7 @@ uacpi_status uacpi_dispatch_opregion_io(
         path = uacpi_namespace_node_generate_absolute_path(field->region);
         uacpi_error(
             "out-of-bounds access to opregion %s[0x%"UACPI_PRIX64"->"
-            "0x%"UACPI_PRIX64"] at 0x%"UACPI_PRIX64" (idx=%u, width=%d)\n",
+            "0x%"UACPI_PRIX64"] at 0x%"UACPI_PRIX64" (idx=%u, width=%d)",
             path, UACPI_FMT64(region->offset),
             UACPI_FMT64(region->offset + region->length),
             UACPI_FMT64(abs_offset), offset, field->access_width_bytes

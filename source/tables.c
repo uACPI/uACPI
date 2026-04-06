@@ -83,7 +83,7 @@ static void dump_table_header(
 
     if (uacpi_signatures_match(hdr, ACPI_FACS_SIGNATURE)) {
         uacpi_info(
-            "FACS 0x%016"UACPI_PRIX64" %08X\n", UACPI_FMT64(phys_addr),
+            "FACS 0x%016"UACPI_PRIX64" %08X", UACPI_FMT64(phys_addr),
             sdt->length
         );
         return;
@@ -93,7 +93,7 @@ static void dump_table_header(
         struct acpi_rsdp *rsdp = hdr;
 
         uacpi_info(
-            "RSDP 0x%016"UACPI_PRIX64" %08X v%02X (%6.6s)\n",
+            "RSDP 0x%016"UACPI_PRIX64" %08X v%02X (%6.6s)",
             UACPI_FMT64(phys_addr), rsdp->revision >= 2 ? rsdp->length : 20,
             rsdp->revision, rsdp->oemid
         );
@@ -101,7 +101,7 @@ static void dump_table_header(
     }
 
     uacpi_info(
-        "%.4s 0x%016"UACPI_PRIX64" %08X v%02X (%6.6s %8.8s)\n",
+        "%.4s 0x%016"UACPI_PRIX64" %08X v%02X (%6.6s %8.8s)",
         sdt->signature, UACPI_FMT64(phys_addr), sdt->length, sdt->revision,
         sdt->oemid, sdt->oem_table_id
     );
@@ -200,7 +200,7 @@ static uacpi_status initialize_from_rsdp(void)
     uacpi_kernel_unmap(rsdp, sizeof(struct acpi_rsdp));
 
     if (!rxsdt) {
-        uacpi_error("both RSDT & XSDT tables are NULL!\n");
+        uacpi_error("both RSDT & XSDT tables are NULL!");
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
 
@@ -231,7 +231,7 @@ uacpi_status uacpi_setup_early_table_access(
 
         stripped_bytes = aligned_buffer_addr - buffer_addr;
         uacpi_warn(
-            "fixed up misaligned early tables buffer (%zu bytes stripped)\n",
+            "fixed up misaligned early tables buffer (%zu bytes stripped)",
             stripped_bytes
         );
 
@@ -262,7 +262,7 @@ static uacpi_iteration_decision warn_if_early_referenced(
 
     if (uacpi_unlikely(tbl->reference_count != 0)) {
         uacpi_warn(
-            "table "UACPI_PRI_TBL_HDR" (%zu) still has %d early reference(s)!\n",
+            "table "UACPI_PRI_TBL_HDR" (%zu) still has %d early reference(s)!",
             UACPI_FMT_TBL_HDR(&tbl->hdr), idx, tbl->reference_count
         );
     }
@@ -433,7 +433,7 @@ uacpi_status uacpi_verify_table_checksum(void *table, uacpi_size size)
         }
 
         uacpi_log_lvl(
-            lvl, "invalid table "UACPI_PRI_TBL_HDR" checksum %d!\n",
+            lvl, "invalid table "UACPI_PRI_TBL_HDR" checksum %d!",
             UACPI_FMT_TBL_HDR(hdr), csum
         );
     }
@@ -461,7 +461,7 @@ uacpi_status uacpi_check_table_signature(void *table, const uacpi_char *expect)
 
         uacpi_log_lvl(
             lvl,
-            "invalid table "UACPI_PRI_TBL_HDR" signature (expected '%.4s')\n",
+            "invalid table "UACPI_PRI_TBL_HDR" signature (expected '%.4s')",
             UACPI_FMT_TBL_HDR(hdr), expect
         );
     }
@@ -477,7 +477,7 @@ static uacpi_status table_alloc(
 
     if (early_table_access &&
         table_array_size(&tables) == table_array_capacity(&tables)) {
-        uacpi_warn("early table access buffer capacity exhausted!\n");
+        uacpi_warn("early table access buffer capacity exhausted!");
         return UACPI_STATUS_OUT_OF_MEMORY;
     }
 
@@ -539,7 +539,7 @@ static uacpi_status table_ref_unlocked(struct uacpi_installed_table *tbl)
     case 0xFFFF - 1:
         uacpi_warn(
             "too many references for "UACPI_PRI_TBL_HDR
-            ", mapping permanently\n", UACPI_FMT_TBL_HDR(&tbl->hdr)
+            ", mapping permanently", UACPI_FMT_TBL_HDR(&tbl->hdr)
         );
         break;
     default:
@@ -556,7 +556,7 @@ static uacpi_status table_unref_unlocked(struct uacpi_installed_table *tbl)
     switch (tbl->reference_count) {
     case 0:
         uacpi_warn(
-            "tried to unref table "UACPI_PRI_TBL_HDR" with no references\n",
+            "tried to unref table "UACPI_PRI_TBL_HDR" with no references",
             UACPI_FMT_TBL_HDR(&tbl->hdr)
         );
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -673,7 +673,7 @@ static uacpi_status handle_table_override(
             out_table
         );
     default:
-        uacpi_error("invalid table installation disposition %d\n", disposition);
+        uacpi_error("invalid table installation disposition %d", disposition);
         return UACPI_STATUS_INTERNAL_ERROR;
     }
 }
@@ -693,7 +693,7 @@ static uacpi_status table_install_physical_with_origin_unlocked(
 
     if (uacpi_unlikely(hdr.length < sizeof(struct acpi_sdt_hdr))) {
         uacpi_warn(
-            "bogus table '%.4s' (0x%016"UACPI_PRIX64") size: %u bytes\n",
+            "bogus table '%.4s' (0x%016"UACPI_PRIX64") size: %u bytes",
             hdr.signature, UACPI_FMT64(phys), hdr.length
         );
     }
@@ -723,7 +723,7 @@ static uacpi_status table_install_physical_with_origin_unlocked(
         case UACPI_TABLE_INSTALLATION_DISPOSITON_DENY:
             uacpi_info(
                 "table '%.4s' (0x%016"UACPI_PRIX64") installation denied "
-                "by host\n", hdr.signature, UACPI_FMT64(phys)
+                "by host", hdr.signature, UACPI_FMT64(phys)
             );
             ret = UACPI_STATUS_DENIED;
             goto out;
@@ -731,7 +731,7 @@ static uacpi_status table_install_physical_with_origin_unlocked(
         default:
             uacpi_info(
                 "table '%.4s' (0x%016"UACPI_PRIX64") installation "
-                "overridden by host\n", hdr.signature, UACPI_FMT64(phys)
+                "overridden by host", hdr.signature, UACPI_FMT64(phys)
             );
 
             ret = handle_table_override(disposition, override, out_table);
@@ -778,7 +778,7 @@ static uacpi_status table_install_with_origin_unlocked(
     struct acpi_sdt_hdr *hdr = virt;
 
     if (uacpi_unlikely(hdr->length < sizeof(struct acpi_sdt_hdr))) {
-        uacpi_error("invalid table '%.4s' (%p) size: %u\n",
+        uacpi_error("invalid table '%.4s' (%p) size: %u",
                     hdr->signature, virt, hdr->length);
         return UACPI_STATUS_INVALID_TABLE_LENGTH;
     }
@@ -796,7 +796,7 @@ static uacpi_status table_install_with_origin_unlocked(
             break;
         case UACPI_TABLE_INSTALLATION_DISPOSITON_DENY:
             uacpi_info(
-                "table "UACPI_PRI_TBL_HDR" installation denied by host\n",
+                "table "UACPI_PRI_TBL_HDR" installation denied by host",
                 UACPI_FMT_TBL_HDR(hdr)
             );
             return UACPI_STATUS_DENIED;
@@ -804,7 +804,7 @@ static uacpi_status table_install_with_origin_unlocked(
         default: {
             uacpi_status ret;
             uacpi_info(
-                "table "UACPI_PRI_TBL_HDR" installation overridden by host\n",
+                "table "UACPI_PRI_TBL_HDR" installation overridden by host",
                 UACPI_FMT_TBL_HDR(hdr)
             );
 
@@ -1076,7 +1076,7 @@ static uacpi_status table_ctl(uacpi_size idx, struct table_ctl_request *req)
 
     if (uacpi_unlikely(table_array_size(&tables) <= idx)) {
         uacpi_error(
-            "requested invalid table index %zu (%zu tables installed)\n",
+            "requested invalid table index %zu (%zu tables installed)",
             idx, table_array_size(&tables)
         );
         ret = UACPI_STATUS_INVALID_ARGUMENT;
@@ -1092,7 +1092,7 @@ static uacpi_status table_ctl(uacpi_size idx, struct table_ctl_request *req)
 
         if (uacpi_unlikely((tbl->flags & mask) != mask)) {
             uacpi_error(
-                "unexpected table '%.4s' flags %02X, expected %02X to be set\n",
+                "unexpected table '%.4s' flags %02X, expected %02X to be set",
                 tbl->hdr.signature, tbl->flags, mask
             );
             ret = UACPI_STATUS_INVALID_ARGUMENT;
@@ -1106,7 +1106,7 @@ static uacpi_status table_ctl(uacpi_size idx, struct table_ctl_request *req)
         if (uacpi_unlikely((tbl->flags & mask) != 0)) {
             uacpi_error(
                 "unexpected table '%.4s' flags %02X, expected %02X "
-                "to be clear\n", tbl->hdr.signature, tbl->flags, mask
+                "to be clear", tbl->hdr.signature, tbl->flags, mask
             );
             ret = UACPI_STATUS_ALREADY_EXISTS;
             goto out;
@@ -1212,7 +1212,7 @@ static void fadt_ensure_correct_revision(struct acpi_fadt *fadt)
     if (rev == UACPI_ARRAY_SIZE(fadt_version_sizes)) {
         uacpi_trace(
             "FADT revision (%zu) is likely greater than the last "
-            "supported, reducing to %zu\n", current_rev, rev
+            "supported, reducing to %zu", current_rev, rev
         );
         fadt->hdr.revision = rev;
         return;
@@ -1223,7 +1223,7 @@ static void fadt_ensure_correct_revision(struct acpi_fadt *fadt)
     if (current_rev != rev && !(rev == 3 && current_rev == 4)) {
         uacpi_warn(
             "FADT length %u doesn't match expected for revision %zu, "
-            "assuming version %zu\n", fadt->hdr.length, current_rev,
+            "assuming version %zu", fadt->hdr.length, current_rev,
             rev
         );
         fadt->hdr.revision = rev;
@@ -1448,7 +1448,7 @@ uacpi_status uacpi_for_each_subtable(
         if (uacpi_unlikely(subtable_hdr->length > bytes_left ||
                            subtable_hdr->length < sizeof(*subtable_hdr))) {
             uacpi_error(
-                "corrupted '%.4s' subtable length: %u (%zu bytes left)\n",
+                "corrupted '%.4s' subtable length: %u (%zu bytes left)",
                 hdr->signature, subtable_hdr->length, bytes_left
             );
             return UACPI_STATUS_INVALID_TABLE_LENGTH;
@@ -1469,7 +1469,7 @@ uacpi_status uacpi_for_each_subtable(
 
     if (uacpi_unlikely(bytes_left != 0)) {
         uacpi_warn(
-            "found %zu stray bytes in table '%.4s'\n",
+            "found %zu stray bytes in table '%.4s'",
             bytes_left, hdr->signature
         );
     }

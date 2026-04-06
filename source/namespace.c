@@ -274,7 +274,7 @@ uacpi_namespace_node *uacpi_namespace_get_predefined(
 )
 {
     if (uacpi_unlikely(ns > UACPI_PREDEFINED_NAMESPACE_MAX)) {
-        uacpi_warn("requested invalid predefined namespace %d\n", ns);
+        uacpi_warn("requested invalid predefined namespace %d", ns);
         return UACPI_NULL;
     }
 
@@ -308,7 +308,7 @@ uacpi_status uacpi_namespace_node_install(
         parent = uacpi_namespace_root();
 
     if (uacpi_unlikely(uacpi_namespace_node_is_dangling(node))) {
-        uacpi_warn("attempting to install a dangling namespace node %.4s\n",
+        uacpi_warn("attempting to install a dangling namespace node %.4s",
                    node->name.text);
         return UACPI_STATUS_NAMESPACE_NODE_DANGLING;
     }
@@ -353,7 +353,7 @@ uacpi_status uacpi_namespace_node_uninstall(uacpi_namespace_node *node)
     uacpi_namespace_node *prev;
 
     if (uacpi_unlikely(uacpi_namespace_node_is_dangling(node))) {
-        uacpi_warn("attempting to uninstall a dangling namespace node %.4s\n",
+        uacpi_warn("attempting to uninstall a dangling namespace node %.4s",
                    node->name.text);
         return UACPI_STATUS_INTERNAL_ERROR;
     }
@@ -382,7 +382,7 @@ uacpi_status uacpi_namespace_node_uninstall(uacpi_namespace_node *node)
      */
     if (uacpi_unlikely(node->child != UACPI_NULL)) {
         uacpi_warn(
-            "refusing to uninstall node %.4s with a child (%.4s)\n",
+            "refusing to uninstall node %.4s with a child (%.4s)",
             node->name.text, node->child->name.text
         );
         return UACPI_STATUS_DENIED;
@@ -430,7 +430,7 @@ uacpi_status uacpi_namespace_node_uninstall(uacpi_namespace_node *node)
 
         if (uacpi_unlikely(prev == UACPI_NULL)) {
             uacpi_warn(
-                "trying to uninstall a node %.4s (%p) not linked to any peer\n",
+                "trying to uninstall a node %.4s (%p) not linked to any peer",
                 node->name.text, node
             );
             return UACPI_STATUS_INTERNAL_ERROR;
@@ -596,7 +596,7 @@ uacpi_status uacpi_namespace_node_resolve(
 
 out:
     if (uacpi_unlikely(ret == UACPI_STATUS_INVALID_ARGUMENT)) {
-        uacpi_warn("invalid path '%s'\n", path);
+        uacpi_warn("invalid path '%s'", path);
         goto out_read_unlock;
     }
 
@@ -607,7 +607,7 @@ out:
 
     if (uacpi_namespace_node_is_temporary(cur_node) &&
         permanent_only == UACPI_PERMANENT_ONLY_YES) {
-        uacpi_warn("denying access to temporary namespace node '%.4s'\n",
+        uacpi_warn("denying access to temporary namespace node '%.4s'",
                    cur_node->name.text);
         ret = UACPI_STATUS_DENIED;
         goto out_read_unlock;

@@ -709,18 +709,6 @@ void uacpi_log(uacpi_log_level lvl, const uacpi_char *str, ...)
     if (uacpi_unlikely(ret < 0))
         goto out;
 
-    /*
-     * If this log message is too large for the configured buffer size, cut off
-     * the end and transform into "...\n" to indicate that it didn't fit and
-     * prevent the newline from being truncated.
-     */
-    if (uacpi_unlikely(ret >= UACPI_PLAIN_LOG_BUFFER_SIZE)) {
-        buf[UACPI_PLAIN_LOG_BUFFER_SIZE - 5] = '.';
-        buf[UACPI_PLAIN_LOG_BUFFER_SIZE - 4] = '.';
-        buf[UACPI_PLAIN_LOG_BUFFER_SIZE - 3] = '.';
-        buf[UACPI_PLAIN_LOG_BUFFER_SIZE - 2] = '\n';
-    }
-
     uacpi_kernel_log(lvl, buf);
 
 out:
