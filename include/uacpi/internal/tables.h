@@ -35,7 +35,9 @@ void uacpi_deinitialize_tables(void);
 
 uacpi_bool uacpi_signatures_match(const void *const lhs, const void *const rhs);
 uacpi_status uacpi_check_table_signature(void *table, const uacpi_char *expect);
-uacpi_status uacpi_verify_table_checksum(void *table, uacpi_size size);
+uacpi_status uacpi_verify_table_checksum(
+    void *table, uacpi_size size, uacpi_u8 *out_flags
+);
 
 uacpi_status uacpi_table_install_physical_with_origin(
     uacpi_phys_addr phys, enum uacpi_table_origin origin, uacpi_table *out_table

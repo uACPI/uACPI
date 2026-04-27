@@ -140,7 +140,7 @@ static uacpi_status initialize_from_rxsdt(uacpi_phys_addr rxsdt_addr,
     if (uacpi_unlikely(rxsdt == UACPI_MAP_FAILED))
         return UACPI_STATUS_MAPPING_FAILED;
 
-    ret = uacpi_verify_table_checksum(rxsdt, map_len);
+    ret = uacpi_verify_table_checksum(rxsdt, map_len, NULL);
     if (uacpi_unlikely_error(ret))
         goto error_out;
 
@@ -421,18 +421,27 @@ static uacpi_u8 table_checksum(void *table, uacpi_size size)
     return csum;
 }
 
-uacpi_status uacpi_verify_table_checksum(void *table, uacpi_size size)
+uacpi_status uacpi_verify_table_checksum(
+    void *table, uacpi_size size, uacpi_u8 *out_flags
+)
 {
     uacpi_status ret = UACPI_STATUS_OK;
     uacpi_u8 csum;
 
     csum = table_checksum(table, size);
+    if (out_flags != UACPI_NULL)
+        *out_flags |= UACPI_TABLE_CSUM_VERIFIED;
 
     if (uacpi_unlikely(csum != 0)) {
         enum uacpi_log_level lvl = UACPI_LOG_WARN;
         struct acpi_sdt_hdr *hdr = table;
 
         if (uacpi_check_flag(UACPI_FLAG_BAD_CSUM_FATAL)) {
+            if (out_flags != UACPI_NULL) {
+                *out_flags &= ~UACPI_TABLE_CSUM_VERIFIED;
+                *out_flags |= UACPI_TABLE_INVALID;
+            }
+
             ret = UACPI_STATUS_BAD_CHECKSUM;
             lvl = UACPI_LOG_ERROR;
         }
@@ -529,15 +538,14 @@ static uacpi_status table_ref_unlocked(struct uacpi_installed_table *tbl)
             return UACPI_STATUS_MAPPING_FAILED;
 
         if (!(tbl->flags & UACPI_TABLE_CSUM_VERIFIED)) {
-            ret = uacpi_verify_table_checksum(tbl->ptr, tbl->hdr.length);
+            ret = uacpi_verify_table_checksum(
+                tbl->ptr, tbl->hdr.length, &tbl->flags
+            );
             if (uacpi_unlikely_error(ret)) {
                 uacpi_kernel_unmap(tbl->ptr, tbl->hdr.length);
-                tbl->flags |= UACPI_TABLE_INVALID;
                 tbl->ptr = UACPI_NULL;
                 return ret;
             }
-
-            tbl->flags |= UACPI_TABLE_CSUM_VERIFIED;
         }
         break;
     }
@@ -616,11 +624,10 @@ static uacpi_status verify_and_install_table(
         if (uacpi_unlikely(mapping == UACPI_MAP_FAILED))
             return UACPI_STATUS_MAPPING_FAILED;
 
-        ret = uacpi_verify_table_checksum(mapping, hdr->length);
+        ret = uacpi_verify_table_checksum(mapping, hdr->length, &flags);
         if (uacpi_likely_success(ret)) {
             if (is_fadt)
                 ret = initialize_fadt(mapping);
-            flags |= UACPI_TABLE_CSUM_VERIFIED;
         }
 
         if (virt_addr == UACPI_NULL)
