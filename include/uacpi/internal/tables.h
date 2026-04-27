@@ -24,8 +24,8 @@ struct uacpi_installed_table {
     uacpi_u16 reference_count;
 
 #define UACPI_TABLE_LOADED (1 << 0)
-#define UACPI_TABLE_CSUM_VERIFIED (1 << 1)
-#define UACPI_TABLE_INVALID (1 << 2)
+#define UACPI_TABLE_CSUM_CHECKED (1 << 1)
+#define UACPI_TABLE_CSUM_BAD (1 << 2)
     uacpi_u8 flags;
     uacpi_u8 origin;
 };

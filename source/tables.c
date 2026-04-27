@@ -430,18 +430,16 @@ uacpi_status uacpi_verify_table_checksum(
 
     csum = table_checksum(table, size);
     if (out_flags != UACPI_NULL)
-        *out_flags |= UACPI_TABLE_CSUM_VERIFIED;
+        *out_flags |= UACPI_TABLE_CSUM_CHECKED;
 
     if (uacpi_unlikely(csum != 0)) {
         enum uacpi_log_level lvl = UACPI_LOG_WARN;
         struct acpi_sdt_hdr *hdr = table;
 
-        if (uacpi_check_flag(UACPI_FLAG_BAD_CSUM_FATAL)) {
-            if (out_flags != UACPI_NULL) {
-                *out_flags &= ~UACPI_TABLE_CSUM_VERIFIED;
-                *out_flags |= UACPI_TABLE_INVALID;
-            }
+        if (out_flags != UACPI_NULL)
+            *out_flags |= UACPI_TABLE_CSUM_BAD;
 
+        if (uacpi_check_flag(UACPI_FLAG_BAD_CSUM_FATAL)) {
             ret = UACPI_STATUS_BAD_CHECKSUM;
             lvl = UACPI_LOG_ERROR;
         }
@@ -453,6 +451,12 @@ uacpi_status uacpi_verify_table_checksum(
     }
 
     return ret;
+}
+
+static bool skip_due_to_bad_csum(struct uacpi_installed_table *tbl)
+{
+    return uacpi_check_flag(UACPI_FLAG_BAD_CSUM_FATAL) &&
+           (tbl->flags & UACPI_TABLE_CSUM_BAD);
 }
 
 uacpi_bool uacpi_signatures_match(const void *const lhs, const void *const rhs)
@@ -526,8 +530,8 @@ static uacpi_status table_ref_unlocked(struct uacpi_installed_table *tbl)
     case 0: {
         uacpi_status ret;
 
-        if (tbl->flags & UACPI_TABLE_INVALID)
-            return UACPI_STATUS_INVALID_ARGUMENT;
+        if (uacpi_unlikely(skip_due_to_bad_csum(tbl)))
+            return UACPI_STATUS_BAD_CHECKSUM;
 
         if (tbl->origin != UACPI_TABLE_ORIGIN_HOST_PHYSICAL &&
             tbl->origin != UACPI_TABLE_ORIGIN_FIRMWARE_PHYSICAL)
@@ -537,7 +541,7 @@ static uacpi_status table_ref_unlocked(struct uacpi_installed_table *tbl)
         if (uacpi_unlikely(tbl->ptr == UACPI_MAP_FAILED))
             return UACPI_STATUS_MAPPING_FAILED;
 
-        if (!(tbl->flags & UACPI_TABLE_CSUM_VERIFIED)) {
+        if (!(tbl->flags & UACPI_TABLE_CSUM_CHECKED)) {
             ret = uacpi_verify_table_checksum(
                 tbl->ptr, tbl->hdr.length, &tbl->flags
             );
@@ -613,7 +617,7 @@ static uacpi_status verify_and_install_table(
      * writable fields. Don't try to validate it here.
      */
     if (uacpi_signatures_match(hdr->signature, ACPI_FACS_SIGNATURE)) {
-        flags |= UACPI_TABLE_CSUM_VERIFIED;
+        flags |= UACPI_TABLE_CSUM_CHECKED;
     } else if (uacpi_check_flag(UACPI_FLAG_PROACTIVE_TBL_CSUM) || is_fadt ||
                out_table != UACPI_NULL) {
         void *mapping = virt_addr;
@@ -889,7 +893,7 @@ uacpi_status uacpi_for_each_table(
     for (idx = base_idx; idx < table_array_size(&tables); ++idx) {
         tbl = table_array_at(&tables, idx);
 
-        if (tbl->flags & UACPI_TABLE_INVALID)
+        if (uacpi_unlikely(skip_due_to_bad_csum(tbl)))
             continue;
 
         dec = cb(user, tbl, idx);
@@ -1096,8 +1100,8 @@ static uacpi_status table_ctl(uacpi_size idx, struct table_ctl_request *req)
     }
 
     tbl = table_array_at(&tables, idx);
-    if (uacpi_unlikely(tbl->flags & UACPI_TABLE_INVALID))
-        return UACPI_STATUS_INVALID_ARGUMENT;
+    if (uacpi_unlikely(uacpi_unlikely(skip_due_to_bad_csum(tbl))))
+        return UACPI_STATUS_BAD_CHECKSUM;
 
     if (req->type & TABLE_CTL_VALIDATE_SET_FLAGS) {
         uacpi_u8 mask = req->expect_set;
