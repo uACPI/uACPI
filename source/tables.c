@@ -1185,13 +1185,18 @@ uacpi_status uacpi_table_ref(uacpi_table *tbl)
     return table_ctl(tbl->index, &req);
 }
 
-uacpi_status uacpi_table_unref(uacpi_table *tbl)
+uacpi_status uacpi_table_unref_by_index(uacpi_size index)
 {
     struct table_ctl_request req = {
         .type = TABLE_CTL_PUT
     };
 
-    return table_ctl(tbl->index, &req);
+    return table_ctl(index, &req);
+}
+
+uacpi_status uacpi_table_unref(uacpi_table *tbl)
+{
+    return uacpi_table_unref_by_index(tbl->index);
 }
 
 uacpi_u16 fadt_version_sizes[] = {

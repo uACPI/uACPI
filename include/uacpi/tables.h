@@ -92,6 +92,7 @@ uacpi_status uacpi_table_find(
  */
 uacpi_status uacpi_table_ref(uacpi_table*);
 uacpi_status uacpi_table_unref(uacpi_table*);
+uacpi_status uacpi_table_unref_by_index(uacpi_size);
 
 /**
  * Returns the pointer to a sanitized internal version of FADT.
