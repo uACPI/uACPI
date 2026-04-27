@@ -280,7 +280,7 @@ uacpi_status uacpi_initialize_tables(void)
     if (early_table_access) {
         uacpi_size num_tables;
 
-        uacpi_for_each_table(0, warn_if_early_referenced, UACPI_NULL);
+        uacpi_for_each_installed_table(0, warn_if_early_referenced, UACPI_NULL);
 
         // Reallocate the user buffer into a normal heap array
         num_tables = table_array_size(&tables);
@@ -875,8 +875,8 @@ uacpi_status uacpi_table_install_physical(
     );
 }
 
-uacpi_status uacpi_for_each_table(
-    uacpi_size base_idx, uacpi_table_iteration_callback cb, void *user
+uacpi_status uacpi_for_each_installed_table(
+    uacpi_size base_idx, uacpi_installed_table_iteration_callback cb, void *user
 )
 {
     uacpi_status ret;
@@ -990,7 +990,7 @@ uacpi_status uacpi_table_match(
     ctx.out_table = out_table;
     ctx.status = UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_for_each_table(base_idx, do_search_tables, &ctx);
+    ret = uacpi_for_each_installed_table(base_idx, do_search_tables, &ctx);
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -1011,7 +1011,7 @@ static uacpi_status find_table(
     ctx.search_type = SEARCH_TYPE_BY_ID;
     ctx.status = UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_for_each_table(base_idx, do_search_tables, &ctx);
+    ret = uacpi_for_each_installed_table(base_idx, do_search_tables, &ctx);
     if (uacpi_unlikely_error(ret))
         return ret;
 

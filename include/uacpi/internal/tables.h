@@ -54,11 +54,11 @@ uacpi_status uacpi_table_load_with_cause(
 );
 #endif // !UACPI_BAREBONES_MODE
 
-typedef uacpi_iteration_decision (*uacpi_table_iteration_callback)
+typedef uacpi_iteration_decision (*uacpi_installed_table_iteration_callback)
     (void *user, struct uacpi_installed_table *tbl, uacpi_size idx);
 
-uacpi_status uacpi_for_each_table(
-    uacpi_size base_idx, uacpi_table_iteration_callback, void *user
+uacpi_status uacpi_for_each_installed_table(
+    uacpi_size base_idx, uacpi_installed_table_iteration_callback, void *user
 );
 
 typedef uacpi_bool (*uacpi_table_match_callback)
