@@ -34,6 +34,13 @@ typedef struct uacpi_table {
 } uacpi_table;
 
 /**
+ * Returns the number of tables stored in the internal array via 'out_count'.
+ * This includes all firmware-provided, dynamically loaded, as well as
+ * client-installed tables via 'uacpi_table_install' etc.
+ */
+uacpi_size uacpi_table_count(void);
+
+/**
  * Install a table from either a virtual or a physical address.
  * The table is simply stored in the internal table array, and not loaded by
  * the interpreter (see uacpi_table_load).

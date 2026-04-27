@@ -207,6 +207,11 @@ static uacpi_status initialize_from_rsdp(void)
     return initialize_from_rxsdt(rxsdt, rxsdt_entry_size);
 }
 
+uacpi_size uacpi_table_count(void)
+{
+    return table_array_size(&tables);
+}
+
 uacpi_status uacpi_setup_early_table_access(
     void *temporary_buffer, uacpi_size buffer_size
 )
