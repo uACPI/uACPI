@@ -1181,6 +1181,22 @@ void uacpi_table_mark_as_loaded(uacpi_size idx)
 }
 #endif // !UACPI_BAREBONES_MODE
 
+uacpi_status uacpi_table_get_by_index(uacpi_size idx, uacpi_table *out_table)
+{
+    uacpi_status ret;
+    struct table_ctl_request req = {
+        .type = TABLE_CTL_GET,
+    };
+
+    ret = table_ctl(idx, &req);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    out_table->ptr = req.out_tbl;
+    out_table->index = idx;
+    return UACPI_STATUS_OK;
+}
+
 uacpi_status uacpi_table_ref(uacpi_table *tbl)
 {
     struct table_ctl_request req = {

@@ -94,6 +94,17 @@ uacpi_status uacpi_table_find(
 );
 
 /**
+ * Returns a table by its index in the internal table array.
+ *
+ * The number of available tables can be queried via 'uacpi_table_count()'.
+ *
+ * NOTE:
+ * Even if a table is present, this may still fail with
+ * UACPI_STATUS_BAD_CHECKSUM in case UACPI_FLAG_BAD_CSUM_FATAL is enabled.
+ */
+uacpi_status uacpi_table_get_by_index(uacpi_size, uacpi_table *out_table);
+
+/**
  * Increment/decrement a table's reference count.
  * The table is unmapped when the reference count drops to 0.
  */
