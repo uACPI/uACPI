@@ -6,16 +6,6 @@
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 
-enum uacpi_table_origin {
-#ifndef UACPI_BAREBONES_MODE
-    UACPI_TABLE_ORIGIN_FIRMWARE_VIRTUAL = 0,
-#endif
-    UACPI_TABLE_ORIGIN_FIRMWARE_PHYSICAL = 1,
-
-    UACPI_TABLE_ORIGIN_HOST_VIRTUAL,
-    UACPI_TABLE_ORIGIN_HOST_PHYSICAL,
-};
-
 struct uacpi_installed_table {
     uacpi_phys_addr phys_addr;
     struct acpi_sdt_hdr hdr;
@@ -23,9 +13,6 @@ struct uacpi_installed_table {
 
     uacpi_u16 reference_count;
 
-#define UACPI_TABLE_LOADED (1 << 0)
-#define UACPI_TABLE_CSUM_CHECKED (1 << 1)
-#define UACPI_TABLE_CSUM_BAD (1 << 2)
     uacpi_u8 flags;
     uacpi_u8 origin;
 };

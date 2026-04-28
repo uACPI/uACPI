@@ -599,6 +599,97 @@ static uacpi_status table_unref_unlocked(struct uacpi_installed_table *tbl)
     return UACPI_STATUS_OK;
 }
 
+static void table_info_by_index_unchecked(
+    uacpi_size idx, uacpi_table_info *out_info
+)
+{
+    struct uacpi_installed_table *tbl;
+
+    tbl = table_array_at(&tables, idx);
+
+    out_info->idx = idx;
+    out_info->size = tbl->hdr.length;
+    uacpi_memcpy(
+        out_info->signature, tbl->hdr.signature,
+        sizeof(out_info->signature)
+    );
+    out_info->origin = tbl->origin;
+    out_info->flags = tbl->flags;
+    out_info->reference_count = tbl->reference_count;
+
+    if (out_info->origin & (UACPI_TABLE_ORIGIN_HOST_VIRTUAL |
+                            UACPI_TABLE_ORIGIN_FIRMWARE_VIRTUAL)) {
+        out_info->virt_addr = tbl->ptr;
+    } else {
+        out_info->phys_addr = tbl->phys_addr;
+    }
+}
+
+uacpi_status uacpi_table_info_get_by_index(
+    uacpi_size idx, uacpi_table_info *out_info
+)
+{
+    uacpi_status ret;
+
+    ENSURE_TABLES_ONLINE();
+
+    ret = uacpi_acquire_native_mutex_may_be_null(table_mutex);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    if (uacpi_unlikely(table_array_size(&tables) <= idx)) {
+        uacpi_error(
+            "requested invalid table index %zu (%zu tables installed)",
+            idx, table_array_size(&tables)
+        );
+        ret = UACPI_STATUS_INVALID_ARGUMENT;
+        goto out;
+    }
+
+    table_info_by_index_unchecked(idx, out_info);
+
+out:
+    uacpi_release_native_mutex_may_be_null(table_mutex);
+    return ret;
+}
+
+uacpi_status uacpi_for_each_table(
+    uacpi_table_iteration_callback cb, void *user
+)
+{
+    uacpi_status ret;
+    uacpi_size num_tables, i = 0;
+    uacpi_table_info info;
+
+    ENSURE_TABLES_ONLINE();
+
+    for (;;) {
+        ret = uacpi_acquire_native_mutex_may_be_null(table_mutex);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+
+        // Number of tables may have increased while we were in the callback
+        num_tables = table_array_size(&tables);
+        if (i >= num_tables) {
+            ret = uacpi_release_native_mutex_may_be_null(table_mutex);
+            return ret;
+        }
+
+        table_info_by_index_unchecked(i, &info);
+
+        ret = uacpi_release_native_mutex_may_be_null(table_mutex);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+
+        if (cb(user, &info) == UACPI_ITERATION_DECISION_BREAK)
+            break;
+
+        i++;
+    }
+
+    return UACPI_STATUS_OK;
+}
+
 static uacpi_status verify_and_install_table(
     struct acpi_sdt_hdr *hdr, uacpi_phys_addr phys_addr, void *virt_addr,
     enum uacpi_table_origin origin, uacpi_table *out_table
