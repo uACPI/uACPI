@@ -24,8 +24,11 @@
 #define ACPI_SSDT_SIGNATURE "SSDT"
 #define ACPI_PSDT_SIGNATURE "PSDT"
 #define ACPI_ECDT_SIGNATURE "ECDT"
+#define ACPI_DBG2_SIGNATURE "DBG2"
+#define ACPI_SPCR_SIGNATURE "SPCR"
 #define ACPI_RHCT_SIGNATURE "RHCT"
 #define ACPI_DMAR_SIGNATURE "DMAR"
+#define ACPI_WAET_SIGNATURE "WAET"
 
 #define ACPI_AS_ID_SYS_MEM       0x00
 #define ACPI_AS_ID_SYS_IO        0x01
@@ -1137,7 +1140,11 @@ UACPI_PACKED(struct acpi_spcr {
     uacpi_u8 pci_function_number;
     uacpi_u32 pci_flags;
     uacpi_u8 pci_segment;
+
+    // revision >= 3
     uacpi_u32 uart_clock_frequency;
+
+    // revision >= 4
     uacpi_u32 precise_baud_rate;
     uacpi_u16 namespace_string_length;
     uacpi_u16 namespace_string_offset;
@@ -1702,3 +1709,13 @@ UACPI_PACKED(struct acpi_dmar_sidp {
     struct acpi_dmar_dss entries[];
 })
 UACPI_EXPECT_SIZEOF(struct acpi_dmar_sidp, 8);
+
+// acpi_waet->flags
+#define ACPI_WAET_RTC_GOOD (1 << 0)
+#define ACPI_WAET_ACPI_PM_TIMER_GOOD (1 << 1)
+
+UACPI_PACKED(struct acpi_waet {
+    struct acpi_sdt_hdr hdr;
+    uacpi_u32 flags;
+})
+UACPI_EXPECT_SIZEOF(struct acpi_waet, 40);
