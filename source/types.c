@@ -391,7 +391,7 @@ static void free_plain_no_recurse(uacpi_object *obj, struct free_queue *queue)
         if (uacpi_unlikely(!free_queue_push(queue,
                                             obj->package))) {
             uacpi_warn(
-                "unable to free nested package @%p: not enough memory\n",
+                "unable to free nested package @%p: not enough memory",
                 obj->package
             );
         }
@@ -558,7 +558,7 @@ static void free_op_region(uacpi_handle handle)
 
     if (uacpi_unlikely(op_region->handler != UACPI_NULL)) {
         uacpi_warn(
-            "BUG: attempting to free an opregion@%p with a handler attached\n",
+            "BUG: attempting to free an opregion@%p with a handler attached",
             op_region
         );
     }
@@ -716,7 +716,7 @@ static void free_object(uacpi_object *obj)
 
 static void make_chain_bugged(uacpi_object *obj)
 {
-    uacpi_warn("object refcount bug, marking chain @%p as bugged\n", obj);
+    uacpi_warn("object refcount bug, marking chain @%p as bugged", obj);
 
     while (obj) {
         uacpi_make_shareable_bugged(obj);

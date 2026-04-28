@@ -211,10 +211,10 @@ static uacpi_status get_slp_type_for_state(
     );
     if (ret != UACPI_STATUS_OK) {
         if (uacpi_unlikely(ret != UACPI_STATUS_NOT_FOUND)) {
-            uacpi_warn("error while evaluating %s: %s\n", path,
+            uacpi_warn("error while evaluating %s: %s", path,
                        uacpi_status_to_string(ret));
         } else {
-            uacpi_trace("sleep state %d is not supported as %s was not found\n",
+            uacpi_trace("sleep state %d is not supported as %s was not found",
                         state, path);
         }
         goto out;
@@ -222,7 +222,7 @@ static uacpi_status get_slp_type_for_state(
 
     switch (ret_obj->package->count) {
     case 0:
-        uacpi_error("empty package while evaluating %s!\n", path);
+        uacpi_error("empty package while evaluating %s!", path);
         ret = UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
         goto out;
 
@@ -230,7 +230,7 @@ static uacpi_status get_slp_type_for_state(
         obj0 = ret_obj->package->objects[0];
         if (uacpi_unlikely(obj0->type != UACPI_OBJECT_INTEGER)) {
             uacpi_error(
-                "invalid object type at pkg[0] => %s when evaluating %s\n",
+                "invalid object type at pkg[0] => %s when evaluating %s",
                 uacpi_object_type_to_string(obj0->type), path
             );
             goto out;
@@ -248,7 +248,7 @@ static uacpi_status get_slp_type_for_state(
                            obj1->type != UACPI_OBJECT_INTEGER)) {
             uacpi_error(
                 "invalid object type when evaluating %s: "
-                "pkg[0] => %s, pkg[1] => %s\n", path,
+                "pkg[0] => %s, pkg[1] => %s", path,
                 uacpi_object_type_to_string(obj0->type),
                 uacpi_object_type_to_string(obj1->type)
             );
@@ -295,7 +295,7 @@ static uacpi_status eval_sleep_helper(
         ret = UACPI_STATUS_OK;
         break;
     default:
-        uacpi_error("error while evaluating %s: %s\n",
+        uacpi_error("error while evaluating %s: %s",
                     path, uacpi_status_to_string(ret));
         break;
     }
@@ -505,7 +505,7 @@ uacpi_status uacpi_enter_sleep_state(enum uacpi_sleep_state state_enum)
 
     if (uacpi_unlikely(g_uacpi_rt_ctx.last_sleep_typ_a > ACPI_SLP_TYP_MAX ||
                        g_uacpi_rt_ctx.last_sleep_typ_b > ACPI_SLP_TYP_MAX)) {
-        uacpi_error("invalid SLP_TYP values: 0x%02X:0x%02X\n",
+        uacpi_error("invalid SLP_TYP values: 0x%02X:0x%02X",
                     g_uacpi_rt_ctx.last_sleep_typ_a,
                     g_uacpi_rt_ctx.last_sleep_typ_b);
         return UACPI_STATUS_AML_BAD_ENCODING;
@@ -593,7 +593,7 @@ uacpi_status uacpi_reboot(void)
     }
     default:
         uacpi_warn(
-            "unable to perform a reset: unsupported address space '%s' (%d)\n",
+            "unable to perform a reset: unsupported address space '%s' (%d)",
             uacpi_address_space_to_string(reset_reg->address_space_id),
             reset_reg->address_space_id
         );
@@ -612,7 +612,7 @@ uacpi_status uacpi_reboot(void)
             stalled_time += 100;
         }
 
-        uacpi_error("reset timeout\n");
+        uacpi_error("reset timeout");
         ret = UACPI_STATUS_HARDWARE_TIMEOUT;
     }
 

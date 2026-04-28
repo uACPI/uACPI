@@ -12,6 +12,19 @@
  * Context-related options
  * =======================
  */
+
+/*
+ * Optional string to prefix all uACPI log messages with.
+ */
+// #define UACPI_START_OF_LOG_MSG
+
+/*
+ * Optional string to suffix all uACPI log messages with.
+ */
+#ifndef UACPI_END_OF_LOG_MSG
+    #define UACPI_END_OF_LOG_MSG "\n"
+#endif
+
 #ifndef UACPI_DEFAULT_LOG_LEVEL
     #define UACPI_DEFAULT_LOG_LEVEL UACPI_LOG_INFO
 #endif
