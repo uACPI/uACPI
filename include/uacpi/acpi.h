@@ -26,6 +26,7 @@
 #define ACPI_ECDT_SIGNATURE "ECDT"
 #define ACPI_RHCT_SIGNATURE "RHCT"
 #define ACPI_DMAR_SIGNATURE "DMAR"
+#define ACPI_WAET_SIGNATURE "WAET"
 
 #define ACPI_AS_ID_SYS_MEM       0x00
 #define ACPI_AS_ID_SYS_IO        0x01
@@ -1702,3 +1703,13 @@ UACPI_PACKED(struct acpi_dmar_sidp {
     struct acpi_dmar_dss entries[];
 })
 UACPI_EXPECT_SIZEOF(struct acpi_dmar_sidp, 8);
+
+// acpi_waet->flags
+#define ACPI_WAET_RTC_GOOD (1 << 0)
+#define ACPI_WAET_ACPI_PM_TIMER_GOOD (1 << 1)
+
+UACPI_PACKED(struct acpi_waet {
+    struct acpi_sdt_hdr hdr;
+    uacpi_u32 flags;
+})
+UACPI_EXPECT_SIZEOF(struct acpi_waet, 40);
