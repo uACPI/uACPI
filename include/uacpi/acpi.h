@@ -24,6 +24,8 @@
 #define ACPI_SSDT_SIGNATURE "SSDT"
 #define ACPI_PSDT_SIGNATURE "PSDT"
 #define ACPI_ECDT_SIGNATURE "ECDT"
+#define ACPI_DBG2_SIGNATURE "DBG2"
+#define ACPI_SPCR_SIGNATURE "SPCR"
 #define ACPI_RHCT_SIGNATURE "RHCT"
 #define ACPI_DMAR_SIGNATURE "DMAR"
 #define ACPI_WAET_SIGNATURE "WAET"
@@ -1138,7 +1140,11 @@ UACPI_PACKED(struct acpi_spcr {
     uacpi_u8 pci_function_number;
     uacpi_u32 pci_flags;
     uacpi_u8 pci_segment;
+
+    // revision >= 3
     uacpi_u32 uart_clock_frequency;
+
+    // revision >= 4
     uacpi_u32 precise_baud_rate;
     uacpi_u16 namespace_string_length;
     uacpi_u16 namespace_string_offset;
