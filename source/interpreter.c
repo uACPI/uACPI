@@ -5431,6 +5431,20 @@ static uacpi_status exec_op(struct execution_context *ctx)
             emit_op_skip_warn(op_ctx);
             break;
 
+        case UACPI_PARSE_OP_TARGET: {
+            uacpi_aml_op next_op;
+
+            /*
+             * Target := SuperName | NullName, and a null target has no use
+             * for an object, so don't bother executing it as ZeroOp.
+             */
+            if (peek_next_op(frame, &next_op) == 1 &&
+                next_op == UACPI_AML_OP_ZeroOp) {
+                frame->code_offset++;
+                break;
+            }
+            UACPI_FALLTHROUGH;
+        }
         case UACPI_PARSE_OP_SIMPLE_NAME:
         case UACPI_PARSE_OP_SUPERNAME:
         case UACPI_PARSE_OP_SUPERNAME_OR_UNRESOLVED:
@@ -5441,7 +5455,6 @@ static uacpi_status exec_op(struct execution_context *ctx)
         case UACPI_PARSE_OP_OPERAND:
         case UACPI_PARSE_OP_STRING:
         case UACPI_PARSE_OP_COMPUTATIONAL_DATA:
-        case UACPI_PARSE_OP_TARGET:
             /*
              * Preempt this op parsing for now as we wait for the dynamic arg
              * to be parsed.
@@ -5832,6 +5845,10 @@ static uacpi_status exec_op(struct execution_context *ctx)
             } else {
                 src = item->obj;
             }
+
+            // Null target
+            if (dst == UACPI_NULL)
+                break;
 
             ret = store_to_target(dst, src, UACPI_NULL);
             break;
