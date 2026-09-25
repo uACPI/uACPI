@@ -4338,7 +4338,6 @@ static uacpi_status frame_setup_base_scope(struct call_frame *frame,
     block->node = scope;
     block->begin = 0;
     block->end = method->size;
-    frame->method = method;
     frame->cur_scope = scope;
     return UACPI_STATUS_OK;
 }
@@ -4546,6 +4545,7 @@ static uacpi_status enter_method(
     uacpi_status ret = UACPI_STATUS_OK;
 
     uacpi_shareable_ref(method);
+    new_frame->method = method;
 
     if (!method->is_serialized)
         return ret;

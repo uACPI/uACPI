@@ -28,8 +28,14 @@ void test_object_api(void)
     uacpi_object_array arr1;
 
     arr.objects = objects;
-    arr.count = UACPI_ARRAY_SIZE(objects);
     objects[0] = uacpi_object_create_integer(1);
+
+    // Calling with a wrong number of arguments must fail cleanly
+    arr.count = 1;
+    st = uacpi_eval(UACPI_NULL, "CHEK", &arr, UACPI_NULL);
+    if (st != UACPI_STATUS_INVALID_ARGUMENT)
+        error("expected call with a bad arg count to fail");
+    arr.count = UACPI_ARRAY_SIZE(objects);
 
     st = uacpi_object_create_integer_safe(
         0xDEADBEEFDEADBEEF, UACPI_OVERFLOW_DISALLOW, &objects[1]
