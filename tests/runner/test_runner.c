@@ -331,7 +331,7 @@ static uacpi_status handle_notify(
 
     printf("Received a notification from %s %" PRIx64 "\n", path, value);
 
-    free((void*)path);
+    uacpi_free_absolute_path(path);
     return UACPI_STATUS_OK;
 }
 
