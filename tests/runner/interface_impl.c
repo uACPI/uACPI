@@ -291,6 +291,10 @@ void uacpi_kernel_unmap(void *addr, uacpi_size len)
     HASH_TABLE_REMOVE(&virt_locations, virt_location, virt_location_t, node);
 }
 
+#ifdef UACPI_SIZED_FREES
+static hash_table_t allocations;
+#endif
+
 void interface_cleanup(void)
 {
     size_t i;
@@ -308,6 +312,11 @@ void interface_cleanup(void)
 
     hash_table_cleanup(&phys_locations);
     hash_table_cleanup(&virt_locations);
+
+#ifdef UACPI_SIZED_FREES
+    // Make any leaked allocations unreachable so that LSan reports them
+    hash_table_cleanup(&allocations);
+#endif
 }
 
 #ifdef UACPI_SIZED_FREES
@@ -316,8 +325,6 @@ typedef struct {
     hash_node_t node;
     size_t size;
 } allocation_t;
-
-static hash_table_t allocations;
 
 void *uacpi_kernel_alloc(uacpi_size size)
 {
