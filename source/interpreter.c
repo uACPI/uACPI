@@ -2331,30 +2331,27 @@ DYNAMIC_ARRAY_WITH_INLINE_STORAGE(object_stack, uacpi_object*, 8)
 DYNAMIC_ARRAY_WITH_INLINE_STORAGE_IMPL(object_stack, uacpi_object*, static)
 
 /*
- * Storing a reference into a package element can make the package reachable
- * from itself, which reference counting is unable to free. Walk everything
- * reachable through the new element and reject the store if it leads back
- * to the slot it's about to be stored in.
+ * Storing a reference, or a package containing one, can make the target
+ * reachable from itself, which reference counting is unable to free. Walk
+ * everything reachable through the new object and reject the store if it
+ * leads back to the reference it's about to be stored through.
  */
 static uacpi_status check_no_reference_cycle(
-    uacpi_object *slot, uacpi_object *new_obj
+    uacpi_object *dst, uacpi_object *new_obj
 )
 {
     struct object_stack stack = { 0 };
     uacpi_status ret = UACPI_STATUS_OK;
     uacpi_object *obj, **entry;
 
-    if (slot->flags != UACPI_REFERENCE_KIND_PKG_INDEX ||
-        new_obj->type != UACPI_OBJECT_REFERENCE)
+    if (new_obj->type != UACPI_OBJECT_REFERENCE &&
+        new_obj->type != UACPI_OBJECT_PACKAGE)
         return ret;
 
     obj = new_obj;
     for (;;) {
-        if (obj == slot) {
-            uacpi_error(
-                "storing a reference into a package element would create "
-                "a reference cycle"
-            );
+        if (obj == dst) {
+            uacpi_error("store would create a reference cycle");
             ret = UACPI_STATUS_AML_REFERENCE_CYCLE;
             break;
         }
