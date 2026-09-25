@@ -2327,6 +2327,74 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
     uacpi_object_attach_child(parent, new_child);
 }
 
+DYNAMIC_ARRAY_WITH_INLINE_STORAGE(object_stack, uacpi_object*, 8)
+DYNAMIC_ARRAY_WITH_INLINE_STORAGE_IMPL(object_stack, uacpi_object*, static)
+
+/*
+ * Storing a reference into a package element can make the package reachable
+ * from itself, which reference counting is unable to free. Walk everything
+ * reachable through the new element and reject the store if it leads back
+ * to the slot it's about to be stored in.
+ */
+static uacpi_status check_no_reference_cycle(
+    uacpi_object *slot, uacpi_object *new_obj
+)
+{
+    struct object_stack stack = { 0 };
+    uacpi_status ret = UACPI_STATUS_OK;
+    uacpi_object *obj, **entry;
+
+    if (slot->flags != UACPI_REFERENCE_KIND_PKG_INDEX ||
+        new_obj->type != UACPI_OBJECT_REFERENCE)
+        return ret;
+
+    obj = new_obj;
+    for (;;) {
+        if (obj == slot) {
+            uacpi_error(
+                "storing a reference into a package element would create "
+                "a reference cycle"
+            );
+            ret = UACPI_STATUS_AML_REFERENCE_CYCLE;
+            break;
+        }
+
+        if (obj->type == UACPI_OBJECT_REFERENCE) {
+            entry = object_stack_alloc(&stack);
+            if (uacpi_unlikely(entry == UACPI_NULL)) {
+                ret = UACPI_STATUS_OUT_OF_MEMORY;
+                break;
+            }
+            *entry = obj->inner_object;
+        } else if (obj->type == UACPI_OBJECT_PACKAGE) {
+            uacpi_size i;
+
+            for (i = 0; i < obj->package->count; ++i) {
+                entry = object_stack_alloc(&stack);
+                if (uacpi_unlikely(entry == UACPI_NULL)) {
+                    ret = UACPI_STATUS_OUT_OF_MEMORY;
+                    break;
+                }
+                *entry = obj->package->objects[i];
+            }
+            if (uacpi_unlikely_error(ret))
+                break;
+        }
+
+        do {
+            if (object_stack_size(&stack) == 0)
+                goto out;
+
+            obj = *object_stack_last(&stack);
+            object_stack_pop(&stack);
+        } while (obj == UACPI_NULL);
+    }
+
+out:
+    object_stack_clear(&stack);
+    return ret;
+}
+
 /*
  * Breakdown of what happens here:
  *
@@ -2372,6 +2440,8 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
 
     ret = uacpi_object_assign(new_obj, src_obj,
                               UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+    if (uacpi_likely_success(ret))
+        ret = check_no_reference_cycle(dst, new_obj);
     if (uacpi_unlikely_error(ret)) {
         uacpi_object_unref(new_obj);
         return ret;
@@ -2440,6 +2510,8 @@ static uacpi_status store_to_reference(
 
         ret = uacpi_object_assign(new_obj, src_obj,
                                   UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+        if (uacpi_likely_success(ret))
+            ret = check_no_reference_cycle(dst, new_obj);
         if (uacpi_unlikely_error(ret)) {
             uacpi_object_unref(new_obj);
             return ret;

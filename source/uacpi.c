@@ -125,6 +125,8 @@ const uacpi_char *uacpi_status_to_string(uacpi_status st)
         return "hanging AML while loop";
     case UACPI_STATUS_AML_CALL_STACK_DEPTH_LIMIT:
         return "reached maximum AML call stack depth";
+    case UACPI_STATUS_AML_REFERENCE_CYCLE:
+        return "AML attempted to create a reference cycle";
     default:
         return "<invalid status>";
     }
