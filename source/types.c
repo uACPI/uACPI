@@ -1377,24 +1377,10 @@ uacpi_status uacpi_object_assign(uacpi_object *dst, uacpi_object *src,
     if (src == dst)
         return ret;
 
-    switch (dst->type) {
-    case UACPI_OBJECT_REFERENCE:
+    if (dst->type == UACPI_OBJECT_REFERENCE)
         uacpi_object_detach_child(dst);
-        break;
-    case UACPI_OBJECT_STRING:
-    case UACPI_OBJECT_BUFFER:
-    case UACPI_OBJECT_METHOD:
-    case UACPI_OBJECT_PACKAGE:
-    case UACPI_OBJECT_MUTEX:
-    case UACPI_OBJECT_EVENT:
-    case UACPI_OBJECT_PROCESSOR:
-    case UACPI_OBJECT_DEVICE:
-    case UACPI_OBJECT_THERMAL_ZONE:
+    else
         free_object_storage(dst);
-        break;
-    default:
-        break;
-    }
 
     switch (src->type) {
     case UACPI_OBJECT_UNINITIALIZED:
