@@ -2350,8 +2350,10 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
 
     ret = uacpi_object_assign(new_obj, src_obj,
                               UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
-    if (uacpi_unlikely_error(ret))
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_object_unref(new_obj);
         return ret;
+    }
 
     object_replace_child(dst, new_obj);
     uacpi_object_unref(new_obj);
