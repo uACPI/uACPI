@@ -2327,6 +2327,92 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
     uacpi_object_attach_child(parent, new_child);
 }
 
+DYNAMIC_ARRAY_WITH_INLINE_STORAGE(object_queue, uacpi_object*, 8)
+DYNAMIC_ARRAY_WITH_INLINE_STORAGE_IMPL(object_queue, uacpi_object*, static)
+
+/*
+ * Queues up an object to be looked at by check_no_reference_cycle, unless it
+ * has nothing to lead to, or it was queued up already.
+ *
+ * An object might be reachable in more than one way, e.g. if it's referenced
+ * by more than one element of a package. Going through it every single time
+ * makes the amount of work that we have to do grow exponentially with the
+ * depth of such a graph, so it's marked as soon as it's queued up.
+ */
+static uacpi_status queue_object(
+    struct object_queue *queue, uacpi_object *obj
+)
+{
+    uacpi_object **entry;
+
+    if (obj == UACPI_NULL || obj->visited)
+        return UACPI_STATUS_OK;
+
+    if (!uacpi_object_is_one_of(obj, UACPI_OBJECT_REFERENCE_BIT |
+                                     UACPI_OBJECT_PACKAGE_BIT))
+        return UACPI_STATUS_OK;
+
+    entry = object_queue_alloc(queue);
+    if (uacpi_unlikely(entry == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    *entry = obj;
+    obj->visited = UACPI_TRUE;
+    return UACPI_STATUS_OK;
+}
+
+/*
+ * Storing a reference, or a package containing one, can make the target
+ * reachable from itself, which reference counting is unable to free. Walk
+ * everything reachable through the new object and reject the store if it
+ * leads back to the reference it's about to be stored through.
+ */
+static uacpi_status check_no_reference_cycle(
+    uacpi_object *dst, uacpi_object *new_obj
+)
+{
+    struct object_queue queue = { 0 };
+    uacpi_status ret;
+    uacpi_object *obj;
+    uacpi_size i, j;
+
+    /*
+     * Every object that was ever queued up stays in the queue, which is what
+     * we use to take the marks back off once we're done.
+     */
+    ret = queue_object(&queue, new_obj);
+
+    for (i = 0; i < object_queue_size(&queue); ++i) {
+        if (uacpi_unlikely_error(ret))
+            break;
+
+        obj = *object_queue_at(&queue, i);
+
+        if (obj == dst) {
+            uacpi_error("store would create a reference cycle");
+            ret = UACPI_STATUS_AML_REFERENCE_CYCLE;
+            break;
+        }
+
+        if (uacpi_object_is(obj, UACPI_OBJECT_REFERENCE)) {
+            ret = queue_object(&queue, obj->inner_object);
+            continue;
+        }
+
+        for (j = 0; j < obj->package->count; ++j) {
+            ret = queue_object(&queue, obj->package->objects[j]);
+            if (uacpi_unlikely_error(ret))
+                break;
+        }
+    }
+
+    for (i = 0; i < object_queue_size(&queue); ++i)
+        (*object_queue_at(&queue, i))->visited = UACPI_FALSE;
+
+    object_queue_clear(&queue);
+    return ret;
+}
+
 /*
  * Breakdown of what happens here:
  *
@@ -2372,6 +2458,8 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
 
     ret = uacpi_object_assign(new_obj, src_obj,
                               UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+    if (uacpi_likely_success(ret))
+        ret = check_no_reference_cycle(dst, new_obj);
     if (uacpi_unlikely_error(ret)) {
         uacpi_object_unref(new_obj);
         return ret;
@@ -2440,6 +2528,8 @@ static uacpi_status store_to_reference(
 
         ret = uacpi_object_assign(new_obj, src_obj,
                                   UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+        if (uacpi_likely_success(ret))
+            ret = check_no_reference_cycle(dst, new_obj);
         if (uacpi_unlikely_error(ret)) {
             uacpi_object_unref(new_obj);
             return ret;
