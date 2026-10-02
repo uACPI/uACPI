@@ -1760,6 +1760,11 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
             node = item->node;
 
             obj = item_array_at(&op_ctx->items, i++)->obj;
+
+            // Duplicate field, skip
+            if (uacpi_unlikely(node == UACPI_NULL))
+                goto next_field;
+
             field = obj->field_unit;
 
             field->update_rule = update_rule;
@@ -1863,6 +1868,7 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
                 return ret;
             }
 
+        next_field:
             bit_offset += length;
             pin_offset += length;
             continue;
