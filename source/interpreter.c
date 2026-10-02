@@ -5791,7 +5791,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 break;
 
             default:
-                EXEC_OP_ERR_1("don't know how to copy/transfer object to %d",
+                EXEC_OP_ERR_1("don't know how to copy/transfer object to %u",
                               prev_op);
                 ret = UACPI_STATUS_INVALID_ARGUMENT;
                 break;
@@ -6002,7 +6002,7 @@ static uacpi_status exec_op(struct execution_context *ctx)
         }
 
         default:
-            EXEC_OP_ERR_1("unhandled parser op '%d'", op);
+            EXEC_OP_ERR_1("unhandled parser op '%u'", op);
             ret = UACPI_STATUS_UNIMPLEMENTED;
             break;
         }

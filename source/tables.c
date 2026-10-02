@@ -782,7 +782,7 @@ static uacpi_status handle_table_override(
             out_table
         );
     default:
-        uacpi_error("invalid table installation disposition %d", disposition);
+        uacpi_error("invalid table installation disposition %u", disposition);
         return UACPI_STATUS_INTERNAL_ERROR;
     }
 }

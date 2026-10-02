@@ -271,7 +271,7 @@ uacpi_namespace_node *uacpi_namespace_get_predefined(
 )
 {
     if (uacpi_unlikely(ns > UACPI_PREDEFINED_NAMESPACE_MAX)) {
-        uacpi_warn("requested invalid predefined namespace %d", ns);
+        uacpi_warn("requested invalid predefined namespace %u", ns);
         return UACPI_NULL;
     }
 
