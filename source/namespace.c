@@ -315,8 +315,15 @@ uacpi_status uacpi_namespace_node_install(
     } else {
         uacpi_namespace_node *prev = parent->child;
 
-        while (prev->next != UACPI_NULL)
+        for (;;) {
+            if (uacpi_unlikely(prev->name.id == node->name.id))
+                return UACPI_STATUS_AML_OBJECT_ALREADY_EXISTS;
+
+            if (prev->next == UACPI_NULL)
+                break;
+
             prev = prev->next;
+        }
 
         prev->next = node;
     }
