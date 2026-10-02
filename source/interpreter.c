@@ -1865,7 +1865,13 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
             if (uacpi_unlikely_error(ret)) {
                 uacpi_object_unref(node->object);
                 node->object = UACPI_NULL;
-                return ret;
+
+                if (ret != UACPI_STATUS_AML_OBJECT_ALREADY_EXISTS ||
+                    !ctx->cur_frame->method->named_objects_persist)
+                    return ret;
+
+                uacpi_warn("duplicate field '%.4s', skipping",
+                           node->name.text);
             }
 
         next_field:
