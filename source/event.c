@@ -185,7 +185,7 @@ static uacpi_interrupt_ret dispatch_fixed_event(
 
     if (uacpi_unlikely(evh->handler == UACPI_NULL)) {
         uacpi_warn(
-            "fixed event %d fired but no handler installed, disabling...",
+            "fixed event %u fired but no handler installed, disabling...",
             event
         );
         uacpi_write_register_field(ev->enable_field, UACPI_EVENT_DISABLED);
@@ -1100,7 +1100,7 @@ static uacpi_status create_gpe_block(
         UACPI_SHOULD_LOCK_YES, UACPI_PERMANENT_ONLY_YES, &match_ctx
     );
 
-    uacpi_trace("initialized GPE block %.4s[%d->%d], %d AML handlers (IRQ %d)",
+    uacpi_trace("initialized GPE block %.4s[%d->%d], %u AML handlers (IRQ %u)",
                 device_node->name.text, base_idx, base_idx + block->num_events,
                 match_ctx.matched_count, irq);
     return UACPI_STATUS_OK;
