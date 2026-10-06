@@ -6,6 +6,7 @@
 #include <uacpi/internal/io.h>
 #include <uacpi/kernel_api.h>
 #include <uacpi/uacpi.h>
+#include <uacpi/osi.h>
 
 #ifndef UACPI_BAREBONES_MODE
 
@@ -599,6 +600,86 @@ static uacpi_status handle_table_data_region(uacpi_region_op op, uacpi_handle op
     }
 }
 
+enum io_protection_kind {
+    IO_PROTECTION_KIND_ALWAYS,
+
+    // Only after AML has queried _OSI for Windows XP or anything newer
+    IO_PROTECTION_KIND_XP_AND_ABOVE,
+};
+
+struct protected_io_range {
+    uacpi_u16 first;
+    uacpi_u16 last;
+    uacpi_u8 kind;
+};
+
+/*
+ * Ports that AML can't touch. These ranges match the NT ACPI driver 1:1,
+ * verified via a traced QEMU run with injected AML. Access to these returns
+ * 0 on reads and writes are simply dropped.
+ */
+static const struct protected_io_range protected_io_ranges[] = {
+    // DMA
+    { 0x0000, 0x000F, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // PIC
+    { 0x0020, 0x0021, IO_PROTECTION_KIND_ALWAYS },
+    // PIT
+    { 0x0040, 0x0043, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // PIT (EISA)
+    { 0x0048, 0x004B, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // RTC/CMOS
+    { 0x0070, 0x0071, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // Extended CMOS
+    { 0x0074, 0x0076, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // DMA page registers
+    { 0x0081, 0x0083, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    { 0x0087, 0x0087, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    { 0x0089, 0x008B, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    { 0x008F, 0x008F, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // Arbitration control
+    { 0x0090, 0x0091, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // System board setup
+    { 0x0093, 0x0094, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // POS channel select
+    { 0x0096, 0x0097, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // Cascaded PIC
+    { 0x00A0, 0x00A1, IO_PROTECTION_KIND_ALWAYS },
+    // ISA DMA
+    { 0x00C0, 0x00DF, IO_PROTECTION_KIND_XP_AND_ABOVE },
+    // ELCR
+    { 0x04D0, 0x04D1, IO_PROTECTION_KIND_ALWAYS },
+    /*
+     * PCI configuration mechanism #1. NT emulates this one via its own PCI
+     * accessors until Windows XP is queried. We can't afford that because
+     * we could race against the host kernel PCI configuration accesses, and
+     * rolling emulation on top of the kernel API for PCI doesn't seem worth it
+     * as this doesn't seem to be actualy used by AML from inspecting real
+     * hardware AML dumps.
+     */
+    { 0x0CF8, 0x0CFF, IO_PROTECTION_KIND_ALWAYS },
+};
+
+// We intentionally only check the first port of an access, same as NT
+static uacpi_bool io_port_is_protected(uacpi_u64 port)
+{
+    const struct protected_io_range *range;
+    uacpi_size i;
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(protected_io_ranges); ++i) {
+        range = &protected_io_ranges[i];
+
+        if (port < range->first || port > range->last)
+            continue;
+        if (range->kind == IO_PROTECTION_KIND_ALWAYS)
+            return UACPI_TRUE;
+
+        return uacpi_latest_queried_vendor_interface() >=
+               UACPI_VENDOR_INTERFACE_WINDOWS_XP;
+    }
+
+    return UACPI_FALSE;
+}
+
 static uacpi_status io_region_do_rw(
     uacpi_region_op op, uacpi_region_rw_data *data
 )
@@ -609,6 +690,19 @@ static uacpi_status io_region_do_rw(
 
     offset = data->offset - ctx->base;
     width = data->byte_width;
+
+    if (io_port_is_protected(data->offset)) {
+        uacpi_trace(
+            "denied AML %s access to protected port 0x%04"UACPI_PRIX64,
+            op == UACPI_REGION_OP_READ ? "read" : "write",
+            UACPI_FMT64(data->offset)
+        );
+
+        if (op == UACPI_REGION_OP_READ)
+            data->value = 0;
+
+        return UACPI_STATUS_OK;
+    }
 
     return op == UACPI_REGION_OP_READ ?
         uacpi_system_io_read(ctx->handle, offset, width, &data->value) :
