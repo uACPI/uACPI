@@ -140,7 +140,7 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
             Return (0)
         }
 
-        CHK ("root", \PCI0.ID, 0xA0000000)
+        CHK ("root without an _ADR", \PCI0.ID, 0xFFFFFFFF)
         CHK ("bridge", \PCI0.RP01.ID, 0xA000001C)
         CHK ("device below a bridge", \PCI0.RP01.PXSX.ID, 0xA0001500)
         CHK ("container below a bridge", \PCI0.RP01.CONT.ID, 0xA000001C)

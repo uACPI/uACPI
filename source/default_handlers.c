@@ -80,7 +80,8 @@ struct pci_region_ctx {
 
     /*
      * Everything between the PCI root and the region that might be a PCI
-     * device, top-down. This is the root itself if there's nothing else.
+     * device, top-down. This is the root itself if there's nothing else, or
+     * nothing at all if the root has no _ADR.
      */
     struct pci_region_device *devices;
     uacpi_size num_devices;
@@ -216,6 +217,10 @@ static struct pci_region_device *pci_region_resolve(struct pci_region_ctx *ctx)
     uacpi_size i;
     uacpi_u8 bus;
 
+    // The region doesn't belong to any device, see pci_region_find_devices()
+    if (ctx->num_devices == 0)
+        return UACPI_NULL;
+
     for (i = 0;; ++i) {
         dev = &ctx->devices[i];
 
@@ -267,7 +272,9 @@ static void pci_region_ctx_free(struct pci_region_ctx *ctx)
     for (i = 0; i < ctx->num_devices; ++i)
         pci_region_device_close(&ctx->devices[i]);
 
-    uacpi_free(ctx->devices, ctx->num_devices * sizeof(*ctx->devices));
+    if (ctx->devices != UACPI_NULL)
+        uacpi_free(ctx->devices, ctx->num_devices * sizeof(*ctx->devices));
+
     uacpi_free(ctx, sizeof(*ctx));
 }
 
@@ -341,10 +348,14 @@ static uacpi_status pci_region_find_devices(
         return UACPI_STATUS_OK;
     }
 
-    // No PCI devices on the way, so the region belongs to the root itself
     ret = uacpi_eval_simple_integer(pci_root, "_ADR", &adr);
-    if (ret != UACPI_STATUS_OK)
-        adr = 0;
+    if (ret != UACPI_STATUS_OK) {
+        uacpi_trace(
+            "unable to determine the PCI address of %.4s",
+            device->name.text
+        );
+        return UACPI_STATUS_OK;
+    }
 
     devices = uacpi_kernel_alloc_zeroed(sizeof(*devices));
     if (uacpi_unlikely(devices == UACPI_NULL))
