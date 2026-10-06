@@ -12,6 +12,13 @@
 #define PCI_ROOT_PNP_ID "PNP0A03"
 #define PCI_EXPRESS_ROOT_PNP_ID "PNP0A08"
 
+#define PCI_HEADER_TYPE_REG 0x0E
+#define PCI_HEADER_TYPE_MASK 0x7F
+#define PCI_HEADER_TYPE_PCI_BRIDGE 0x01
+#define PCI_HEADER_TYPE_CARDBUS_BRIDGE 0x02
+#define PCI_HEADER_TYPE_NO_DEVICE 0xFF
+#define PCI_SECONDARY_BUS_REG 0x19
+
 static uacpi_namespace_node *find_pci_root(uacpi_namespace_node *node)
 {
     static const uacpi_char *pci_root_ids[] = {
@@ -40,16 +47,315 @@ static uacpi_namespace_node *find_pci_root(uacpi_namespace_node *node)
     return node;
 }
 
-struct pci_region_ctx {
-    uacpi_handle device_handle;
-    uacpi_bool handle_is_valid;
+enum pci_region_state {
+    PCI_REGION_STATE_UNKNOWN = 0,
+    PCI_REGION_STATE_OPEN,
+    PCI_REGION_STATE_NOT_FOUND,
+    PCI_REGION_STATE_UNREACHABLE,
 };
+
+// One of the PCI devices found on the way from the root to a region
+struct pci_region_device {
+    uacpi_u8 device;
+    uacpi_u8 function;
+
+    // Only valid if is_open is set
+    uacpi_pci_address address;
+    uacpi_handle handle;
+    uacpi_bool is_open;
+};
+
+struct pci_region_ctx {
+    // The device the region was declared in, only used for logging
+    uacpi_namespace_node *node;
+
+    // Segment & bus of the PCI root
+    uacpi_pci_address root_address;
+
+    /*
+     * Everything between the PCI root and the region that might be a PCI
+     * device, top-down. This is the root itself if there's nothing else.
+     */
+    struct pci_region_device *devices;
+    uacpi_size num_devices;
+
+    // The outcome of the last access
+    uacpi_pci_address address;
+    uacpi_u8 state;
+};
+
+enum pci_device_kind {
+    // There's no device at this address
+    PCI_DEVICE_KIND_NONE,
+
+    PCI_DEVICE_KIND_NORMAL,
+    PCI_DEVICE_KIND_BRIDGE,
+
+    // A bridge that has no secondary bus assigned
+    PCI_DEVICE_KIND_UNCONFIGURED_BRIDGE,
+};
+
+static uacpi_bool pci_address_equal(
+    const uacpi_pci_address *lhs, const uacpi_pci_address *rhs
+)
+{
+    return lhs->segment == rhs->segment && lhs->bus == rhs->bus &&
+           lhs->device == rhs->device && lhs->function == rhs->function;
+}
+
+static void pci_region_device_close(struct pci_region_device *dev)
+{
+    if (!dev->is_open)
+        return;
+
+    uacpi_kernel_pci_device_close(dev->handle);
+    dev->is_open = UACPI_FALSE;
+}
+
+// The handle is kept around for as long as the device stays where it was
+static uacpi_bool pci_region_device_open(
+    struct pci_region_device *dev, const uacpi_pci_address *address
+)
+{
+    uacpi_status ret;
+
+    if (dev->is_open) {
+        if (pci_address_equal(&dev->address, address))
+            return UACPI_TRUE;
+
+        pci_region_device_close(dev);
+    }
+
+    ret = uacpi_kernel_pci_device_open(*address, &dev->handle);
+    if (ret != UACPI_STATUS_OK)
+        return UACPI_FALSE;
+
+    dev->address = *address;
+    dev->is_open = UACPI_TRUE;
+    return UACPI_TRUE;
+}
+
+// The secondary bus is only returned for PCI_DEVICE_KIND_BRIDGE
+static enum pci_device_kind pci_region_device_probe(
+    struct pci_region_device *dev, const uacpi_pci_address *address,
+    uacpi_u8 *out_secondary_bus
+)
+{
+    uacpi_status ret;
+    uacpi_u8 header_type;
+
+    if (!pci_region_device_open(dev, address))
+        return PCI_DEVICE_KIND_NONE;
+
+    ret = uacpi_kernel_pci_read8(
+        dev->handle, PCI_HEADER_TYPE_REG, &header_type
+    );
+    if (ret != UACPI_STATUS_OK || header_type == PCI_HEADER_TYPE_NO_DEVICE)
+        return PCI_DEVICE_KIND_NONE;
+
+    switch (header_type & PCI_HEADER_TYPE_MASK) {
+    case PCI_HEADER_TYPE_PCI_BRIDGE:
+    case PCI_HEADER_TYPE_CARDBUS_BRIDGE:
+        break;
+    default:
+        return PCI_DEVICE_KIND_NORMAL;
+    }
+
+    ret = uacpi_kernel_pci_read8(
+        dev->handle, PCI_SECONDARY_BUS_REG, out_secondary_bus
+    );
+    if (ret != UACPI_STATUS_OK || *out_secondary_bus == 0)
+        return PCI_DEVICE_KIND_UNCONFIGURED_BRIDGE;
+
+    return PCI_DEVICE_KIND_BRIDGE;
+}
+
+static const uacpi_char *pci_region_state_to_string(uacpi_u8 state)
+{
+    switch (state) {
+    case PCI_REGION_STATE_OPEN:
+        return "detected";
+    case PCI_REGION_STATE_NOT_FOUND:
+        return "is not present or powered off";
+    default:
+        return "is unreachable due to a missing or unconfigured bridge";
+    }
+}
+
+/*
+ * Figure out the PCI device that a region belongs to at the moment, and open
+ * it.
+ *
+ * A device is only a PCI device if it has an _ADR, and its direct parent is
+ * either the PCI root or a PCI device that is a bridge, in which case it lives
+ * on the secondary bus of that bridge. This means that e.g. a USB port below
+ * an XHCI controller is not a PCI device even though it does have an _ADR.
+ * The region then belongs to the closest PCI device at or above the device it
+ * was declared in, or to the root itself if there's none.
+ *
+ * The namespace side of this never changes, so it's only looked at once when
+ * the region is attached. The bus numbers on the other hand can change at any
+ * time since they're host writable, which is why those are read for every
+ * access.
+ *
+ * Returns the device that the access must be forwarded to, or NULL if there's
+ * no such device at the moment.
+ */
+static struct pci_region_device *pci_region_resolve(struct pci_region_ctx *ctx)
+{
+    struct pci_region_device *dev;
+    uacpi_pci_address address = ctx->root_address;
+    uacpi_u8 state = PCI_REGION_STATE_OPEN;
+    enum pci_device_kind kind;
+    uacpi_size i;
+    uacpi_u8 bus;
+
+    for (i = 0;; ++i) {
+        dev = &ctx->devices[i];
+
+        address.device = dev->device;
+        address.function = dev->function;
+
+        // Nothing below us, so this is the one
+        if ((i + 1) == ctx->num_devices)
+            break;
+
+        kind = pci_region_device_probe(dev, &address, &bus);
+        if (kind == PCI_DEVICE_KIND_BRIDGE) {
+            address.bus = bus;
+            continue;
+        }
+
+        // Whatever is below a normal device belongs to it, so we're done
+        if (kind != PCI_DEVICE_KIND_NORMAL)
+            state = PCI_REGION_STATE_UNREACHABLE;
+        break;
+    }
+
+    // Whatever is below the device we stopped at is of no use anymore
+    while (++i < ctx->num_devices)
+        pci_region_device_close(&ctx->devices[i]);
+
+    if (state == PCI_REGION_STATE_OPEN &&
+        !pci_region_device_open(dev, &address))
+        state = PCI_REGION_STATE_NOT_FOUND;
+
+    if (state != ctx->state || !pci_address_equal(&address, &ctx->address)) {
+        uacpi_trace(
+            "PCI device %.4s %s at %04X:%02X:%02X:%01X", ctx->node->name.text,
+            pci_region_state_to_string(state), address.segment, address.bus,
+            address.device, address.function
+        );
+
+        ctx->address = address;
+        ctx->state = state;
+    }
+
+    return state == PCI_REGION_STATE_OPEN ? dev : UACPI_NULL;
+}
+
+static void pci_region_ctx_free(struct pci_region_ctx *ctx)
+{
+    uacpi_size i;
+
+    for (i = 0; i < ctx->num_devices; ++i)
+        pci_region_device_close(&ctx->devices[i]);
+
+    uacpi_free(ctx->devices, ctx->num_devices * sizeof(*ctx->devices));
+    uacpi_free(ctx, sizeof(*ctx));
+}
+
+/*
+ * Collect the devices below 'pci_root' that lead to 'device' for as long as
+ * they have an _ADR, see pci_region_resolve() for why. If 'out' is NULL the
+ * devices are only counted.
+ */
+static uacpi_size pci_region_collect_devices(
+    uacpi_namespace_node *pci_root, uacpi_namespace_node *device,
+    struct pci_region_device *out
+)
+{
+    uacpi_namespace_node *node;
+    uacpi_size depth = 0, count = 0, i;
+    uacpi_object_type type;
+    uacpi_status ret;
+    uacpi_u64 adr;
+
+    for (node = device; node != UACPI_NULL && node != pci_root;
+         node = node->parent)
+        depth++;
+
+    // There's no root above the device, the best we can do is use its _ADR
+    if (node == UACPI_NULL)
+        depth = 1;
+
+    while (depth-- != 0) {
+        node = device;
+        for (i = 0; i < depth; ++i)
+            node = node->parent;
+
+        ret = uacpi_namespace_node_type(node, &type);
+        if (ret != UACPI_STATUS_OK || type != UACPI_OBJECT_DEVICE)
+            break;
+
+        ret = uacpi_eval_simple_integer(node, "_ADR", &adr);
+        if (ret != UACPI_STATUS_OK)
+            break;
+
+        if (out != UACPI_NULL) {
+            out[count].function = (adr >> 0)  & 0xFF;
+            out[count].device   = (adr >> 16) & 0xFF;
+        }
+        count++;
+    }
+
+    return count;
+}
+
+static uacpi_status pci_region_find_devices(
+    struct pci_region_ctx *ctx, uacpi_namespace_node *pci_root,
+    uacpi_namespace_node *device
+)
+{
+    struct pci_region_device *devices;
+    uacpi_size count;
+    uacpi_status ret;
+    uacpi_u64 adr;
+
+    count = pci_region_collect_devices(pci_root, device, UACPI_NULL);
+    if (count != 0) {
+        devices = uacpi_kernel_alloc_zeroed(count * sizeof(*devices));
+        if (uacpi_unlikely(devices == UACPI_NULL))
+            return UACPI_STATUS_OUT_OF_MEMORY;
+
+        ctx->devices = devices;
+        ctx->num_devices = pci_region_collect_devices(
+            pci_root, device, devices
+        );
+        return UACPI_STATUS_OK;
+    }
+
+    // No PCI devices on the way, so the region belongs to the root itself
+    ret = uacpi_eval_simple_integer(pci_root, "_ADR", &adr);
+    if (ret != UACPI_STATUS_OK)
+        adr = 0;
+
+    devices = uacpi_kernel_alloc_zeroed(sizeof(*devices));
+    if (uacpi_unlikely(devices == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    devices->function = (adr >> 0)  & 0xFF;
+    devices->device   = (adr >> 16) & 0xFF;
+
+    ctx->devices = devices;
+    ctx->num_devices = 1;
+    return UACPI_STATUS_OK;
+}
 
 static uacpi_status pci_region_attach(uacpi_region_attach_data *data)
 {
     uacpi_namespace_node *node, *pci_root, *device;
     struct pci_region_ctx *ctx;
-    uacpi_pci_address address = { 0 };
     uacpi_u64 value;
     uacpi_status ret;
 
@@ -82,49 +388,33 @@ static uacpi_status pci_region_attach(uacpi_region_attach_data *data)
         return ret;
     }
 
-    ret = uacpi_eval_simple_integer(device, "_ADR", &value);
-    if (ret == UACPI_STATUS_OK) {
-        address.function = (value >> 0)  & 0xFF;
-        address.device   = (value >> 16) & 0xFF;
-    }
-
-    ret = uacpi_eval_simple_integer(pci_root, "_SEG", &value);
-    if (ret == UACPI_STATUS_OK)
-        address.segment = value;
-
-    ret = uacpi_eval_simple_integer(pci_root, "_BBN", &value);
-    if (ret == UACPI_STATUS_OK)
-        address.bus = value;
-
-    uacpi_trace(
-        "detected PCI device %.4s@%04X:%02X:%02X:%01X",
-        device->name.text, address.segment, address.bus,
-        address.device, address.function
-    );
-
     ctx = uacpi_kernel_alloc_zeroed(sizeof(*ctx));
     if (uacpi_unlikely(ctx == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
+    ctx->node = device;
+
+    ret = uacpi_eval_simple_integer(pci_root, "_SEG", &value);
+    if (ret == UACPI_STATUS_OK)
+        ctx->root_address.segment = value;
+
+    ret = uacpi_eval_simple_integer(pci_root, "_BBN", &value);
+    if (ret == UACPI_STATUS_OK)
+        ctx->root_address.bus = value;
+
+    ret = pci_region_find_devices(ctx, pci_root, device);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_free(ctx, sizeof(*ctx));
+        return ret;
+    }
+
     data->out_region_context = ctx;
-
-    ret = uacpi_kernel_pci_device_open(address, &ctx->device_handle);
-    if (ret == UACPI_STATUS_NOT_FOUND)
-        return UACPI_STATUS_OK;
-
-    ctx->handle_is_valid = UACPI_TRUE;
     return UACPI_STATUS_OK;
 }
 
 static uacpi_status pci_region_detach(uacpi_region_detach_data *data)
 {
-    struct pci_region_ctx *ctx = data->region_context;
-
-    if (ctx->handle_is_valid)
-        uacpi_kernel_pci_device_close(ctx->device_handle);
-
-    uacpi_free(ctx, sizeof(*ctx));
-
+    pci_region_ctx_free(data->region_context);
     return UACPI_STATUS_OK;
 }
 
@@ -134,12 +424,13 @@ static uacpi_status pci_region_do_rw(
 {
     uacpi_u8 width;
     uacpi_size offset;
-    struct pci_region_ctx *ctx = data->region_context;
+    struct pci_region_device *dev;
 
     offset = data->offset;
     width = data->byte_width;
 
-    if (!ctx->handle_is_valid) {
+    dev = pci_region_resolve(data->region_context);
+    if (dev == UACPI_NULL) {
         uacpi_trace(
             "faking a PCI device %s access",
             op == UACPI_REGION_OP_READ ? "read" : "write"
@@ -154,8 +445,8 @@ static uacpi_status pci_region_do_rw(
     }
 
     return op == UACPI_REGION_OP_READ ?
-        uacpi_pci_read(ctx->device_handle, offset, width, &data->value) :
-        uacpi_pci_write(ctx->device_handle, offset, width, data->value);
+        uacpi_pci_read(dev->handle, offset, width, &data->value) :
+        uacpi_pci_write(dev->handle, offset, width, data->value);
 }
 
 static uacpi_status handle_pci_region(uacpi_region_op op, uacpi_handle op_data)
