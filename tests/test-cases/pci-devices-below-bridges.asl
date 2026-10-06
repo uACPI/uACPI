@@ -34,6 +34,12 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
         OperationRegion (CFG, PCI_Config, 0, 4)
         Field (CFG, DWordAcc, NoLock) { ID, 32 }
 
+        // Not a PCI device, and neither is the root
+        Device (NADR) {
+            OperationRegion (CFG, PCI_Config, 0, 4)
+            Field (CFG, DWordAcc, NoLock) { ID, 32 }
+        }
+
         Device (RP01) {
             Name (_ADR, 0x001C0000)
 
@@ -133,6 +139,28 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
         }
     }
 
+    // Same bus as above, but this root is a PCI device as well (10:00.0)
+    Device (PCI1) {
+        Name (_HID, "PNP0A08")
+        Name (_SEG, 0xCAFE)
+        Name (_BBN, 0x10)
+        Name (_ADR, 0)
+
+        OperationRegion (CFG, PCI_Config, 0, 4)
+        Field (CFG, DWordAcc, NoLock) { ID, 32 }
+
+        Device (NADR) {
+            OperationRegion (CFG, PCI_Config, 0, 4)
+            Field (CFG, DWordAcc, NoLock) { ID, 32 }
+        }
+    }
+
+    // No PCI root above this one, and no _ADR either
+    Device (NPCI) {
+        OperationRegion (CFG, PCI_Config, 0, 4)
+        Field (CFG, DWordAcc, NoLock) { ID, 32 }
+    }
+
     Method (MAIN, 0, NotSerialized)
     {
         // The PCI devices used here only exist in the uACPI test runner
@@ -141,6 +169,12 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
         }
 
         CHK ("root without an _ADR", \PCI0.ID, 0xFFFFFFFF)
+        CHK ("device without an _ADR below such a root", \PCI0.NADR.ID,
+             0xFFFFFFFF)
+        CHK ("root with an _ADR", \PCI1.ID, 0xA0000000)
+        CHK ("device without an _ADR below such a root", \PCI1.NADR.ID,
+             0xA0000000)
+        CHK ("device without an _ADR & a root", \NPCI.ID, 0xFFFFFFFF)
         CHK ("bridge", \PCI0.RP01.ID, 0xA000001C)
         CHK ("device below a bridge", \PCI0.RP01.PXSX.ID, 0xA0001500)
         CHK ("container below a bridge", \PCI0.RP01.CONT.ID, 0xA000001C)
