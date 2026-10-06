@@ -87,9 +87,10 @@ void uacpi_kernel_deinitialize(void);
  *
  * The device at 'address' might not actually exist on the system, in this case
  * the api is allowed to return UACPI_STATUS_NOT_FOUND to indicate that, this
- * error is handled gracefully by creating a dummy device internally that always
- * returns 0xFF on reads and is no-op for writes. This is to support a common
- * pattern in AML that probes for 0xFF reads to detect whether a device exists.
+ * error is handled gracefully by returning 0xFF on reads and ignoring writes.
+ * This is to support a common pattern in AML that probes for 0xFF reads to
+ * detect whether a device exists. The open is attempted again on the next
+ * access to the device, to support hotplug & wake-from-suspend.
  *
  * The handle returned via 'out_handle' is used to perform IO on the
  * configuration space of the device.
