@@ -100,15 +100,131 @@ void uacpi_kernel_io_unmap(uacpi_handle handle)
         return UACPI_STATUS_OK;                                           \
     }
 
+/*
+ * A fake PCI topology that lives on its own segment, used to test that devices
+ * below bridges are looked up on the correct bus. Every other device (and
+ * anything not listed here) reads as all ones.
+ *
+ * The configuration space of these is plain memory, with one exception: a
+ * write to FAKE_PCI_SET_SECONDARY_BUS_REG also sets the secondary bus number.
+ * This allows a test to (re)configure a bridge without having to write to its
+ * header.
+ */
+#define FAKE_PCI_SEGMENT 0xCAFE
+
+// Nothing on this bus can be opened
+#define FAKE_PCI_BUS_NOT_FOUND 0x1B
+
+#define FAKE_PCI_HEADER_ENDPOINT 0x00
+#define FAKE_PCI_HEADER_BRIDGE 0x01
+#define FAKE_PCI_HEADER_CARDBUS 0x02
+#define FAKE_PCI_HEADER_MULTIFUNCTION 0x80
+
+#define FAKE_PCI_CONFIG_SIZE 0x48
+#define FAKE_PCI_SET_SECONDARY_BUS_REG 0x40
+
+typedef struct {
+    uint8_t bus;
+    uint8_t device;
+    uint8_t function;
+    uint8_t header_type;
+    uint8_t secondary_bus;
+    uint32_t id;
+} fake_pci_device_t;
+
+static const fake_pci_device_t fake_pci_devices[] = {
+    // Nothing is supposed to end up here, the root bus is 0x10
+    { 0x00, 0x00, 0, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xBAD00000 },
+
+    { 0x10, 0x00, 0, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xA0000000 },
+    { 0x10, 0x02, 0, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xA0000002 },
+    { 0x10, 0x03, 0, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xA0000003 },
+    {
+        0x10, 0x1C, 0,
+        FAKE_PCI_HEADER_BRIDGE | FAKE_PCI_HEADER_MULTIFUNCTION,
+        0x15, 0xA000001C,
+    },
+    /*
+     * These two bridges don't lead anywhere until their secondary bus number
+     * is set to something else by the test.
+     */
+    { 0x10, 0x18, 0, FAKE_PCI_HEADER_BRIDGE, 0x00, 0xA0000018 },
+    {
+        0x10, 0x19, 0,
+        FAKE_PCI_HEADER_BRIDGE, FAKE_PCI_BUS_NOT_FOUND, 0xA0000019
+    },
+    // A bridge that was never configured by the firmware
+    { 0x10, 0x1D, 0, FAKE_PCI_HEADER_BRIDGE, 0x00, 0xA000001D },
+    { 0x10, 0x1F, 0, FAKE_PCI_HEADER_CARDBUS, 0x19, 0xA000001F },
+
+    { 0x15, 0x00, 0, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xA0001500 },
+    { 0x15, 0x01, 0, FAKE_PCI_HEADER_BRIDGE, 0x16, 0xA0001501 },
+    { 0x16, 0x02, 3, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xA0001623 },
+    { 0x19, 0x00, 0, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xA0001900 },
+    { 0x1A, 0x00, 0, FAKE_PCI_HEADER_ENDPOINT, 0x00, 0xA0001A00 },
+};
+
+typedef struct {
+    bool is_valid;
+    uint8_t data[FAKE_PCI_CONFIG_SIZE];
+} fake_pci_config_t;
+
+static fake_pci_config_t fake_pci_configs[UACPI_ARRAY_SIZE(fake_pci_devices)];
+
+static fake_pci_config_t *fake_pci_get_config(size_t idx)
+{
+    const fake_pci_device_t *dev = &fake_pci_devices[idx];
+    fake_pci_config_t *config = &fake_pci_configs[idx];
+
+    if (!config->is_valid) {
+        memcpy(&config->data[0x00], &dev->id, sizeof(dev->id));
+        config->data[0x0E] = dev->header_type;
+        config->data[0x18] = dev->bus;
+        config->data[0x19] = dev->secondary_bus;
+        config->is_valid = true;
+    }
+
+    return config;
+}
+
+static uint64_t fake_pci_read(
+    const fake_pci_config_t *config, uacpi_size offset, uacpi_size width
+)
+{
+    uint64_t value = 0;
+
+    if (offset + width <= sizeof(config->data))
+        memcpy(&value, &config->data[offset], width);
+
+    return value;
+}
+
+static void fake_pci_write(
+    fake_pci_config_t *config, uacpi_size offset, uacpi_size width,
+    uint64_t value
+)
+{
+    if (offset + width > sizeof(config->data))
+        return;
+
+    memcpy(&config->data[offset], &value, width);
+
+    if (offset <= FAKE_PCI_SET_SECONDARY_BUS_REG &&
+        (offset + width) > FAKE_PCI_SET_SECONDARY_BUS_REG)
+        config->data[0x19] = config->data[FAKE_PCI_SET_SECONDARY_BUS_REG];
+}
+
 #define UACPI_PCI_READ(bits)                                         \
     uacpi_status uacpi_kernel_pci_read##bits(                        \
         uacpi_handle handle, uacpi_size offset, uacpi_u##bits *value \
     )                                                                \
     {                                                                \
-        UACPI_UNUSED(handle);                                        \
-        UACPI_UNUSED(offset);                                        \
+        uint64_t ret = 0xFFFFFFFFFFFFFFFF;                           \
                                                                      \
-        *value = (uacpi_u##bits)0xFFFFFFFFFFFFFFFF;                  \
+        if (handle != NULL)                                          \
+            ret = fake_pci_read(handle, offset, bits / 8);           \
+                                                                     \
+        *value = (uacpi_u##bits)ret;                                 \
         return UACPI_STATUS_OK;                                      \
     }
 
@@ -117,9 +233,8 @@ void uacpi_kernel_io_unmap(uacpi_handle handle)
         uacpi_handle handle, uacpi_size offset, uacpi_u##bits value \
     )                                                               \
     {                                                               \
-        UACPI_UNUSED(handle);                                       \
-        UACPI_UNUSED(offset);                                       \
-        UACPI_UNUSED(value);                                        \
+        if (handle != NULL)                                         \
+            fake_pci_write(handle, offset, bits / 8, value);        \
                                                                     \
         return UACPI_STATUS_OK;                                     \
     }
@@ -168,10 +283,29 @@ uacpi_status uacpi_kernel_pci_device_open(
     uacpi_pci_address address, uacpi_handle *out_handle
 )
 {
+    size_t i;
+
     if (address.segment == 0xDEAD)
         return UACPI_STATUS_NOT_FOUND;
 
     *out_handle = NULL;
+
+    if (address.segment != FAKE_PCI_SEGMENT)
+        return UACPI_STATUS_OK;
+    if (address.bus == FAKE_PCI_BUS_NOT_FOUND)
+        return UACPI_STATUS_NOT_FOUND;
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(fake_pci_devices); ++i) {
+        const fake_pci_device_t *dev = &fake_pci_devices[i];
+
+        if (dev->bus != address.bus || dev->device != address.device ||
+            dev->function != address.function)
+            continue;
+
+        *out_handle = fake_pci_get_config(i);
+        break;
+    }
+
     return UACPI_STATUS_OK;
 }
 
