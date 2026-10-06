@@ -13,12 +13,17 @@
 #define PCI_ROOT_PNP_ID "PNP0A03"
 #define PCI_EXPRESS_ROOT_PNP_ID "PNP0A08"
 
+#define PCI_HEADER_SIZE 0x40
 #define PCI_HEADER_TYPE_REG 0x0E
 #define PCI_HEADER_TYPE_MASK 0x7F
+#define PCI_HEADER_TYPE_NORMAL 0x00
 #define PCI_HEADER_TYPE_PCI_BRIDGE 0x01
 #define PCI_HEADER_TYPE_CARDBUS_BRIDGE 0x02
 #define PCI_HEADER_TYPE_NO_DEVICE 0xFF
 #define PCI_SECONDARY_BUS_REG 0x19
+#define PCI_SUBSYSTEM_VENDOR_ID_REG 0x2C
+#define PCI_EXPANSION_ROM_REG 0x30
+#define PCI_INTERRUPT_LINE_REG 0x3C
 
 static uacpi_namespace_node *find_pci_root(uacpi_namespace_node *node)
 {
@@ -419,6 +424,31 @@ static uacpi_status pci_region_detach(uacpi_region_detach_data *data)
     return UACPI_STATUS_OK;
 }
 
+// We intentionally only check the first port of an access, same as NT
+static uacpi_bool pci_write_is_protected(
+    struct pci_region_device *dev, uacpi_size offset
+)
+{
+    uacpi_status ret;
+    uacpi_u8 header_type;
+
+    if (offset >= PCI_HEADER_SIZE)
+        return UACPI_FALSE;
+
+    if (offset < PCI_SUBSYSTEM_VENDOR_ID_REG)
+        return UACPI_TRUE;
+    if (offset >= PCI_EXPANSION_ROM_REG && offset < PCI_INTERRUPT_LINE_REG)
+        return UACPI_TRUE;
+
+    ret = uacpi_kernel_pci_read8(
+        dev->handle, PCI_HEADER_TYPE_REG, &header_type
+    );
+    if (uacpi_unlikely_error(ret))
+        return UACPI_TRUE;
+
+    return (header_type & PCI_HEADER_TYPE_MASK) != PCI_HEADER_TYPE_NORMAL;
+}
+
 static uacpi_status pci_region_do_rw(
     uacpi_region_op op, uacpi_region_rw_data *data
 )
@@ -445,9 +475,19 @@ static uacpi_status pci_region_do_rw(
         return UACPI_STATUS_OK;
     }
 
-    return op == UACPI_REGION_OP_READ ?
-        uacpi_pci_read(dev->handle, offset, width, &data->value) :
-        uacpi_pci_write(dev->handle, offset, width, data->value);
+    if (op == UACPI_REGION_OP_READ)
+        return uacpi_pci_read(dev->handle, offset, width, &data->value);
+
+    if (pci_write_is_protected(dev, offset)) {
+        uacpi_trace(
+            "denied AML write access to protected offset 0x%02zX of PCI "
+            "device %04X:%02X:%02X:%01X", offset, dev->address.segment,
+            dev->address.bus, dev->address.device, dev->address.function
+        );
+        return UACPI_STATUS_OK;
+    }
+
+    return uacpi_pci_write(dev->handle, offset, width, data->value);
 }
 
 static uacpi_status handle_pci_region(uacpi_region_op op, uacpi_handle op_data)
