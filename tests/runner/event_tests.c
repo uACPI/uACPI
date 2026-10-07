@@ -146,6 +146,22 @@ void test_notify_install_oom(void)
     CHECK(log.value == 0x80);
     CHECK(root_log.count == 1);
 
+    /*
+     * A notification is delivered via a work item of its own, which is not
+     * something that we're guaranteed to get either.
+     */
+    fail_next_work_item();
+    CHECK_STATUS(
+        uacpi_execute_simple(UACPI_NULL, "\\NTF0"), UACPI_STATUS_OUT_OF_MEMORY
+    );
+    flush_work();
+    CHECK(log.count == 1);
+
+    CHECK_OK(uacpi_execute_simple(UACPI_NULL, "\\NTF0"));
+    flush_work();
+    CHECK(log.count == 2);
+    CHECK(root_log.count == 2);
+
     CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_a));
     CHECK_OK(uacpi_uninstall_notify_handler(root, notify_b));
 
@@ -972,6 +988,15 @@ void test_wake_gpes(void)
 
     // GPEs 10 and 11 have no handler, so that is something we do ourselves
     CHECK_GPE_INFO(UACPI_NULL, 0x10, 0);
+
+    // This is done via deferred work, which the event needs a work item for
+    fail_next_work_item();
+    CHECK_STATUS(
+        uacpi_setup_gpe_for_wake(UACPI_NULL, 0x10, dev1),
+        UACPI_STATUS_OUT_OF_MEMORY
+    );
+    CHECK_GPE_INFO(UACPI_NULL, 0x10, 0);
+
     CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x10, dev1));
     CHECK_GPE_INFO(UACPI_NULL, 0x10, UACPI_EVENT_INFO_HAS_HANDLER);
     CHECK_STATUS(
