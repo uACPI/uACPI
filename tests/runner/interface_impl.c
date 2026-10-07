@@ -85,6 +85,10 @@ static bool io_is_write_one_to_clear(uacpi_io_addr addr)
     return false;
 }
 
+// Both are defined along with the rest of the thread support code
+static void irq_park_before_read(uacpi_io_addr addr);
+static void io_invoke_hook(fake_io_op op, uacpi_io_addr addr);
+
 static bool io_is_valid(uacpi_io_addr addr, size_t width)
 {
     return io_space != NULL && addr < IO_SPACE_SIZE &&
@@ -98,6 +102,8 @@ static void io_read(uacpi_io_addr addr, void *out_value, size_t width)
     if (!io_is_valid(addr, width))
         return;
 
+    irq_park_before_read(addr);
+
     interface_lock();
     memcpy(out_value, &io_space[addr], width);
     interface_unlock();
@@ -110,6 +116,8 @@ static void io_write(uacpi_io_addr addr, const void *value, size_t width)
 
     if (!io_is_valid(addr, width))
         return;
+
+    io_invoke_hook(FAKE_IO_OP_WRITE, addr);
 
     interface_lock();
 
@@ -198,7 +206,7 @@ uacpi_status uacpi_kernel_io_map(
 
 void uacpi_kernel_io_unmap(uacpi_handle handle)
 {
-    UACPI_UNUSED(handle);
+    io_invoke_hook(FAKE_IO_OP_UNMAP, (uacpi_io_addr)((uintptr_t)handle));
 }
 
 #define UACPI_IO_READ(bits)                                                \
@@ -1025,13 +1033,24 @@ typedef struct {
  * One thread per work type, indexed by uacpi_work_type. This is what most
  * kernels do, and what makes it possible for a GPE handler to execute at the
  * same time as a notify handler.
+ *
+ * The last one is not really a work queue: it's where the interrupts that are
+ * supposed to look like they were taken by a different CPU are handled, see
+ * fake_irq_raise_parked.
  */
-static work_queue_t work_queues[UACPI_WORK_NOTIFICATION + 1];
+#define WORK_QUEUE_INTERRUPT (UACPI_WORK_NOTIFICATION + 1)
+static work_queue_t work_queues[WORK_QUEUE_INTERRUPT + 1];
 
 static mutex_t work_mutex;
 static condvar_t work_done;
 static condvar_t work_watchdog_stop;
 static thread_t work_watchdog;
+
+static condvar_t irq_park_changed;
+static uacpi_io_addr irq_park_addr;
+static bool irq_park_is_armed;
+static bool irq_is_parked;
+static bool irq_is_done;
 
 // The amount of work that is either queued or is being executed right now
 static size_t work_num_pending;
@@ -1056,7 +1075,13 @@ static bool work_queue_should_wake(void *opaque)
 {
     work_queue_t *queue = opaque;
 
-    return work_is_stopping || (!work_is_held && queue->head != NULL);
+    if (work_is_stopping)
+        return true;
+    if (queue->head == NULL)
+        return false;
+
+    // An interrupt is not something that can be held back
+    return !work_is_held || queue == &work_queues[WORK_QUEUE_INTERRUPT];
 }
 
 static void work_thread(void *opaque)
@@ -1149,6 +1174,7 @@ void work_threads_start(void)
     mutex_init(&work_mutex);
     condvar_init(&work_done);
     condvar_init(&work_watchdog_stop);
+    condvar_init(&irq_park_changed);
 
     work_is_held = false;
     work_is_stopping = false;
@@ -1200,6 +1226,7 @@ void work_threads_stop(void)
 
     interface_is_threaded = false;
 
+    condvar_free(&irq_park_changed);
     condvar_free(&work_watchdog_stop);
     condvar_free(&work_done);
     mutex_free(&work_mutex);
@@ -1226,20 +1253,12 @@ void work_release(void)
     mutex_unlock(&work_mutex);
 }
 
-uacpi_status uacpi_kernel_schedule_work(
-    uacpi_work_type type, uacpi_work_handler handler, uacpi_handle ctx
+static void work_enqueue(
+    size_t queue_idx, uacpi_work_handler handler, uacpi_handle ctx
 )
 {
-    work_queue_t *queue;
+    work_queue_t *queue = &work_queues[queue_idx];
     work_t *work;
-
-    if (!interface_is_threaded) {
-        handler(ctx);
-        return UACPI_STATUS_OK;
-    }
-
-    if ((size_t)type >= UACPI_ARRAY_SIZE(work_queues))
-        return UACPI_STATUS_INVALID_ARGUMENT;
 
     work = do_calloc(1, sizeof(*work));
     work->handler = handler;
@@ -1247,7 +1266,6 @@ uacpi_status uacpi_kernel_schedule_work(
 
     mutex_lock(&work_mutex);
 
-    queue = &work_queues[type];
     if (queue->head == NULL)
         queue->head = work;
     else
@@ -1255,11 +1273,154 @@ uacpi_status uacpi_kernel_schedule_work(
     queue->tail = work;
 
     work_num_pending++;
-    if (!work_is_held)
-        condvar_signal(&queue->has_work);
+    condvar_signal(&queue->has_work);
 
     mutex_unlock(&work_mutex);
+}
+
+uacpi_status uacpi_kernel_schedule_work(
+    uacpi_work_type type, uacpi_work_handler handler, uacpi_handle ctx
+)
+{
+    if (!interface_is_threaded) {
+        handler(ctx);
+        return UACPI_STATUS_OK;
+    }
+
+    if (type != UACPI_WORK_GPE_EXECUTION && type != UACPI_WORK_NOTIFICATION)
+        return UACPI_STATUS_INVALID_ARGUMENT;
+
+    work_enqueue(type, handler, ctx);
     return UACPI_STATUS_OK;
+}
+
+static bool irq_is_running(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return !irq_is_parked;
+}
+
+// Invoked for every IO read, parks the interrupt thread if it was asked to
+static void irq_park_before_read(uacpi_io_addr addr)
+{
+    if (!interface_is_threaded)
+        return;
+
+    mutex_lock(&work_mutex);
+
+    if (irq_park_is_armed && addr == irq_park_addr &&
+        get_thread_id() == work_queues[WORK_QUEUE_INTERRUPT].thread_id) {
+        irq_park_is_armed = false;
+        irq_is_parked = true;
+        condvar_broadcast(&irq_park_changed);
+
+        condvar_wait(&irq_park_changed, &work_mutex, irq_is_running, NULL);
+    }
+
+    mutex_unlock(&work_mutex);
+}
+
+static void irq_unpark_locked(void)
+{
+    irq_park_is_armed = false;
+
+    if (irq_is_parked) {
+        irq_is_parked = false;
+        condvar_broadcast(&irq_park_changed);
+    }
+}
+
+void fake_irq_unpark(void)
+{
+    if (!interface_is_threaded)
+        error("an interrupt can only be parked by the work threads");
+
+    mutex_lock(&work_mutex);
+    irq_unpark_locked();
+    mutex_unlock(&work_mutex);
+}
+
+bool fake_irq_is_parked(void)
+{
+    bool ret;
+
+    if (!interface_is_threaded)
+        return false;
+
+    mutex_lock(&work_mutex);
+    ret = irq_is_parked;
+    mutex_unlock(&work_mutex);
+
+    return ret;
+}
+
+static void irq_raise_on_this_thread(uacpi_handle opaque)
+{
+    fake_irq_raise((uacpi_u32)((uintptr_t)opaque));
+
+    mutex_lock(&work_mutex);
+    irq_park_is_armed = false;
+    irq_is_done = true;
+    condvar_broadcast(&irq_park_changed);
+    mutex_unlock(&work_mutex);
+}
+
+static bool irq_is_parked_or_done(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return irq_is_parked || irq_is_done;
+}
+
+bool fake_irq_raise_parked(uacpi_u32 irq, uacpi_io_addr park_addr)
+{
+    bool is_parked;
+
+    if (!interface_is_threaded)
+        error("an interrupt can only be parked by the work threads");
+
+    mutex_lock(&work_mutex);
+    irq_park_addr = park_addr;
+    irq_park_is_armed = true;
+    irq_is_parked = false;
+    irq_is_done = false;
+    mutex_unlock(&work_mutex);
+
+    work_enqueue(
+        WORK_QUEUE_INTERRUPT, irq_raise_on_this_thread,
+        (uacpi_handle)((uintptr_t)irq)
+    );
+
+    mutex_lock(&work_mutex);
+    condvar_wait(&irq_park_changed, &work_mutex, irq_is_parked_or_done, NULL);
+    is_parked = irq_is_parked;
+    mutex_unlock(&work_mutex);
+
+    return is_parked;
+}
+
+static fake_io_hook io_hook;
+static void *io_hook_ctx;
+
+void fake_io_set_hook(fake_io_hook hook, void *ctx)
+{
+    interface_lock();
+    io_hook = hook;
+    io_hook_ctx = ctx;
+    interface_unlock();
+}
+
+static void io_invoke_hook(fake_io_op op, uacpi_io_addr addr)
+{
+    fake_io_hook hook;
+    void *ctx;
+
+    interface_lock();
+    hook = io_hook;
+    ctx = io_hook_ctx;
+    interface_unlock();
+
+    if (hook != NULL)
+        hook(ctx, op, addr);
 }
 
 static bool work_is_done(void *opaque)
@@ -1284,19 +1445,20 @@ uacpi_status uacpi_kernel_wait_for_work_completion(void)
             continue;
 
         work_fatal(
-            "a work handler has attempted to wait for work completion, "
-            "which would never return"
+            "a work or an interrupt handler has attempted to wait for work "
+            "completion, which would never return"
         );
     }
 
     /*
-     * There are no in-flight interrupts to wait for, as an interrupt handler
-     * is never invoked asynchronously.
-     *
      * Someone is waiting for the work, so there's no point in holding it any
-     * longer: this is exactly what the hold is there to wait for.
+     * longer: this is exactly what the hold is there to wait for. Same goes
+     * for an interrupt handler that was parked, which is accounted for the
+     * same way the work is.
      */
     work_release_locked();
+    irq_unpark_locked();
+
     work_num_waiters++;
     condvar_wait(&work_done, &work_mutex, work_is_done, NULL);
     work_num_waiters--;

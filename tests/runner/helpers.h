@@ -286,6 +286,41 @@ void fake_io_lower(uacpi_io_addr addr, uint8_t bits);
 uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq);
 
 /*
+ * Same as above, but the handlers are invoked by a dedicated thread, the way
+ * an interrupt that was taken by a different CPU would be. That thread is
+ * stopped right before it reads the IO register at 'park_addr', at which point
+ * this returns true with the handler still in flight. If the handlers never
+ * read it and simply return, this returns false.
+ *
+ * A parked interrupt is resumed via fake_irq_unpark, or by someone waiting for
+ * it to complete via uacpi_kernel_wait_for_work_completion. Only valid while
+ * the work threads are running.
+ */
+bool fake_irq_raise_parked(uacpi_u32 irq, uacpi_io_addr park_addr);
+void fake_irq_unpark(void);
+bool fake_irq_is_parked(void);
+
+typedef enum {
+    FAKE_IO_OP_WRITE,
+    FAKE_IO_OP_UNMAP,
+} fake_io_op;
+
+typedef void (*fake_io_hook)(void *ctx, fake_io_op op, uacpi_io_addr addr);
+
+/*
+ * Have 'hook' invoked right before every IO write or unmap, with the address
+ * that is about to be written or unmapped. This makes it possible to have
+ * something happen at a very specific point in time. NULL removes the hook.
+ *
+ * The hook is invoked by whoever is doing the access, with whatever it has
+ * locked at the time. Make sure that it doesn't end up waiting for something
+ * that needs one of those locks: taking an interrupt from a write that is done
+ * with a spinlock held, which is the case for most writes to a GPE enable
+ * register, is a deadlock, as a spinlock is just a mutex here.
+ */
+void fake_io_set_hook(fake_io_hook hook, void *ctx);
+
+/*
  * By default, all deferred work is executed right away by the thread that
  * has scheduled it. This switches to executing it on dedicated threads
  * instead, same as a real kernel would do, until the threads are stopped.
