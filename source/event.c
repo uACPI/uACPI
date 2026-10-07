@@ -734,6 +734,25 @@ static uacpi_status find_or_create_gpe_interrupt_ctx(
     return UACPI_STATUS_OK;
 }
 
+static void remove_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
+{
+    if (ctx->prev != UACPI_NULL)
+        ctx->prev->next = ctx->next;
+    else
+        g_gpe_interrupt_head = ctx->next;
+
+    if (ctx->next != UACPI_NULL)
+        ctx->next->prev = ctx->prev;
+
+    if (ctx->irq != g_uacpi_rt_ctx.fadt.sci_int) {
+        uacpi_kernel_uninstall_interrupt_handler(
+            handle_gpes, ctx->irq_handle
+        );
+    }
+
+    uacpi_free(ctx, sizeof(*ctx));
+}
+
 static void gpe_release_implicit_notify_handlers(struct gp_event *event)
 {
     struct gpe_implicit_notify_handler *handler, *next_handler;
@@ -895,24 +914,16 @@ static void uninstall_gpe_block(struct gpe_block *block)
             }
         }
 
-        // This GPE block was the last user of this interrupt context, remove it
-        if (ctx->gpe_head == UACPI_NULL) {
-            if (ctx->prev != UACPI_NULL)
-                ctx->prev->next = ctx->next;
-            else
-                g_gpe_interrupt_head = ctx->next;
-
-            if (ctx->next != UACPI_NULL)
-                ctx->next->prev = ctx->prev;
-
-            if (ctx->irq != g_uacpi_rt_ctx.fadt.sci_int) {
-                uacpi_kernel_uninstall_interrupt_handler(
-                    handle_gpes, ctx->irq_handle
-                );
-            }
-
-            uacpi_free(block->irq_ctx, sizeof(*block->irq_ctx));
-        }
+        /*
+         * This GPE block was the last user of this interrupt context, remove it
+         *
+         * The context of the SCI is an exception: it's what the SCI handler
+         * uses to find the blocks to dispatch, so it stays around for as long
+         * as the handler does.
+         */
+        if (ctx->gpe_head == UACPI_NULL &&
+            ctx->irq != g_uacpi_rt_ctx.fadt.sci_int)
+            remove_gpe_interrupt_ctx(ctx);
     }
 
     if (block->events != UACPI_NULL) {
@@ -2322,6 +2333,7 @@ uacpi_status uacpi_initialize_events_early(void)
 uacpi_status uacpi_initialize_events(void)
 {
     uacpi_status ret;
+    struct gpe_interrupt_ctx *sci_ctx;
 
     if (uacpi_is_hardware_reduced())
         return UACPI_STATUS_OK;
@@ -2330,8 +2342,19 @@ uacpi_status uacpi_initialize_events(void)
     if (uacpi_unlikely_error(ret))
         return ret;
 
+    /*
+     * The SCI handler is responsible for every GPE block that shares its
+     * interrupt. Make sure it has a context to look for them in even if the
+     * FADT doesn't describe any, as one might still be installed later on.
+     */
+    ret = find_or_create_gpe_interrupt_ctx(
+        g_uacpi_rt_ctx.fadt.sci_int, &sci_ctx
+    );
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
     ret = uacpi_kernel_install_interrupt_handler(
-        g_uacpi_rt_ctx.fadt.sci_int, handle_sci, g_gpe_interrupt_head,
+        g_uacpi_rt_ctx.fadt.sci_int, handle_sci, sci_ctx,
         &g_uacpi_rt_ctx.sci_handle
     );
     if (uacpi_unlikely_error(ret)) {
@@ -2396,9 +2419,11 @@ void uacpi_deinitialize_events(void)
 
     while (next_ctx) {
         struct gpe_block *block, *next_block;
+        uacpi_bool is_sci_ctx;
 
         ctx = next_ctx;
         next_ctx = ctx->next;
+        is_sci_ctx = ctx->irq == g_uacpi_rt_ctx.fadt.sci_int;
 
         next_block = ctx->gpe_head;
         while (next_block) {
@@ -2406,6 +2431,13 @@ void uacpi_deinitialize_events(void)
             next_block = block->next;
             uninstall_gpe_block(block);
         }
+
+        /*
+         * Any other context is gone at this point, as it's removed along with
+         * the last block that was using it.
+         */
+        if (is_sci_ctx)
+            remove_gpe_interrupt_ctx(ctx);
     }
 
     if (locked)
