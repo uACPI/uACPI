@@ -131,7 +131,7 @@ static uacpi_status initialize_fixed_events(void)
 {
     uacpi_size i;
 
-    for (i = 0; i < UACPI_FIXED_EVENT_MAX; ++i) {
+    for (i = 0; i <= UACPI_FIXED_EVENT_MAX; ++i) {
         uacpi_write_register_field(
             fixed_events[i].enable_field, UACPI_EVENT_DISABLED
         );
@@ -285,7 +285,7 @@ static uacpi_interrupt_ret handle_fixed_events(void)
     if (uacpi_unlikely_error(ret))
         return int_ret;
 
-    for (i = 0; i < UACPI_FIXED_EVENT_MAX; ++i)
+    for (i = 0; i <= UACPI_FIXED_EVENT_MAX; ++i)
     {
         const struct fixed_event *ev = &fixed_events[i];
 
@@ -2406,7 +2406,7 @@ void uacpi_deinitialize_events(void)
     if (locked)
         event_config_unlock();
 
-    for (i = 0; i < UACPI_FIXED_EVENT_MAX; ++i) {
+    for (i = 0; i <= UACPI_FIXED_EVENT_MAX; ++i) {
         if (fixed_event_handlers[i].handler)
             uacpi_uninstall_fixed_event_handler(i);
     }
