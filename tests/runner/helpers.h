@@ -278,8 +278,9 @@ extern bool g_no_fadt_gpe_blocks;
  */
 void fake_io_set_write_one_to_clear(uacpi_io_addr base, uacpi_size len);
 
-// Set bits of an IO register directly, bypassing the emulation
+// Set or clear bits of an IO register directly, bypassing the emulation
 void fake_io_raise(uacpi_io_addr addr, uint8_t bits);
+void fake_io_lower(uacpi_io_addr addr, uint8_t bits);
 
 // Invoke the handlers that are currently installed for this IRQ
 uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq);

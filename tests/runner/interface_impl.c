@@ -133,6 +133,16 @@ void fake_io_raise(uacpi_io_addr addr, uint8_t bits)
     interface_unlock();
 }
 
+void fake_io_lower(uacpi_io_addr addr, uint8_t bits)
+{
+    if (!io_is_valid(addr, 1))
+        error("invalid IO address 0x%04X", (unsigned)addr);
+
+    interface_lock();
+    io_space[addr] &= (uint8_t)~bits;
+    interface_unlock();
+}
+
 #ifdef UACPI_KERNEL_INITIALIZATION
 uacpi_status uacpi_kernel_initialize(uacpi_init_level lvl)
 {

@@ -10,6 +10,7 @@
 #include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
 #include <uacpi/notify.h>
+#include <uacpi/sleep.h>
 #include <uacpi/uacpi.h>
 
 /*
@@ -1424,6 +1425,40 @@ void test_fixed_events(void)
     CHECK(power.count == 4);
     CHECK(rtc.count == 2);
 
+    /*
+     * The button that has woken us up is not supposed to be delivered as if it
+     * was pressed once again. This is not the case for anything else that is
+     * pending at the time, e.g. the RTC alarm.
+     *
+     * Also pretend that the power button didn't make it through the sleep
+     * enabled, it's expected to be turned back on since it has a handler.
+     */
+    fake_io_lower(
+        FAKE_PM1A_EVT_BLK + 3, (uint8_t)(ACPI_PM1_EN_PWRBTN_EN_MASK >> 8)
+    );
+    CHECK_FIXED_INFO(
+        UACPI_FIXED_EVENT_POWER_BUTTON, UACPI_EVENT_INFO_HAS_HANDLER
+    );
+
+    fixed_event_set_status(
+        ACPI_PM1_STS_PWRBTN_STS_MASK | ACPI_PM1_STS_RTC_STS_MASK |
+        ACPI_PM1_STS_WAKE_STS_MASK
+    );
+    CHECK_OK(uacpi_wake_from_sleep_state(UACPI_SLEEP_STATE_S3));
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_POWER_BUTTON, FIXED_INFO_ENABLED);
+
+    // The sleep button has no handler, and so has no business being enabled
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_SLEEP_BUTTON, 0);
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(power.count == 4);
+    CHECK(rtc.count == 3);
+
+    // An actual press of the button is delivered as usual
+    fixed_event_set_status(ACPI_PM1_STS_PWRBTN_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(power.count == 5);
+
     // An event is disabled along with the removal of its handler
     CHECK_OK(uacpi_uninstall_fixed_event_handler(
         UACPI_FIXED_EVENT_POWER_BUTTON
@@ -1436,7 +1471,7 @@ void test_fixed_events(void)
 
     fixed_event_set_status(ACPI_PM1_STS_PWRBTN_STS_MASK);
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
-    CHECK(power.count == 4);
+    CHECK(power.count == 5);
     CHECK_OK(uacpi_clear_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON));
 
     /*
