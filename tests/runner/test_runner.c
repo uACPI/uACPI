@@ -25,6 +25,19 @@
 #include <uacpi/utilities.h>
 #include <uacpi/sleep.h>
 
+/*
+ * Tests that exercise the API directly instead of evaluating \MAIN, selected
+ * by the value that the test case is expected to return.
+ */
+static const struct {
+    const char *name;
+    void (*run)(void);
+} api_tests[] = {
+    { "check-object-api-works", test_object_api },
+    { "check-address-spaces-work", test_address_spaces },
+    { "check-notify-install-handles-oom", test_notify_install_oom },
+};
+
 static uacpi_object_type string_to_object_type(const char *str)
 {
     if (strcmp(str, "int") == 0)
@@ -373,6 +386,7 @@ static void run_test(
     uacpi_table tbl;
     bool is_test_mode;
     uacpi_object *ret = NULL;
+    size_t i;
 
     g_rsdp = (uacpi_phys_addr)((uintptr_t)&rsdp);
 
@@ -494,13 +508,11 @@ static void run_test(
     if (!is_test_mode)
         goto done;
 
-    if (strcmp(expected_value, "check-object-api-works") == 0) {
-        test_object_api();
-        goto done;
-    }
+    for (i = 0; i < UACPI_ARRAY_SIZE(api_tests); ++i) {
+        if (strcmp(expected_value, api_tests[i].name) != 0)
+            continue;
 
-    if (strcmp(expected_value, "check-address-spaces-work") == 0) {
-        test_address_spaces();
+        api_tests[i].run();
         goto done;
     }
 
