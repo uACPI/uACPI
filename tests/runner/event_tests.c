@@ -1071,6 +1071,15 @@ void test_wake_gpes(void)
     CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_a));
     CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_a));
     CHECK_OK(uacpi_uninstall_notify_handler(dev2, notify_a));
+
+    /*
+     * Replace an implicit notify handler with a native one, and leave it be.
+     * Both are expected to be released when uACPI is deinitialized.
+     */
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 0x10, UACPI_GPE_TRIGGERING_LEVEL, gpe_handler_never_called,
+        UACPI_NULL
+    ));
 }
 
 #define GPEB_ADDRESS 0x1000
