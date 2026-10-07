@@ -53,9 +53,14 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
 
     Scope (\_GPE) {
         Name (CNT0, 0)
+        Name (CNT1, 0)
 
         Method (_L00) {
             CNT0++
+        }
+
+        Method (_E01) {
+            CNT1++
         }
     }
 }

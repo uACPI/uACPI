@@ -1135,11 +1135,22 @@ void test_gpe_blocks(void)
     CHECK_GPE_INFO(UACPI_NULL, 0, UACPI_EVENT_INFO_HAS_HANDLER);
     CHECK_GPE_INFO(UACPI_NULL, 9, 0);
 
-    // The events of every block that exists at this point get enabled
+    /*
+     * The events of every block that exists at this point get enabled. Those
+     * that are already pending are dispatched as well, no matter which of the
+     * interrupts the block belongs to.
+     */
+    gpe_set_status(1);
+    fake_io_raise(GPEB_ADDRESS + 1, 1 << 1);
+
     CHECK_OK(uacpi_finalize_gpe_initialization());
+    CHECK(eval_integer("\\_GPE.CNT1") == 1);
+    CHECK(eval_integer("\\GPEB.CNT9") == 1);
+
     CHECK_GPE_INFO(gpeb, 0, GPE_INFO_ENABLED);
     CHECK_GPE_INFO(gpeb, 9, GPE_INFO_ENABLED);
     CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
 
     /*
      * A block that is installed later on has to be finalized as well. This is
@@ -1182,7 +1193,7 @@ void test_gpe_blocks(void)
     CHECK_GPE_INFO(gpeb, 0, GPE_INFO_ENABLED);
 
     gpe_block_fire(GPEB_ADDRESS, GPE_BLOCK_IRQ, 9);
-    CHECK(eval_integer("\\GPEB.CNT9") == 1);
+    CHECK(eval_integer("\\GPEB.CNT9") == 2);
 
     gpe_block_fire(GPEC_ADDRESS, GPE_BLOCK_IRQ, 1);
     CHECK(eval_integer("\\GPEC.CNT1") == 1);
