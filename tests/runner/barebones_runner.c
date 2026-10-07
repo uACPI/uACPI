@@ -551,23 +551,19 @@ static struct {
     { "misaligned-early-tables-buffer", test_misaligned_early_tables_buffer },
 };
 
-static arg_spec_t TEST_CASE_ARG = ARG_POS("test-case", "name of the test case");
-
+static arg_spec_t BUILTIN_ARG = ARG_PARAM(
+    "builtin", 'a', "name of the test case to run"
+);
 static arg_spec_t HELP_ARG = ARG_HELP(
     "help", 'h', "Display this menu and exit"
 );
 
-static arg_spec_t *const POSITIONAL_ARGS[] = {
-    &TEST_CASE_ARG,
-};
-
 static arg_spec_t *const OPTION_ARGS[] = {
+    &BUILTIN_ARG,
     &HELP_ARG,
 };
 
 static const arg_parser_t PARSER = {
-    .positional_args = POSITIONAL_ARGS,
-    .num_positional_args = UACPI_ARRAY_SIZE(POSITIONAL_ARGS),
     .option_args = OPTION_ARGS,
     .num_option_args = UACPI_ARRAY_SIZE(OPTION_ARGS),
 };
@@ -597,7 +593,7 @@ int main(int argc, char *argv[])
     if (!uacpi_table_subsystem_available())
         error("table subsystem must be available at this point!\n");
 
-    test_case = get(&TEST_CASE_ARG);
+    test_case = get(&BUILTIN_ARG);
 
     for (i = 0; i < UACPI_ARRAY_SIZE(test_cases); i++) {
         if (strcmp(test_case, test_cases[i].name) == 0) {

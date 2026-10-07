@@ -37,8 +37,11 @@ class TestCase(ABC):
     def extra_runner_args(self) -> List[str]:
         pass
 
+    def runner_args(self) -> List[str]:
+        return [self.path, *self.extra_runner_args()]
 
-class BarebonesTestCase(TestCase):
+
+class BuiltinTestCase(TestCase):
     def __init__(
         self, name: str
     ) -> None:
@@ -46,6 +49,20 @@ class BarebonesTestCase(TestCase):
 
     def extra_runner_args(self) -> List[str]:
         return []
+
+    def runner_args(self) -> List[str]:
+        return ["--builtin", self.name]
+
+
+def get_builtin_test_cases(runner: str) -> List[TestCase]:
+    names = subprocess.check_output(
+        [runner, "--list-builtin"], universal_newlines=True
+    ).split()
+
+    if not names:
+        raise RuntimeError(f"{runner} didn't list any builtin tests")
+
+    return [BuiltinTestCase(name) for name in names]
 
 
 class TestCaseWithMain(TestCase):
@@ -227,7 +244,7 @@ def run_single_test(case: TestCase, results: Queue, runner: str) -> bool:
     timeout = False
     start_time = time.time()
     proc = subprocess.Popen(
-        [runner, case.path, *case.extra_runner_args()],
+        [runner, *case.runner_args()],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         universal_newlines=True
     )
@@ -452,6 +469,12 @@ def main() -> int:
     with TestHeaderFooter("AML Tests"):
         ret = run_tests(base_test_cases, test_runner, args.parallelism)
 
+    if ret:
+        api_cases = get_builtin_test_cases(test_runner)
+
+        with TestHeaderFooter("API Tests"):
+            ret = run_tests(api_cases, test_runner, args.parallelism)
+
     if ret and args.large:
         large_test_cases = generate_large_test_cases(
             args.acpi_extractor, bin_dir
@@ -462,12 +485,12 @@ def main() -> int:
 
     if ret and args.barebones:
         bare_cases: List[TestCase] = [
-            BarebonesTestCase("basic-operation"),
-            BarebonesTestCase("table-installation"),
-            BarebonesTestCase("table-advanced"),
-            BarebonesTestCase("foreach-subtable"),
-            BarebonesTestCase("reduced-hardware"),
-            BarebonesTestCase("misaligned-early-tables-buffer"),
+            BuiltinTestCase("basic-operation"),
+            BuiltinTestCase("table-installation"),
+            BuiltinTestCase("table-advanced"),
+            BuiltinTestCase("foreach-subtable"),
+            BuiltinTestCase("reduced-hardware"),
+            BuiltinTestCase("misaligned-early-tables-buffer"),
         ]
 
         with TestHeaderFooter("Barebones Mode Tests"):

@@ -168,7 +168,18 @@ struct full_xsdt *make_xsdt(
 
     vector_init(&tables, ssdts->count + 1);
 
-    get_table_path(&tables.blobs[0], dsdt_path);
+    if (dsdt_path != NULL) {
+        get_table_path(&tables.blobs[0], dsdt_path);
+    } else {
+        struct acpi_sdt_hdr empty_dsdt = { 0 };
+
+        empty_dsdt.length = sizeof(empty_dsdt);
+        empty_dsdt.revision = 2;
+        set_oem(&empty_dsdt.oemid);
+        set_oem_table_id(&empty_dsdt.oem_table_id);
+
+        get_table_blob(&tables.blobs[0], &empty_dsdt, sizeof(empty_dsdt));
+    }
 
     for (i = 0; i < ssdts->count; ++i)
         get_table_path(&tables.blobs[1 + i], ssdts->blobs[i].data);
