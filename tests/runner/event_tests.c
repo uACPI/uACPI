@@ -964,6 +964,27 @@ void test_wake_gpes(void)
     CHECK(log2.count == 2);
     CHECK_GPE_INFO(UACPI_NULL, 0x11, GPE_INFO_ENABLED);
 
+    /*
+     * An event that was disabled right after being dispatched still has work
+     * in flight. This work must be waited for before the handler of the event
+     * is replaced, or the notification is lost.
+     */
+    work_hold();
+    gpe_fire(0x11);
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0x11));
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 0x11, UACPI_GPE_TRIGGERING_LEVEL, gpe_handler_never_called,
+        UACPI_NULL
+    ));
+    CHECK(log2.count == 3);
+
+    CHECK_OK(uacpi_uninstall_gpe_handler(
+        UACPI_NULL, 0x11, gpe_handler_never_called
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0x11));
+    CHECK_GPE_INFO(UACPI_NULL, 0x11, GPE_INFO_ENABLED);
+
     work_threads_stop();
 
     // Only an event that is marked as wake can be enabled for it
@@ -1270,6 +1291,25 @@ void test_gpe_blocks(void)
     CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
     CHECK(user.count == 1);
     CHECK(eval_integer("\\GPEB.CNT0") == 3);
+
+    /*
+     * Same goes for an event that was disabled right after being dispatched:
+     * the work that is in flight still refers to it, and so has to be waited
+     * for before the block is gone.
+     */
+    CHECK_OK(uacpi_install_gpe_block(
+        gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+        GPEB_NUM_REGISTERS, GPE_BLOCK_OTHER_IRQ
+    ));
+    CHECK_OK(uacpi_enable_gpe(gpeb, 0));
+
+    work_hold();
+    gpe_block_fire(GPEB_ADDRESS, GPE_BLOCK_OTHER_IRQ, 0);
+    CHECK_OK(uacpi_disable_gpe(gpeb, 0));
+
+    CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
+    CHECK(user.count == 2);
+    CHECK(eval_integer("\\GPEB.CNT0") == 4);
 
     work_threads_stop();
 
