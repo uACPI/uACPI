@@ -556,6 +556,33 @@ static uacpi_interrupt_ret log_gpe_other(
     return log_gpe(ctx, gpe_device, idx);
 }
 
+typedef struct {
+    // An event of the first FADT block
+    uacpi_u16 idx;
+    bool is_done;
+} gpe_latch_t;
+
+/*
+ * An event is only polled as it gets its first user, with its status cleared
+ * right before that. This makes it pending again as soon as that's done, same
+ * as if it has fired right as it was being enabled.
+ */
+static void gpe_latch_once_cleared(
+    void *ctx, fake_io_op op, uacpi_io_addr addr
+)
+{
+    gpe_latch_t *latch = ctx;
+    uacpi_io_addr status_addr = FAKE_GPE0_BLK;
+
+    status_addr += latch->idx / 8;
+
+    if (latch->is_done || op != FAKE_IO_OP_WRITE || addr != status_addr)
+        return;
+
+    latch->is_done = true;
+    gpe_set_status(latch->idx);
+}
+
 /*
  * This is executed twice: with the deferred work executed right by whoever
  * schedules it, and with it handed off to the work threads. All of the state
@@ -566,6 +593,7 @@ static void do_test_gpe_handlers(void)
     uacpi_namespace_node *gpe;
     uacpi_u64 cnt0, cnt1, cnt80, cntff;
     gpe_log_t log = { 0 };
+    gpe_latch_t latch = { 0 };
 
     gpe = uacpi_namespace_get_predefined(UACPI_PREDEFINED_NAMESPACE_GPE);
 
@@ -856,6 +884,33 @@ static void do_test_gpe_handlers(void)
     CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
 
     /*
+     * This only applies to an event that is actually able to fire, which is
+     * not the case for one that is masked: it must be left alone until it's
+     * unmasked.
+     */
+    CHECK_OK(uacpi_mask_gpe(UACPI_NULL, 1));
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 1, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+
+    gpe_set_status(1);
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 1, log_gpe));
+    flush_work();
+    CHECK(log.count == 1);
+    CHECK(eval_integer("\\_GPE.CNT1") == cnt1);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 1,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_MASKED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 1));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    /*
      * That's only done for whoever gets the event enabled: one that already
      * is can raise an interrupt by itself, so it's left for its handler.
      */
@@ -923,6 +978,36 @@ static void do_test_gpe_handlers(void)
     CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 11));
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
     CHECK(log.count == 2);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+
+    /*
+     * An event that is not able to fire must not be dispatched even if it
+     * happens to be pending at the time that it's polled, which is the case
+     * for the one that is masked.
+     */
+    log.ret = UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_OK(uacpi_mask_gpe(UACPI_NULL, 11));
+
+    latch.idx = 11;
+    latch.is_done = false;
+    fake_io_set_hook(gpe_latch_once_cleared, &latch);
+
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+    fake_io_set_hook(UACPI_NULL, UACPI_NULL);
+    CHECK(latch.is_done);
+    CHECK(log.count == 2);
+
+    CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 11));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(log.count == 3);
+    CHECK_GPE_INFO(UACPI_NULL, 11, GPE_INFO_ENABLED);
 
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
     CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
