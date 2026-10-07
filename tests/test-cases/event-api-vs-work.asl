@@ -86,5 +86,11 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
         // These don't do anything, and are only here to be reconfigured
         Method (_L08) { }
         Method (_L09) { }
+
+        Name (CNTB, 0)
+
+        Method (_E0B) {
+            CNTB++
+        }
     }
 }
