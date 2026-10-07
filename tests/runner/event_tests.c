@@ -483,6 +483,36 @@ void test_event_api_vs_work(void)
     CHECK(eval_integer("\\_GPE.CNT5") == 1);
 
     /*
+     * An event is disabled while it's being handled, but there are ways to
+     * enable it regardless. It must not be scheduled again if it fires at
+     * that point, as that would be reusing a work item that is still pending,
+     * and it must not be lost either.
+     */
+    work_hold();
+    gpe_fire(5);
+    CHECK_OK(uacpi_resume_gpe(UACPI_NULL, 5));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNT5") == 2);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    // Same thing, but the event is edge triggered and thus fires once more
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0x0B));
+
+    work_hold();
+    gpe_fire(0x0B);
+    CHECK_OK(uacpi_resume_gpe(UACPI_NULL, 0x0B));
+    gpe_fire(0x0B);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNTB") == 1);
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNTB") == 2);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    /*
      * The handler of a GPE might get replaced while we wait for it to quiesce.
      * GPE 06 is configured for implicit notify at first, but ends up with an
      * AML handler by the time a native one is installed, so this is what must
