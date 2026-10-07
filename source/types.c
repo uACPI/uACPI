@@ -620,17 +620,11 @@ static void free_field_unit(uacpi_handle handle)
         break;
     case UACPI_FIELD_UNIT_KIND_BANK:
         uacpi_namespace_node_unref(field_unit->bank_region);
-        uacpi_shareable_unref_and_delete_if_last(
-            field_unit->bank_selection, free_field_unit
-        );
+        uacpi_field_unit_unref(field_unit->bank_selection);
         break;
     case UACPI_FIELD_UNIT_KIND_INDEX:
-        uacpi_shareable_unref_and_delete_if_last(
-            field_unit->index, free_field_unit
-        );
-        uacpi_shareable_unref_and_delete_if_last(
-            field_unit->data, free_field_unit
-        );
+        uacpi_field_unit_unref(field_unit->index);
+        uacpi_field_unit_unref(field_unit->data);
         break;
     default:
         break;
@@ -657,6 +651,11 @@ void uacpi_method_unref(uacpi_control_method *method)
     uacpi_shareable_unref_and_delete_if_last(method, free_method);
 }
 
+void uacpi_field_unit_unref(uacpi_field_unit *field_unit)
+{
+    uacpi_shareable_unref_and_delete_if_last(field_unit, free_field_unit);
+}
+
 static void free_object_storage(uacpi_object *obj)
 {
     switch (obj->type) {
@@ -680,8 +679,7 @@ static void free_object_storage(uacpi_object *obj)
                                                  free_package);
         break;
     case UACPI_OBJECT_FIELD_UNIT:
-        uacpi_shareable_unref_and_delete_if_last(obj->field_unit,
-                                                 free_field_unit);
+        uacpi_field_unit_unref(obj->field_unit);
         break;
     case UACPI_OBJECT_MUTEX:
         uacpi_mutex_unref(obj->mutex);
