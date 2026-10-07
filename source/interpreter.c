@@ -1006,10 +1006,20 @@ static uacpi_status object_assign_with_implicit_cast(
         break;
 
     case UACPI_OBJECT_FIELD_UNIT:
-        return uacpi_write_field_unit(
+        /*
+         * The namespace is unlocked for as long as the address space handler
+         * is running, which makes it possible for someone else to get rid of
+         * the object that we're writing from, e.g. by overwriting it via
+         * CopyObject. All of the references that we have to it are gone if
+         * that happens, so take one that is ours alone.
+         */
+        uacpi_object_ref(src);
+        ret = uacpi_write_field_unit(
             dst->field_unit, src_buf.bytes, src_buf.length,
             wtr_response
         );
+        uacpi_object_unref(src);
+        return ret;
 
     case UACPI_OBJECT_BUFFER_INDEX:
         write_buffer_index(&dst->buffer_index, &src_buf);
