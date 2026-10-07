@@ -57,6 +57,7 @@ static const struct api_test {
         "check-state-reset-waits-for-notifications",
         test_state_reset_vs_notifications, API_TEST_NO_FADT_GPE_BLOCKS
     },
+    { "check-aml-with-threads", test_aml_with_threads, 0 },
 };
 
 /*
