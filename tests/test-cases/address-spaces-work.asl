@@ -497,4 +497,37 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
         Printf("Address space %o OK", ToHexString(Arg0))
         Return (Ones)
     }
+
+    /*
+     * Unlike the IPMI region above, this one is not created by a method, and
+     * thus gets to have a _REG method.
+     */
+    Device (IPMD) {
+        Name (_HID, "TEST0000")
+
+        OperationRegion (IPMS, IPMI, 0, 1)
+
+        // Whether the region is connected, as far as _REG is aware
+        Name (CONN, 0xFF)
+
+        Method (_REG, 2) {
+            If (Arg0 == 7) {
+                CONN = Arg1
+            }
+        }
+    }
+
+    /*
+     * Arg0 -> Whether IPMS is expected to be connected
+     * Return -> Ones on success, Zero on failure
+     */
+    Method (CREG, 1) {
+        If (\IPMD.CONN != Arg0) {
+            Printf("Unexpected IPMS connection state %o, expected %o",
+                   \IPMD.CONN, Arg0)
+            Return (Zero)
+        }
+
+        Return (Ones)
+    }
 }

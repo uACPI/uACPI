@@ -432,6 +432,26 @@ static uacpi_status generic_serial_bus_handler(
     return UACPI_STATUS_OK;
 }
 
+static void check_connected(
+    uacpi_object *arg, const char *method, bool connected
+)
+{
+    uacpi_object_array arr = { 0 };
+    uacpi_u64 out_value;
+    uacpi_status st;
+
+    arr.objects = &arg;
+    arr.count = 1;
+
+    st = uacpi_object_assign_integer(arg, connected);
+    ensure_ok_status(st);
+    st = uacpi_eval_integer(NULL, method, &arr, &out_value);
+    ensure_ok_status(st);
+
+    if (!out_value)
+        error("%s test failed", method);
+}
+
 #define OEM_ADDRESS_SPACE ((uacpi_address_space)0x80)
 
 /*
@@ -483,6 +503,7 @@ void test_address_spaces(void)
     );
     ensure_ok_status(st);
     eval_one(arg, UACPI_ADDRESS_SPACE_IPMI);
+    check_connected(arg, "CREG", true);
 
     st = uacpi_install_address_space_handler(
         uacpi_namespace_root(), UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO,
@@ -539,6 +560,16 @@ void test_address_spaces(void)
     ensure_ok_status(st);
     if (!out_value)
         error("OEM address space test failed");
+
+    /*
+     * The regions of an address space are disconnected once its handler is
+     * gone, no matter how many other handlers were installed after it.
+     */
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_IPMI
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CREG", false);
 
     uacpi_object_unref(arg);
 }
