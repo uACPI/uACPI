@@ -773,7 +773,7 @@ static uacpi_status gpe_block_apply_action(
             value = 0;
             break;
         case GPE_BLOCK_ACTION_ENABLE_ALL_FOR_RUNTIME:
-            value = reg->runtime_mask & ~reg->masked_mask;
+            value = reg->runtime_mask;
             break;
         case GPE_BLOCK_ACTION_ENABLE_ALL_FOR_WAKE:
             value = reg->wake_mask;
@@ -788,6 +788,15 @@ static uacpi_status gpe_block_apply_action(
         }
 
         reg->current_mask = value;
+
+        /*
+         * A masked event is kept disabled for as long as we're running, but
+         * it still counts as enabled as far as the current mask goes. This is
+         * what allows it to be enabled as soon as it's unmasked.
+         */
+        if (action == GPE_BLOCK_ACTION_ENABLE_ALL_FOR_RUNTIME)
+            value &= ~reg->masked_mask;
+
         ret = uacpi_gas_write_mapped(&reg->enable, value);
         if (uacpi_unlikely_error(ret))
             return ret;
