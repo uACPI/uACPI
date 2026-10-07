@@ -1256,7 +1256,7 @@ void uacpi_events_match_post_dynamic_table_load(void)
     uacpi_namespace_write_unlock();
 
     if (uacpi_unlikely_error(uacpi_recursive_lock_acquire(&g_event_lock)))
-        goto out;
+        goto out_no_unlock;
 
     irq_ctx = g_gpe_interrupt_head;
 
@@ -1280,8 +1280,9 @@ void uacpi_events_match_post_dynamic_table_load(void)
                    match_ctx.matched_count);
     }
 
-out:
     uacpi_recursive_lock_release(&g_event_lock);
+
+out_no_unlock:
     uacpi_namespace_write_lock();
 }
 
