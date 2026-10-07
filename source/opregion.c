@@ -820,7 +820,7 @@ uacpi_status uacpi_uninstall_address_space_handler(
     while (prev_handler) {
         if (prev_handler->next == handler) {
             prev_handler->next = handler->next;
-            goto out;
+            break;
         }
 
         prev_handler = prev_handler->next;
