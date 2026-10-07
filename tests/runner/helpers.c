@@ -91,18 +91,20 @@ static struct full_xsdt *do_make_xsdt(
     fadt->pm1a_cnt_blk = 0xFFEE;
     fadt->pm1_cnt_len = 2;
 
-    fadt->pm1a_evt_blk = 0xDEAD;
-    fadt->pm1_evt_len = 4;
+    fadt->sci_int = FAKE_SCI_IRQ;
+
+    fadt->pm1a_evt_blk = FAKE_PM1A_EVT_BLK;
+    fadt->pm1_evt_len = FAKE_PM1_EVT_LEN;
 
     fadt->pm2_cnt_blk = 0xCCDD;
     fadt->pm2_cnt_len = 1;
 
-    fadt->gpe0_blk_len = 0x20;
-    fadt->gpe0_blk = 0xDEAD;
+    fadt->gpe0_blk_len = FAKE_GPE0_BLK_LEN;
+    fadt->gpe0_blk = FAKE_GPE0_BLK;
 
-    fadt->gpe1_base = 128;
-    fadt->gpe1_blk = 0xBEEF;
-    fadt->gpe1_blk_len = 0x20;
+    fadt->gpe1_base = FAKE_GPE1_BASE;
+    fadt->gpe1_blk = FAKE_GPE1_BLK;
+    fadt->gpe1_blk_len = FAKE_GPE1_BLK_LEN;
 
     fadt->x_dsdt = (uacpi_phys_addr)((uintptr_t)tables[0].data);
     memcpy(

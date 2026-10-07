@@ -38,13 +38,111 @@ static void interface_unlock(void)
         mutex_unlock(&interface_mutex);
 }
 
+#define IO_SPACE_SIZE ((size_t)UINT16_MAX + 1)
+
 static uint8_t *io_space;
+
+typedef struct {
+    uacpi_io_addr base;
+    uacpi_size len;
+} io_range_t;
+
+// The first half of every event block is taken by the status registers
+static io_range_t io_write_one_to_clear_ranges[8] = {
+    { FAKE_PM1A_EVT_BLK, FAKE_PM1_EVT_LEN / 2 },
+    { FAKE_GPE0_BLK, FAKE_GPE0_BLK_LEN / 2 },
+    { FAKE_GPE1_BLK, FAKE_GPE1_BLK_LEN / 2 },
+};
+static size_t io_num_write_one_to_clear_ranges = 3;
+
+void fake_io_set_write_one_to_clear(uacpi_io_addr base, uacpi_size len)
+{
+    io_range_t *range;
+
+    if (io_num_write_one_to_clear_ranges ==
+        UACPI_ARRAY_SIZE(io_write_one_to_clear_ranges))
+        error("too many write-one-to-clear IO ranges");
+
+    interface_lock();
+    range = &io_write_one_to_clear_ranges[io_num_write_one_to_clear_ranges++];
+    range->base = base;
+    range->len = len;
+    interface_unlock();
+}
+
+static bool io_is_write_one_to_clear(uacpi_io_addr addr)
+{
+    size_t i;
+
+    for (i = 0; i < io_num_write_one_to_clear_ranges; ++i) {
+        const io_range_t *range = &io_write_one_to_clear_ranges[i];
+
+        if (addr >= range->base && (addr - range->base) < range->len)
+            return true;
+    }
+
+    return false;
+}
+
+static bool io_is_valid(uacpi_io_addr addr, size_t width)
+{
+    return io_space != NULL && addr < IO_SPACE_SIZE &&
+           width <= (IO_SPACE_SIZE - addr);
+}
+
+static void io_read(uacpi_io_addr addr, void *out_value, size_t width)
+{
+    memset(out_value, 0xFF, width);
+
+    if (!io_is_valid(addr, width))
+        return;
+
+    interface_lock();
+    memcpy(out_value, &io_space[addr], width);
+    interface_unlock();
+}
+
+static void io_write(uacpi_io_addr addr, const void *value, size_t width)
+{
+    const uint8_t *bytes = value;
+    size_t i;
+
+    if (!io_is_valid(addr, width))
+        return;
+
+    interface_lock();
+
+    for (i = 0; i < width; ++i) {
+        if (io_is_write_one_to_clear(addr + i))
+            io_space[addr + i] &= (uint8_t)~bytes[i];
+        else
+            io_space[addr + i] = bytes[i];
+    }
+
+    interface_unlock();
+}
+
+void fake_io_raise(uacpi_io_addr addr, uint8_t bits)
+{
+    if (!io_is_valid(addr, 1))
+        error("invalid IO address 0x%04X", (unsigned)addr);
+
+    interface_lock();
+    io_space[addr] |= bits;
+    interface_unlock();
+}
 
 #ifdef UACPI_KERNEL_INITIALIZATION
 uacpi_status uacpi_kernel_initialize(uacpi_init_level lvl)
 {
-    if (lvl == UACPI_INIT_LEVEL_EARLY)
-        io_space = do_malloc(UINT16_MAX + 1);
+    if (lvl == UACPI_INIT_LEVEL_EARLY) {
+        io_space = do_malloc(IO_SPACE_SIZE);
+
+        // Make sure there are no events pending or enabled from the get-go
+        memset(&io_space[FAKE_PM1A_EVT_BLK], 0, FAKE_PM1_EVT_LEN);
+        memset(&io_space[FAKE_GPE0_BLK], 0, FAKE_GPE0_BLK_LEN);
+        memset(&io_space[FAKE_GPE1_BLK], 0, FAKE_GPE1_BLK_LEN);
+    }
     return UACPI_STATUS_OK;
 }
 
@@ -99,11 +197,7 @@ void uacpi_kernel_io_unmap(uacpi_handle handle)
     {                                                                      \
         uacpi_io_addr addr = (uacpi_io_addr)((uintptr_t)handle) + offset;  \
                                                                            \
-        if (io_space && addr <= UINT16_MAX)                                \
-            memcpy(out_value, &io_space[addr], bits / 8);                  \
-        else                                                               \
-            *out_value = (uacpi_u##bits)0xFFFFFFFFFFFFFFFF;                \
-                                                                           \
+        io_read(addr, out_value, bits / 8);                                \
         return UACPI_STATUS_OK;                                            \
     }
 
@@ -114,9 +208,7 @@ void uacpi_kernel_io_unmap(uacpi_handle handle)
     {                                                                     \
         uacpi_io_addr addr = (uacpi_io_addr)((uintptr_t)handle) + offset; \
                                                                           \
-        if (io_space && addr <= UINT16_MAX)                               \
-            memcpy(&io_space[addr], &in_value, bits / 8);                 \
-                                                                          \
+        io_write(addr, &in_value, bits / 8);                              \
         return UACPI_STATUS_OK;                                           \
     }
 
@@ -774,16 +866,41 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req)
     return UACPI_STATUS_OK;
 }
 
+typedef struct {
+    uacpi_u32 irq;
+    uacpi_interrupt_handler handler;
+    uacpi_handle ctx;
+} irq_handler_t;
+
+static irq_handler_t irq_handlers[8];
+
 uacpi_status uacpi_kernel_install_interrupt_handler(
     uacpi_u32 irq, uacpi_interrupt_handler handler, uacpi_handle ctx,
     uacpi_handle *out_irq_handle
 )
 {
-    UACPI_UNUSED(irq);
-    UACPI_UNUSED(handler);
-    UACPI_UNUSED(ctx);
-    UACPI_UNUSED(out_irq_handle);
+    irq_handler_t *slot = NULL;
+    size_t i;
 
+    interface_lock();
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(irq_handlers); ++i) {
+        if (irq_handlers[i].handler != NULL)
+            continue;
+
+        slot = &irq_handlers[i];
+        slot->irq = irq;
+        slot->handler = handler;
+        slot->ctx = ctx;
+        break;
+    }
+
+    interface_unlock();
+
+    if (slot == NULL)
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    *out_irq_handle = slot;
     return UACPI_STATUS_OK;
 }
 
@@ -791,10 +908,48 @@ uacpi_status uacpi_kernel_uninstall_interrupt_handler(
     uacpi_interrupt_handler handler, uacpi_handle irq_handle
 )
 {
-    UACPI_UNUSED(handler);
-    UACPI_UNUSED(irq_handle);
+    irq_handler_t *slot = irq_handle;
+    bool is_valid;
+
+    interface_lock();
+
+    is_valid = slot >= &irq_handlers[0] &&
+               slot < &irq_handlers[UACPI_ARRAY_SIZE(irq_handlers)] &&
+               slot->handler == handler;
+    if (is_valid)
+        memset(slot, 0, sizeof(*slot));
+
+    interface_unlock();
+
+    if (!is_valid)
+        error("attempted to uninstall a bogus interrupt handler");
 
     return UACPI_STATUS_OK;
+}
+
+uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq)
+{
+    uacpi_interrupt_ret ret = UACPI_INTERRUPT_NOT_HANDLED;
+    irq_handler_t handlers[UACPI_ARRAY_SIZE(irq_handlers)];
+    size_t i;
+
+    /*
+     * The handlers are invoked by the calling thread, which is as close as we
+     * can get to an interrupt context. Do that without holding the lock, as
+     * pretty much everything a handler might do needs it.
+     */
+    interface_lock();
+    memcpy(handlers, irq_handlers, sizeof(handlers));
+    interface_unlock();
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(handlers); ++i) {
+        if (handlers[i].handler == NULL || handlers[i].irq != irq)
+            continue;
+
+        ret |= handlers[i].handler(handlers[i].ctx);
+    }
+
+    return ret;
 }
 
 uacpi_handle uacpi_kernel_create_spinlock(void)
