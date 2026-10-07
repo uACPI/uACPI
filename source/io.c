@@ -212,18 +212,36 @@ static uacpi_status lock_field_unit_transaction(uacpi_field_unit *field)
 {
     uacpi_status ret;
 
+    /*
+     * The namespace is unlocked more than once before we're done: while we
+     * wait for the locks below, and around every invocation of the address
+     * space handler. This makes it possible for someone else to get rid of
+     * the field in the meantime, e.g. by overwriting it via CopyObject. All
+     * of the references that our caller has to it are gone if that happens,
+     * so take one that is ours alone.
+     */
+    uacpi_shareable_ref(field);
+
     if (field_unit_needs_global_lock(field)) {
         ret = uacpi_acquire_aml_mutex(
             g_uacpi_rt_ctx.global_lock_mutex, 0xFFFF
         );
         if (uacpi_unlikely_error(ret))
-            return ret;
+            goto out_unref;
     }
 
     ret = uacpi_upgrade_to_opregion_lock();
-    if (uacpi_unlikely_error(ret) && field_unit_needs_global_lock(field))
-        uacpi_release_aml_mutex(g_uacpi_rt_ctx.global_lock_mutex);
+    if (uacpi_unlikely_error(ret)) {
+        if (field_unit_needs_global_lock(field))
+            uacpi_release_aml_mutex(g_uacpi_rt_ctx.global_lock_mutex);
 
+        goto out_unref;
+    }
+
+    return ret;
+
+out_unref:
+    uacpi_field_unit_unref(field);
     return ret;
 }
 
@@ -233,6 +251,8 @@ static void unlock_field_unit_transaction(uacpi_field_unit *field)
 
     if (field_unit_needs_global_lock(field))
         uacpi_release_aml_mutex(g_uacpi_rt_ctx.global_lock_mutex);
+
+    uacpi_field_unit_unref(field);
 }
 
 static uacpi_bool field_fits(uacpi_field_unit *field, uacpi_u64 value)

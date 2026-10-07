@@ -302,6 +302,7 @@ uacpi_mutex *uacpi_create_mutex(void);
 void uacpi_mutex_unref(uacpi_mutex*);
 
 void uacpi_method_unref(uacpi_control_method*);
+void uacpi_field_unit_unref(uacpi_field_unit*);
 
 void uacpi_address_space_handler_unref(uacpi_address_space_handler *handler);
 

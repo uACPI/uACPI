@@ -657,6 +657,11 @@ void uacpi_method_unref(uacpi_control_method *method)
     uacpi_shareable_unref_and_delete_if_last(method, free_method);
 }
 
+void uacpi_field_unit_unref(uacpi_field_unit *field_unit)
+{
+    uacpi_shareable_unref_and_delete_if_last(field_unit, free_field_unit);
+}
+
 static void free_object_storage(uacpi_object *obj)
 {
     switch (obj->type) {
