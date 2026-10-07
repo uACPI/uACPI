@@ -955,6 +955,7 @@ static void free_gpe_block(struct gpe_block *block)
     if (block->events != UACPI_NULL) {
         uacpi_size i;
         struct gp_event *event;
+        struct gpe_native_handler *native_handler;
 
         for (i = 0; i < block->num_events; ++i) {
             event = &block->events[i];
@@ -966,8 +967,19 @@ static void free_gpe_block(struct gpe_block *block)
 
             case GPE_HANDLER_TYPE_NATIVE_HANDLER:
             case GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW:
-                uacpi_free(event->native_handler,
-                           sizeof(*event->native_handler));
+                native_handler = event->native_handler;
+
+                /*
+                 * The handler that this one has replaced is still around in
+                 * case this one gets uninstalled, and it's ours to free too.
+                 */
+                if (native_handler->previous_handler_type ==
+                    GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) {
+                    event->implicit_handler = native_handler->previous_handler;
+                    gpe_release_implicit_notify_handlers(event);
+                }
+
+                uacpi_free(native_handler, sizeof(*native_handler));
                 break;
 
             case GPE_HANDLER_TYPE_IMPLICIT_NOTIFY: {
