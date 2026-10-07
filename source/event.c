@@ -18,7 +18,57 @@
 
 static uacpi_handle g_gpe_state_slock;
 static struct uacpi_recursive_lock g_event_lock;
+
+/*
+ * Serializes the API that reconfigures an event, which has to wait for the
+ * in-flight interrupts & work to complete in order to do that safely. The
+ * event lock is dropped while waiting, see wait_for_work_completion_unlocked,
+ * so this is what keeps the event from being reconfigured or freed by someone
+ * else in the meantime.
+ *
+ * Unlike the event lock, this one is never taken by the work itself, which
+ * makes it safe to wait under. It's always acquired before the event lock.
+ */
+static struct uacpi_recursive_lock g_event_config_lock;
 static uacpi_bool g_gpes_finalized;
+
+static uacpi_status event_config_lock(void)
+{
+    uacpi_status ret;
+
+    ret = uacpi_recursive_lock_acquire(&g_event_config_lock);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    if (uacpi_unlikely_error(ret))
+        uacpi_recursive_lock_release(&g_event_config_lock);
+
+    return ret;
+}
+
+static void event_config_unlock(void)
+{
+    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_recursive_lock_release(&g_event_config_lock);
+}
+
+/*
+ * The work that we're waiting for is allowed to take the event lock: a GPE
+ * handler might load a table, in which case we have to match the GPE methods
+ * it has brought in, and a notify handler is free to use most of the event
+ * API. Waiting for it with the event lock held would hang both sides forever.
+ *
+ * The caller must hold both the config & the event lock. Since the latter is
+ * released while we wait, any event state that was looked at prior to this
+ * call must be considered stale.
+ */
+static void wait_for_work_completion_unlocked(void)
+{
+    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_wait_for_work_completion();
+    uacpi_recursive_lock_acquire(&g_event_lock);
+}
 
 struct fixed_event {
     uacpi_u8 enable_field;
@@ -762,10 +812,24 @@ static uacpi_status gpe_block_apply_action(
     return UACPI_STATUS_OK;
 }
 
+/*
+ * This must be called with the config & event locks held if any of the events
+ * in the block might be enabled, as the latter is dropped while waiting.
+ */
 static void gpe_block_mask_safe(struct gpe_block *block)
 {
     uacpi_size i;
     struct gpe_register *reg;
+
+    /*
+     * 1. Mask the GPEs, this makes sure their state is no longer modifyable
+     *
+     * This is done for every register up front, even if none of its events
+     * are enabled at the moment: we drop the event lock while waiting below,
+     * and nobody should be able to enable an event in the meantime.
+     */
+    for (i = 0; i < block->num_registers; ++i)
+        block->registers[i].masked_mask = 0xFF;
 
     for (i = 0; i < block->num_registers; ++i) {
         reg = &block->registers[i];
@@ -774,15 +838,12 @@ static void gpe_block_mask_safe(struct gpe_block *block)
         if (!reg->current_mask)
             continue;
 
-        // 1. Mask the GPEs, this makes sure their state is no longer modifyable
-        reg->masked_mask = 0xFF;
-
         /*
          * 2. Wait for in-flight work & IRQs to finish, these might already
          *    be past the respective "if (masked)" check and therefore may
          *    try to re-enable a masked GPE.
          */
-        uacpi_kernel_wait_for_work_completion();
+        wait_for_work_completion_unlocked();
 
         /*
          * 3. Now that this GPE's state is unmodifyable and we know that
@@ -796,7 +857,7 @@ static void gpe_block_mask_safe(struct gpe_block *block)
          * 4. Wait for the last possible IRQ to finish, now that this event is
          *    disabled.
          */
-        uacpi_kernel_wait_for_work_completion();
+        wait_for_work_completion_unlocked();
     }
 }
 
@@ -1306,7 +1367,7 @@ static uacpi_status gpe_mask_unmask(
          *    be past the respective "if (masked)" check and therefore may
          *    try to re-enable a masked GPE.
          */
-        uacpi_kernel_wait_for_work_completion();
+        wait_for_work_completion_unlocked();
 
         /*
          * 3. Now that this GPE's state is unmodifyable and we know that currently
@@ -1319,7 +1380,7 @@ static uacpi_status gpe_mask_unmask(
          * 4. Wait for the last possible IRQ to finish, now that this event is
          *    disabled.
          */
-        uacpi_kernel_wait_for_work_completion();
+        wait_for_work_completion_unlocked();
 
         return UACPI_STATUS_OK;
     }
@@ -1339,6 +1400,10 @@ static uacpi_status gpe_mask_unmask(
  *
  * This makes sure we can't get an IRQ in the middle of modifying this
  * event's structures.
+ *
+ * NOTE: the event lock is dropped while we wait for the event to quiesce, so
+ *       anything other than the native handlers, which are protected by the
+ *       config lock, may change by the time this returns.
  */
 static uacpi_bool gpe_mask_safe(struct gp_event *event)
 {
@@ -1454,7 +1519,7 @@ static uacpi_status do_install_gpe_handler(
     if (uacpi_unlikely(triggering > UACPI_GPE_TRIGGERING_MAX))
         return UACPI_STATUS_INVALID_ARGUMENT;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -1476,12 +1541,18 @@ static uacpi_status do_install_gpe_handler(
 
     native_handler->cb = handler;
     native_handler->ctx = ctx;
+
+    did_mask = gpe_mask_safe(event);
+
+    /*
+     * Only look at the current handler after the event is masked, as it might
+     * get replaced while we wait, e.g. if a table that was loaded dynamically
+     * has brought in a GPE method for it.
+     */
     native_handler->previous_handler = event->any_handler;
     native_handler->previous_handler_type = event->handler_type;
     native_handler->previous_triggering = event->triggering;
     native_handler->previously_enabled = UACPI_FALSE;
-
-    did_mask = gpe_mask_safe(event);
 
     if ((event->handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
         event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) &&
@@ -1506,7 +1577,7 @@ static uacpi_status do_install_gpe_handler(
     if (did_mask)
         gpe_mask_unmask(event, UACPI_FALSE);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
@@ -1549,7 +1620,7 @@ uacpi_status uacpi_uninstall_gpe_handler(
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -1589,7 +1660,7 @@ uacpi_status uacpi_uninstall_gpe_handler(
     if (gpe_needs_polling(event))
         maybe_dispatch_gpe(gpe_device, event);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
@@ -1768,7 +1839,7 @@ static uacpi_status gpe_get_mask_unmask(
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -1779,7 +1850,7 @@ static uacpi_status gpe_get_mask_unmask(
     ret = gpe_mask_unmask(event, should_mask);
 
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
@@ -1824,7 +1895,7 @@ uacpi_status uacpi_setup_gpe_for_wake(
             return UACPI_STATUS_INVALID_ARGUMENT;
     }
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -1909,7 +1980,7 @@ out_unmask:
     if (did_mask)
         gpe_mask_unmask(event, UACPI_FALSE);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
@@ -2101,7 +2172,7 @@ uacpi_status uacpi_install_gpe_block(
     if (!is_dev)
         return UACPI_STATUS_INVALID_ARGUMENT;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -2115,7 +2186,7 @@ uacpi_status uacpi_install_gpe_block(
     );
 
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
@@ -2141,7 +2212,7 @@ uacpi_status uacpi_uninstall_gpe_block(
     if (!is_dev)
         return UACPI_STATUS_INVALID_ARGUMENT;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -2154,7 +2225,7 @@ uacpi_status uacpi_uninstall_gpe_block(
     uninstall_gpe_block(search_ctx.out_block);
 
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
@@ -2211,6 +2282,10 @@ uacpi_status uacpi_initialize_events_early(void)
         return UACPI_STATUS_OUT_OF_MEMORY;
 
     ret = uacpi_recursive_lock_init(&g_event_lock);
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    ret = uacpi_recursive_lock_init(&g_event_config_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -2276,6 +2351,7 @@ void uacpi_deinitialize_events(void)
 {
     struct gpe_interrupt_ctx *ctx, *next_ctx = g_gpe_interrupt_head;
     uacpi_size i;
+    uacpi_bool locked;
 
     if (uacpi_is_hardware_reduced())
         return;
@@ -2288,6 +2364,12 @@ void uacpi_deinitialize_events(void)
         );
         g_uacpi_rt_ctx.sci_handle_valid = UACPI_FALSE;
     }
+
+    /*
+     * The locks don't exist if we never got far enough to initialize them, but
+     * that also means there are no GPE blocks that we would need them for.
+     */
+    locked = uacpi_likely_success(event_config_lock());
 
     while (next_ctx) {
         struct gpe_block *block, *next_block;
@@ -2302,6 +2384,9 @@ void uacpi_deinitialize_events(void)
             uninstall_gpe_block(block);
         }
     }
+
+    if (locked)
+        event_config_unlock();
 
     for (i = 0; i < UACPI_FIXED_EVENT_MAX; ++i) {
         if (fixed_event_handlers[i].handler)
@@ -2319,6 +2404,7 @@ void uacpi_deinitialize_events(void)
     }
 
     uacpi_recursive_lock_deinit(&g_event_lock);
+    uacpi_recursive_lock_deinit(&g_event_config_lock);
 
     g_gpe_interrupt_head = UACPI_NULL;
 }
@@ -2339,7 +2425,7 @@ uacpi_status uacpi_install_fixed_event_handler(
     if (uacpi_is_hardware_reduced())
         return UACPI_STATUS_OK;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -2363,7 +2449,7 @@ uacpi_status uacpi_install_fixed_event_handler(
 
 out:
     uacpi_kernel_unlock_spinlock(g_fixed_event_slock, flags);
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
@@ -2382,7 +2468,7 @@ uacpi_status uacpi_uninstall_fixed_event_handler(
     if (uacpi_is_hardware_reduced())
         return UACPI_STATUS_OK;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
+    ret = event_config_lock();
     if (uacpi_unlikely_error(ret))
         return ret;
 
@@ -2407,10 +2493,10 @@ uacpi_status uacpi_uninstall_fixed_event_handler(
         goto out;
 
     // The handler might still be in use by the interrupts that are in flight
-    uacpi_kernel_wait_for_work_completion();
+    wait_for_work_completion_unlocked();
 
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    event_config_unlock();
     return ret;
 }
 
