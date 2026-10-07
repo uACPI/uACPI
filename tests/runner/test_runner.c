@@ -39,6 +39,7 @@ static const struct {
     { "check-notify-handlers-dont-deadlock", test_notify_handlers_vs_work },
     { "check-event-api-doesnt-deadlock", test_event_api_vs_work },
     { "check-gpe-handlers-work", test_gpe_handlers },
+    { "check-wake-gpes-work", test_wake_gpes },
 };
 
 static uacpi_object_type string_to_object_type(const char *str)
