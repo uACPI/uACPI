@@ -1026,6 +1026,9 @@ static thread_t work_watchdog;
 // The amount of work that is either queued or is being executed right now
 static size_t work_num_pending;
 static bool work_is_held;
+
+// The number of threads that are waiting for all of the work to complete
+static size_t work_num_waiters;
 static bool work_is_stopping;
 
 /*
@@ -1284,8 +1287,23 @@ uacpi_status uacpi_kernel_wait_for_work_completion(void)
      * longer: this is exactly what the hold is there to wait for.
      */
     work_release_locked();
+    work_num_waiters++;
     condvar_wait(&work_done, &work_mutex, work_is_done, NULL);
+    work_num_waiters--;
 
     mutex_unlock(&work_mutex);
     return UACPI_STATUS_OK;
+}
+
+void work_wait_for_waiter(void)
+{
+    bool has_waiter;
+
+    do {
+        millisecond_sleep(1);
+
+        mutex_lock(&work_mutex);
+        has_waiter = work_num_waiters != 0;
+        mutex_unlock(&work_mutex);
+    } while (!has_waiter);
 }

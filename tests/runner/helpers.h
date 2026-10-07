@@ -305,6 +305,12 @@ void work_threads_stop(void);
 void work_hold(void);
 void work_release(void);
 
+/*
+ * To be called by the work itself: don't return until someone is waiting for
+ * it to complete via uacpi_kernel_wait_for_work_completion.
+ */
+void work_wait_for_waiter(void);
+
 // Make the next call to uacpi_kernel_alloc(_zeroed) fail
 void fail_next_alloc(void);
 
