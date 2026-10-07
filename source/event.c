@@ -364,6 +364,9 @@ struct gpe_block {
     uacpi_u16 num_registers;
     uacpi_u16 num_events;
     uacpi_u16 base_idx;
+
+    // Set once the events of this block have been enabled by the finalization
+    uacpi_bool finalized;
 };
 
 struct gpe_interrupt_ctx {
@@ -1166,6 +1169,13 @@ static uacpi_status create_gpe_block(
     block->irq_ctx->gpe_head = block;
     match_ctx.block = block;
 
+    /*
+     * The events of this block are only enabled once the initialization is
+     * finalized. Make sure that happens even if it's been done before, which
+     * is the case for a block that is installed at runtime.
+     */
+    g_gpes_finalized = UACPI_FALSE;
+
     uacpi_namespace_do_for_each_child(
         device_node, do_match_gpe_methods, UACPI_NULL,
         UACPI_OBJECT_METHOD_BIT, UACPI_MAX_DEPTH_ANY,
@@ -1419,6 +1429,10 @@ static uacpi_iteration_decision do_initialize_gpe_block(
     uacpi_size i, j, count_enabled = 0;
     struct gp_event *event;
 
+    // Already taken care of by one of the previous calls
+    if (block->finalized)
+        return UACPI_ITERATION_DECISION_CONTINUE;
+
     for (i = 0; i < block->num_registers; ++i) {
         for (j = 0; j < EVENTS_PER_GPE_REGISTER; ++j) {
             event = &block->events[j + i * EVENTS_PER_GPE_REGISTER];
@@ -1446,6 +1460,8 @@ static uacpi_iteration_decision do_initialize_gpe_block(
             block->base_idx, block->base_idx + block->num_events
         );
     }
+
+    block->finalized = UACPI_TRUE;
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 

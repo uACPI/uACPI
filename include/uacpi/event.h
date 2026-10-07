@@ -202,6 +202,10 @@ uacpi_status uacpi_disable_gpe_for_wake(
  * enumerated all of the devices, executing their _PRW methods etc., and
  * marking those it wishes to use for wake by calling uacpi_setup_gpe_for_wake
  * or uacpi_mark_gpe_for_wake.
+ *
+ * This only affects the GPE blocks that haven't been finalized yet, so it's
+ * safe, and in fact required, to call this again after installing a new GPE
+ * block via uacpi_install_gpe_block.
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
     uacpi_status uacpi_finalize_gpe_initialization(void)
@@ -313,9 +317,12 @@ uacpi_status uacpi_enable_all_wake_gpes(void)
  * Install/uninstall a new GPE block, usually defined by a device in the
  * namespace with a _HID of ACPI0006.
  *
- * NOTE: neither of these may be called from an interrupt handler, nor from
- *       deferred work (see uacpi_kernel_schedule_work), which includes notify
- *       handlers, as they might have to wait for both of those to complete.
+ * NOTE:
+ * - The events of a newly installed block that have a matching AML handler
+ *   are not enabled until uacpi_finalize_gpe_initialization is called
+ * - Neither of these may be called from an interrupt handler, nor from
+ *   deferred work (see uacpi_kernel_schedule_work), which includes notify
+ *   handlers, as they might have to wait for both of those to complete
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_gpe_block(
