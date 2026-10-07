@@ -249,7 +249,37 @@ static inline void hash_table_cleanup(hash_table_t *table)
 extern bool g_expect_virtual_addresses;
 extern uacpi_phys_addr g_rsdp;
 
+/*
+ * The fake hardware that we describe via the FADT. The event registers are
+ * emulated closely enough to make it possible to trigger a fixed or a general
+ * purpose event and have it delivered, see fake_io_raise & fake_irq_raise.
+ */
+#define FAKE_SCI_IRQ 9
+
+#define FAKE_PM1A_EVT_BLK 0xDEAD
+#define FAKE_PM1_EVT_LEN 4
+
+#define FAKE_GPE0_BLK 0xD0E0
+#define FAKE_GPE0_BLK_LEN 0x20
+
+#define FAKE_GPE1_BLK 0xBEEF
+#define FAKE_GPE1_BLK_LEN 0x20
+#define FAKE_GPE1_BASE 128
+
 #ifndef UACPI_BAREBONES_MODE
+
+/*
+ * Mark the IO range as write-one-to-clear, which is how the status registers
+ * of every event behave. This is already done for the registers above, so it's
+ * only needed for the GPE blocks that are not described by the FADT.
+ */
+void fake_io_set_write_one_to_clear(uacpi_io_addr base, uacpi_size len);
+
+// Set bits of an IO register directly, bypassing the emulation
+void fake_io_raise(uacpi_io_addr addr, uint8_t bits);
+
+// Invoke the handlers that are currently installed for this IRQ
+uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq);
 
 /*
  * By default, all deferred work is executed right away by the thread that
