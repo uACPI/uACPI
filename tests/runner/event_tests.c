@@ -677,6 +677,25 @@ static void do_test_gpe_handlers(void)
         UACPI_EVENT_INFO_MASKED | UACPI_EVENT_INFO_HW_STATUS
     );
 
+    /*
+     * Nor by re-enabling all of the runtime events, which is what happens
+     * after waking up from sleep. The event is still expected to get enabled
+     * as soon as it's unmasked though.
+     */
+    CHECK_OK(uacpi_disable_all_gpes());
+    CHECK_GPE_INFO(
+        UACPI_NULL, 1,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+
+    CHECK_OK(uacpi_enable_all_runtime_gpes());
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_MASKED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
     CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 0));
     CHECK_STATUS(
         uacpi_unmask_gpe(UACPI_NULL, 0), UACPI_STATUS_INVALID_ARGUMENT
@@ -689,6 +708,9 @@ static void do_test_gpe_handlers(void)
     flush_work();
     CHECK(eval_integer("\\_GPE.CNT0") == ++cnt0);
     CHECK(log.count == 0);
+
+    // And must be enabled again once it's been handled
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
 
     /*
      * A native handler is invoked right away by the interrupt handler, and
