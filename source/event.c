@@ -1478,6 +1478,7 @@ uacpi_status uacpi_finalize_gpe_initialization(void)
 {
     uacpi_status ret;
     uacpi_bool poll_blocks = UACPI_FALSE;
+    struct gpe_interrupt_ctx *irq_ctx;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
@@ -1494,8 +1495,14 @@ uacpi_status uacpi_finalize_gpe_initialization(void)
     g_gpes_finalized = UACPI_TRUE;
 
     for_each_gpe_block(do_initialize_gpe_block, &poll_blocks);
-    if (poll_blocks)
-        detect_gpes(g_gpe_interrupt_head->gpe_head);
+    if (poll_blocks) {
+        irq_ctx = g_gpe_interrupt_head;
+
+        while (irq_ctx) {
+            detect_gpes(irq_ctx->gpe_head);
+            irq_ctx = irq_ctx->next;
+        }
+    }
 
 out:
     uacpi_recursive_lock_release(&g_event_lock);
