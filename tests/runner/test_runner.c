@@ -29,7 +29,7 @@
  * Tests that exercise the API directly instead of evaluating \MAIN, selected
  * by the value that the test case is expected to return.
  */
-static const struct {
+static const struct api_test {
     const char *name;
     void (*run)(void);
 } api_tests[] = {
@@ -42,6 +42,28 @@ static const struct {
     { "check-wake-gpes-work", test_wake_gpes },
     { "check-gpe-blocks-work", test_gpe_blocks },
 };
+
+/*
+ * API tests that don't need any AML to work with. These are selected by name,
+ * and are run against an empty DSDT.
+ */
+static const struct api_test builtin_api_tests[] = {
+    { "fixed-events", test_fixed_events },
+};
+
+static const struct api_test *find_api_test(
+    const struct api_test *tests, size_t num_tests, const char *name
+)
+{
+    size_t i;
+
+    for (i = 0; i < num_tests; ++i) {
+        if (strcmp(name, tests[i].name) == 0)
+            return &tests[i];
+    }
+
+    return NULL;
+}
 
 static uacpi_object_type string_to_object_type(const char *str)
 {
@@ -378,10 +400,11 @@ static uacpi_interrupt_ret handle_gpe(
     return UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
 }
 
+// A null 'dsdt_path' stands for an empty DSDT
 static void run_test(
     const char *dsdt_path, const vector_t *ssdt_paths,
-    uacpi_object_type expected_type, const char *expected_value,
-    bool dump_namespace, bool run_pts3
+    const struct api_test *api_test, uacpi_object_type expected_type,
+    const char *expected_value, bool dump_namespace, bool run_pts3
 )
 {
     static uint8_t early_table_buf[4096];
@@ -391,7 +414,6 @@ static void run_test(
     uacpi_table tbl;
     bool is_test_mode;
     uacpi_object *ret = NULL;
-    size_t i;
 
     g_rsdp = (uacpi_phys_addr)((uintptr_t)&rsdp);
 
@@ -454,7 +476,8 @@ static void run_test(
     st = uacpi_enable_host_interface(UACPI_HOST_INTERFACE_MODULE_DEVICE);
     ensure_ok_status(st);
 
-    is_test_mode = expected_type != UACPI_OBJECT_UNINITIALIZED;
+    is_test_mode = api_test != NULL ||
+                   expected_type != UACPI_OBJECT_UNINITIALIZED;
     if (is_test_mode) {
         st = uacpi_table_install(runner_id_table, NULL);
         ensure_ok_status(st);
@@ -513,11 +536,8 @@ static void run_test(
     if (!is_test_mode)
         goto done;
 
-    for (i = 0; i < UACPI_ARRAY_SIZE(api_tests); ++i) {
-        if (strcmp(expected_value, api_tests[i].name) != 0)
-            continue;
-
-        api_tests[i].run();
+    if (api_test != NULL) {
+        api_test->run();
         goto done;
     }
 
@@ -559,7 +579,8 @@ static uacpi_log_level log_level_from_string(const char *arg)
 
 static arg_spec_t DSDT_PATH_ARG = ARG_POS(
     "dsdt-path-or-keyword",
-    "path to the DSDT to run or \"resource-tests\" to run the resource tests"
+    "path to the DSDT to run, \"resource-tests\" to run the resource tests, "
+    "or the name of a builtin API test to run"
 );
 
 static arg_spec_t EXPECT_ARG = ARG_LIST(
@@ -583,6 +604,9 @@ static arg_spec_t LOG_LEVEL_ARG = ARG_PARAM(
     "log-level", 'l',
     "log level to set, one of: debug, trace, info, warning, error"
 );
+static arg_spec_t LIST_BUILTIN_ARG = ARG_FLAG(
+    "list-builtin", 'b', "list the builtin API tests, one per line, and exit"
+);
 static arg_spec_t HELP_ARG = ARG_HELP(
     "help", 'h', "Display this menu and exit"
 );
@@ -598,6 +622,7 @@ static arg_spec_t *const OPTION_ARGS[] = {
     &RUN_PTS3_ARG,
     &WHILE_LOOP_TIMEOUT_ARG,
     &LOG_LEVEL_ARG,
+    &LIST_BUILTIN_ARG,
     &HELP_ARG,
 };
 
@@ -611,12 +636,20 @@ static const arg_parser_t PARSER = {
 int main(int argc, char *argv[])
 {
     const char *dsdt_path_or_keyword;
+    const struct api_test *api_test;
     const char *expected_value = NULL;
     uacpi_object_type expected_type = UACPI_OBJECT_UNINITIALIZED;
     bool dump_namespace, run_pts3;
     uacpi_log_level log_level;
+    size_t i;
 
     parse_args(&PARSER, argc, argv);
+
+    if (is_set(&LIST_BUILTIN_ARG)) {
+        for (i = 0; i < UACPI_ARRAY_SIZE(builtin_api_tests); ++i)
+            puts(builtin_api_tests[i].name);
+        return 0;
+    }
 
     uacpi_context_set_loop_timeout(get_uint_or(&WHILE_LOOP_TIMEOUT_ARG, 3));
 
@@ -626,12 +659,22 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    if (is_set(&EXPECT_ARG)) {
+    api_test = find_api_test(
+        builtin_api_tests, UACPI_ARRAY_SIZE(builtin_api_tests),
+        dsdt_path_or_keyword
+    );
+    if (api_test != NULL) {
+        dsdt_path_or_keyword = NULL;
+    } else if (is_set(&EXPECT_ARG)) {
         if (EXPECT_ARG.values.count != 2)
             error("bad --expect format");
 
         expected_type = string_to_object_type(EXPECT_ARG.values.blobs[0].data);
         expected_value = EXPECT_ARG.values.blobs[1].data;
+
+        api_test = find_api_test(
+            api_tests, UACPI_ARRAY_SIZE(api_tests), expected_value
+        );
     }
 
     dump_namespace = is_set(&ENUMERATE_NAMESPACE_ARG);
@@ -645,8 +688,8 @@ int main(int argc, char *argv[])
     uacpi_context_set_log_level(log_level);
 
     run_test(
-        dsdt_path_or_keyword, &EXTRA_TABLES_ARG.values, expected_type,
-        expected_value, dump_namespace, run_pts3
+        dsdt_path_or_keyword, &EXTRA_TABLES_ARG.values, api_test,
+        expected_type, expected_value, dump_namespace, run_pts3
     );
 
     return 0;

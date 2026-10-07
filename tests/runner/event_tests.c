@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <uacpi/acpi.h>
 #include <uacpi/event.h>
 #include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
@@ -1223,4 +1224,142 @@ void test_gpe_blocks(void)
 
     CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_use_gpe_block));
     CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+}
+
+#define FIXED_INFO_ENABLED (                                          \
+    UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |         \
+    UACPI_EVENT_INFO_HW_ENABLED                                       \
+)
+
+#define CHECK_FIXED_INFO(event, expected)                                 \
+    do {                                                                  \
+        uacpi_event_info check_info = 0;                                  \
+                                                                          \
+        CHECK_OK(uacpi_fixed_event_info(event, &check_info));             \
+        if ((unsigned)check_info != (unsigned)(expected)) {               \
+            fail(                                                         \
+                "fixed event %d info at line %d is 0x%02X, expected "     \
+                "0x%02X", (int)(event), __LINE__, (unsigned)check_info,   \
+                (unsigned)(expected)                                      \
+            );                                                            \
+        }                                                                 \
+    } while (0)
+
+typedef struct {
+    size_t count;
+} fixed_log_t;
+
+static uacpi_interrupt_ret log_fixed_event(uacpi_handle ctx)
+{
+    fixed_log_t *log = ctx;
+
+    log->count++;
+    return UACPI_INTERRUPT_HANDLED;
+}
+
+static void fixed_event_set_status(uacpi_u16 mask)
+{
+    fake_io_raise(FAKE_PM1A_EVT_BLK, (uint8_t)(mask & 0xFF));
+    fake_io_raise(FAKE_PM1A_EVT_BLK + 1, (uint8_t)(mask >> 8));
+}
+
+void test_fixed_events(void)
+{
+    fixed_log_t power = { 0 }, rtc = { 0 };
+
+    CHECK_STATUS(
+        uacpi_install_fixed_event_handler(
+            UACPI_FIXED_EVENT_MAX + 1, log_fixed_event, UACPI_NULL
+        ), UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_STATUS(
+        uacpi_enable_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON),
+        UACPI_STATUS_NO_HANDLER
+    );
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_POWER_BUTTON, 0);
+
+    // An event is enabled as soon as it has a handler
+    CHECK_OK(uacpi_install_fixed_event_handler(
+        UACPI_FIXED_EVENT_POWER_BUTTON, log_fixed_event, &power
+    ));
+    CHECK_STATUS(
+        uacpi_install_fixed_event_handler(
+            UACPI_FIXED_EVENT_POWER_BUTTON, log_fixed_event, &power
+        ), UACPI_STATUS_ALREADY_EXISTS
+    );
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_POWER_BUTTON, FIXED_INFO_ENABLED);
+
+    fixed_event_set_status(ACPI_PM1_STS_PWRBTN_STS_MASK);
+    CHECK_FIXED_INFO(
+        UACPI_FIXED_EVENT_POWER_BUTTON,
+        FIXED_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(power.count == 1);
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_POWER_BUTTON, FIXED_INFO_ENABLED);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    // An event that is not enabled is left alone
+    fixed_event_set_status(ACPI_PM1_STS_SLPBTN_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK_FIXED_INFO(
+        UACPI_FIXED_EVENT_SLEEP_BUTTON, UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK_OK(uacpi_clear_fixed_event(UACPI_FIXED_EVENT_SLEEP_BUTTON));
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_SLEEP_BUTTON, 0);
+
+    CHECK_OK(uacpi_disable_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON));
+    CHECK_FIXED_INFO(
+        UACPI_FIXED_EVENT_POWER_BUTTON, UACPI_EVENT_INFO_HAS_HANDLER
+    );
+
+    fixed_event_set_status(ACPI_PM1_STS_PWRBTN_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(power.count == 1);
+
+    CHECK_OK(uacpi_enable_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(power.count == 2);
+
+    // The very last fixed event
+    CHECK_OK(uacpi_install_fixed_event_handler(
+        UACPI_FIXED_EVENT_RTC, log_fixed_event, &rtc
+    ));
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_RTC, FIXED_INFO_ENABLED);
+
+    fixed_event_set_status(ACPI_PM1_STS_RTC_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(rtc.count == 1);
+    CHECK(power.count == 2);
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_RTC, FIXED_INFO_ENABLED);
+
+    // More than one event may be pending at once
+    fixed_event_set_status(
+        ACPI_PM1_STS_PWRBTN_STS_MASK | ACPI_PM1_STS_RTC_STS_MASK
+    );
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(power.count == 3);
+    CHECK(rtc.count == 2);
+
+    // An event is disabled along with the removal of its handler
+    CHECK_OK(uacpi_uninstall_fixed_event_handler(
+        UACPI_FIXED_EVENT_POWER_BUTTON
+    ));
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_POWER_BUTTON, 0);
+    CHECK_STATUS(
+        uacpi_enable_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON),
+        UACPI_STATUS_NO_HANDLER
+    );
+
+    fixed_event_set_status(ACPI_PM1_STS_PWRBTN_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(power.count == 3);
+    CHECK_OK(uacpi_clear_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON));
+
+    /*
+     * The handler of the RTC is left in place on purpose, it's expected to
+     * be taken care of when uACPI is deinitialized.
+     */
 }
