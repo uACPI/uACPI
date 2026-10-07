@@ -367,6 +367,14 @@ struct gp_event {
     };
 
     struct gpe_register *reg;
+
+    /*
+     * What the deferred work for this event is scheduled with. This is done
+     * by the interrupt handler, which is no place to be allocating anything,
+     * so an event gets one as soon as it's given a handler that needs it.
+     */
+    uacpi_handle work_item;
+
     uacpi_u16 idx;
 
     // "reference count" of the number of times this event has been enabled
@@ -376,6 +384,13 @@ struct gp_event {
     uacpi_u8 triggering : 1;
     uacpi_u8 wake : 1;
     uacpi_u8 block_interrupts : 1;
+
+    /*
+     * Set for as long as the work item is in use, from the moment the event
+     * is dispatched and until it's restored. Protected by the GPE state
+     * spinlock, which is why this is not a part of the bitfield above.
+     */
+    uacpi_bool work_pending;
 };
 
 struct gpe_register {
@@ -529,10 +544,25 @@ static uacpi_status restore_gpe(struct gp_event *event)
     return ret;
 }
 
+static void gpe_work_done(struct gp_event *event)
+{
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    event->work_pending = UACPI_FALSE;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+}
+
 static void async_restore_gpe(uacpi_handle opaque)
 {
     uacpi_status ret;
     struct gp_event *event = opaque;
+
+    /*
+     * This is the last thing that we need the work item for, so the event is
+     * free to make use of it again as soon as it's enabled below.
+     */
+    gpe_work_done(event);
 
     ret = restore_gpe(event);
     if (uacpi_unlikely_error(ret)) {
@@ -608,15 +638,14 @@ out_no_unlock:
     /*
      * We schedule the work as NOTIFICATION to make sure all other notifications
      * finish before this GPE is re-enabled.
+     *
+     * The work item is the one that we're being executed as: it's ours to
+     * reuse now that we were invoked, and it's not needed for anything else
+     * until the event is restored.
      */
-    ret = uacpi_kernel_schedule_work(
-        UACPI_WORK_NOTIFICATION, async_restore_gpe, event
+    uacpi_kernel_schedule_work(
+        UACPI_WORK_NOTIFICATION, event->work_item, async_restore_gpe, event
     );
-    if (uacpi_unlikely_error(ret)) {
-        uacpi_error("unable to schedule GPE(%02X) restore: %s",
-                    event->idx, uacpi_status_to_string(ret));
-        async_restore_gpe(event);
-    }
 }
 
 /*
@@ -686,7 +715,8 @@ static uacpi_interrupt_ret dispatch_gpe(
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
     uacpi_u8 handler_type;
-    uacpi_bool is_ours;
+    uacpi_bool is_ours, is_pending;
+    uacpi_cpu_flags flags;
 
     ret = gpe_claim(event, &handler_type, &is_ours);
     if (uacpi_unlikely_error(ret)) {
@@ -712,11 +742,37 @@ static uacpi_interrupt_ret dispatch_gpe(
 
     event->block_interrupts = UACPI_TRUE;
 
+    if (handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
+        handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) {
+        /*
+         * A work item must never be scheduled while it's still pending. The
+         * event stays disabled until it's restored, so this only happens if
+         * it was enabled behind our back while still being handled, e.g. via
+         * uacpi_resume_gpe or uacpi_enable_all_runtime_gpes.
+         *
+         * Leave it both disabled & pending in that case: it fires again as
+         * soon as it's restored, which is when the work item is free.
+         */
+        flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+        is_pending = event->work_pending;
+        event->work_pending = UACPI_TRUE;
+        uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+        if (uacpi_unlikely(is_pending))
+            return UACPI_INTERRUPT_HANDLED;
+    }
+
     if (event->triggering == UACPI_GPE_TRIGGERING_EDGE) {
         ret = clear_gpe(event);
         if (uacpi_unlikely_error(ret)) {
             uacpi_error("unable to clear GPE(%02X): %s",
                         event->idx, uacpi_status_to_string(ret));
+
+            // No work was scheduled, see above
+            if (handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
+                handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY)
+                gpe_work_done(event);
+
             set_gpe_state(event, GPE_STATE_ENABLED_CONDITIONALLY);
             return int_ret;
         }
@@ -739,15 +795,10 @@ static uacpi_interrupt_ret dispatch_gpe(
 
     case GPE_HANDLER_TYPE_AML_HANDLER:
     case GPE_HANDLER_TYPE_IMPLICIT_NOTIFY:
-        ret = uacpi_kernel_schedule_work(
-            UACPI_WORK_GPE_EXECUTION, async_run_gpe_handler, event
+        uacpi_kernel_schedule_work(
+            UACPI_WORK_GPE_EXECUTION, event->work_item, async_run_gpe_handler,
+            event
         );
-        if (uacpi_unlikely_error(ret)) {
-            uacpi_warn(
-                "unable to schedule GPE(%02X) for execution: %s",
-                event->idx, uacpi_status_to_string(ret)
-            );
-        }
         break;
 
     default:
@@ -909,6 +960,18 @@ static void unlink_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
     }
 }
 
+static uacpi_status gpe_ensure_work_item(struct gp_event *event)
+{
+    if (event->work_item != UACPI_NULL)
+        return UACPI_STATUS_OK;
+
+    event->work_item = uacpi_kernel_create_work_item();
+    if (uacpi_unlikely(event->work_item == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    return UACPI_STATUS_OK;
+}
+
 static void gpe_release_implicit_notify_handlers(struct gp_event *event)
 {
     struct gpe_implicit_notify_handler *handler, *next_handler;
@@ -1043,6 +1106,9 @@ static void free_gpe_block(struct gpe_block *block)
             default:
                 break;
             }
+
+            if (event->work_item != UACPI_NULL)
+                uacpi_kernel_free_work_item(event->work_item);
         }
 
     }
@@ -1199,6 +1265,19 @@ static uacpi_iteration_decision do_match_gpe_methods(
     event = gpe_from_block(ctx->block, idx);
     if (event == UACPI_NULL)
         return UACPI_ITERATION_DECISION_CONTINUE;
+
+    if (event->handler_type == GPE_HANDLER_TYPE_NONE ||
+        event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) {
+        // The method is executed as deferred work, make sure that's possible
+        ret = gpe_ensure_work_item(event);
+        if (uacpi_unlikely_error(ret)) {
+            uacpi_warn(
+                "unable to assign GPE(%02X) to %.4s: %s", (uacpi_u32)idx,
+                node->name.text, uacpi_status_to_string(ret)
+            );
+            return UACPI_ITERATION_DECISION_CONTINUE;
+        }
+    }
 
     switch (event->handler_type) {
     /*
@@ -2164,6 +2243,11 @@ uacpi_status uacpi_setup_gpe_for_wake(
     if (wake_device != UACPI_NULL) {
         switch (event->handler_type) {
         case GPE_HANDLER_TYPE_NONE:
+            // The device is notified via deferred work
+            ret = gpe_ensure_work_item(event);
+            if (uacpi_unlikely_error(ret))
+                goto out_unmask;
+
             event->handler_type = GPE_HANDLER_TYPE_IMPLICIT_NOTIFY;
             event->triggering = UACPI_GPE_TRIGGERING_LEVEL;
             break;

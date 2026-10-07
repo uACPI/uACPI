@@ -33,12 +33,20 @@ struct notification_ctx {
     uacpi_namespace_node *node;
     uacpi_u64 value;
     uacpi_object *node_object;
+    uacpi_handle work_item;
 };
 
 static void free_notification_ctx(struct notification_ctx *ctx)
 {
     uacpi_namespace_node_release_object(ctx->node_object);
     uacpi_namespace_node_unref(ctx->node);
+
+    /*
+     * This is the work item that we're being executed as. Nobody is supposed
+     * to be looking at it anymore now that the handler was invoked.
+     */
+    uacpi_kernel_free_work_item(ctx->work_item);
+
     uacpi_free(ctx, sizeof(*ctx));
 }
 
@@ -114,6 +122,13 @@ uacpi_status uacpi_notify_all(uacpi_namespace_node *node, uacpi_u64 value)
         goto out;
     }
 
+    ctx->work_item = uacpi_kernel_create_work_item();
+    if (uacpi_unlikely(ctx->work_item == UACPI_NULL)) {
+        uacpi_free(ctx, sizeof(*ctx));
+        ret = UACPI_STATUS_OUT_OF_MEMORY;
+        goto out;
+    }
+
     ctx->node = node;
     // In case this node goes out of scope
     uacpi_shareable_ref(node);
@@ -122,12 +137,9 @@ uacpi_status uacpi_notify_all(uacpi_namespace_node *node, uacpi_u64 value)
     ctx->node_object = uacpi_namespace_node_get_object(node);
     uacpi_object_ref(ctx->node_object);
 
-    ret = uacpi_kernel_schedule_work(UACPI_WORK_NOTIFICATION, do_notify, ctx);
-    if (uacpi_unlikely_error(ret)) {
-        uacpi_warn("unable to schedule notification work: %s",
-                   uacpi_status_to_string(ret));
-        free_notification_ctx(ctx);
-    }
+    uacpi_kernel_schedule_work(
+        UACPI_WORK_NOTIFICATION, ctx->work_item, do_notify, ctx
+    );
 
 out:
     uacpi_release_native_mutex(notify_mutex);

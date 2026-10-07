@@ -370,17 +370,45 @@ typedef enum uacpi_work_type {
 typedef void (*uacpi_work_handler)(uacpi_handle);
 
 /**
- * Schedules deferred work for execution.
- * Might be invoked from an interrupt context.
+ * Create/free an opaque kernel work item object, which is what a piece of
+ * deferred work is scheduled with, see uacpi_kernel_schedule_work.
+ *
+ * A work item is always created ahead of the time that it's needed, so that
+ * scheduling it doesn't require any memory to be allocated. It might end up
+ * never being scheduled at all.
+ *
+ * Both of these might be invoked by the deferred work itself, but are never
+ * used in interrupt contexts, unless that's where the kernel chooses to
+ * execute said work.
  */
-uacpi_status uacpi_kernel_schedule_work(
-    uacpi_work_type, uacpi_work_handler, uacpi_handle ctx
+uacpi_handle uacpi_kernel_create_work_item(void);
+void uacpi_kernel_free_work_item(uacpi_handle);
+
+/**
+ * Schedules 'handler' to be invoked with 'ctx' as its only argument.
+ * Might be invoked from an interrupt context.
+ *
+ * 'work_item' is there for the kernel to keep track of this work with, it's
+ * never scheduled while still pending, that is before the handler that it was
+ * last scheduled with has been invoked.
+ *
+ * Once that happens the work item is fair game: the handler is allowed to
+ * schedule it again, possibly as a different type of work, as well as to free
+ * it. The kernel therefore must not access a work item after it has invoked
+ * the handler, which means that both 'handler' and 'ctx' have to be taken out
+ * of it, and any of its state updated, before the handler is invoked and not
+ * after it returns.
+ */
+void uacpi_kernel_schedule_work(
+    uacpi_work_type, uacpi_handle work_item, uacpi_work_handler handler,
+    uacpi_handle ctx
 );
 
 /**
  * Waits for two types of work to finish:
  * 1. All in-flight interrupts installed via uacpi_kernel_install_interrupt_handler
- * 2. All work scheduled via uacpi_kernel_schedule_work
+ * 2. All work scheduled via uacpi_kernel_schedule_work, including whatever
+ *    was scheduled by the work that is being waited for
  *
  * Note that the waits must be done in this order specifically.
  */

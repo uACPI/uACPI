@@ -353,6 +353,9 @@ void work_wait_for_waiter(void);
 // Make the next call to uacpi_kernel_alloc(_zeroed) fail
 void fail_next_alloc(void);
 
+// Make the next call to uacpi_kernel_create_work_item fail
+void fail_next_work_item(void);
+
 // Free whatever the kernel interface uses to track mappings & allocations
 void interface_cleanup(void);
 

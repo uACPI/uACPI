@@ -988,10 +988,16 @@ void uacpi_kernel_unlock_spinlock(uacpi_handle handle, uacpi_cpu_flags flags)
 
 #define WORK_TIMEOUT_SECONDS 30
 
+/*
+ * This is what a work item is as far as we're concerned. It's only ever
+ * touched up until the point where the handler is invoked, as it's not ours
+ * to look at anymore after that.
+ */
 typedef struct work {
     struct work *next;
     uacpi_work_handler handler;
     uacpi_handle ctx;
+    bool is_pending;
 } work_t;
 
 typedef struct {
@@ -1018,6 +1024,9 @@ static mutex_t work_mutex;
 static condvar_t work_done;
 static condvar_t work_watchdog_stop;
 static thread_t work_watchdog;
+
+// The interrupt thread only ever handles one interrupt at a time
+static work_t irq_work;
 
 static condvar_t irq_park_changed;
 static uacpi_io_addr irq_park_addr;
@@ -1061,6 +1070,8 @@ static void work_thread(void *opaque)
 {
     work_queue_t *queue = opaque;
     work_t *work;
+    uacpi_work_handler handler;
+    uacpi_handle ctx;
 
     mutex_lock(&work_mutex);
     queue->thread_id = get_thread_id();
@@ -1076,10 +1087,14 @@ static void work_thread(void *opaque)
 
         work = queue->head;
         queue->head = work->next;
+
+        handler = work->handler;
+        ctx = work->ctx;
+        work->is_pending = false;
+
         mutex_unlock(&work_mutex);
 
-        work->handler(work->ctx);
-        free(work);
+        handler(ctx);
 
         mutex_lock(&work_mutex);
         if (--work_num_pending == 0)
@@ -1227,17 +1242,21 @@ void work_release(void)
 }
 
 static void work_enqueue(
-    size_t queue_idx, uacpi_work_handler handler, uacpi_handle ctx
+    size_t queue_idx, work_t *work, uacpi_work_handler handler,
+    uacpi_handle ctx
 )
 {
     work_queue_t *queue = &work_queues[queue_idx];
-    work_t *work;
-
-    work = do_calloc(1, sizeof(*work));
-    work->handler = handler;
-    work->ctx = ctx;
 
     mutex_lock(&work_mutex);
+
+    if (work->is_pending)
+        work_fatal("a work item was scheduled while it was still pending");
+
+    work->next = NULL;
+    work->handler = handler;
+    work->ctx = ctx;
+    work->is_pending = true;
 
     if (queue->head == NULL)
         queue->head = work;
@@ -1251,20 +1270,63 @@ static void work_enqueue(
     mutex_unlock(&work_mutex);
 }
 
-uacpi_status uacpi_kernel_schedule_work(
-    uacpi_work_type type, uacpi_work_handler handler, uacpi_handle ctx
+static uacpi_u32 work_item_fail_next;
+
+void fail_next_work_item(void)
+{
+    uacpi_atomic_store32(&work_item_fail_next, 1);
+}
+
+uacpi_handle uacpi_kernel_create_work_item(void)
+{
+    uacpi_u32 expected = 1;
+
+    if (uacpi_atomic_cmpxchg32(&work_item_fail_next, &expected, 0))
+        return NULL;
+
+    return do_calloc(1, sizeof(work_t));
+}
+
+void uacpi_kernel_free_work_item(uacpi_handle handle)
+{
+    work_t *work = handle;
+    bool is_pending;
+
+    if (interface_is_threaded)
+        mutex_lock(&work_mutex);
+
+    is_pending = work->is_pending;
+
+    if (interface_is_threaded)
+        mutex_unlock(&work_mutex);
+
+    if (is_pending)
+        work_fatal("a work item was freed while it was still pending");
+
+    free(work);
+}
+
+void uacpi_kernel_schedule_work(
+    uacpi_work_type type, uacpi_handle work_item, uacpi_work_handler handler,
+    uacpi_handle ctx
 )
 {
+    if (work_item == NULL)
+        work_fatal("attempted to schedule work without a work item");
+    if (type != UACPI_WORK_GPE_EXECUTION && type != UACPI_WORK_NOTIFICATION)
+        work_fatal("attempted to schedule work of an invalid type");
+
     if (!interface_is_threaded) {
+        /*
+         * The work item has nothing to keep track of in this case. Not
+         * touching it is also the only safe thing to do: the handler is
+         * allowed to free it, or to schedule it again.
+         */
         handler(ctx);
-        return UACPI_STATUS_OK;
+        return;
     }
 
-    if (type != UACPI_WORK_GPE_EXECUTION && type != UACPI_WORK_NOTIFICATION)
-        return UACPI_STATUS_INVALID_ARGUMENT;
-
-    work_enqueue(type, handler, ctx);
-    return UACPI_STATUS_OK;
+    work_enqueue(type, work_item, handler, ctx);
 }
 
 static bool irq_is_running(void *opaque)
@@ -1359,7 +1421,7 @@ bool fake_irq_raise_parked(uacpi_u32 irq, uacpi_io_addr park_addr)
     mutex_unlock(&work_mutex);
 
     work_enqueue(
-        WORK_QUEUE_INTERRUPT, irq_raise_on_this_thread,
+        WORK_QUEUE_INTERRUPT, &irq_work, irq_raise_on_this_thread,
         (uacpi_handle)((uintptr_t)irq)
     );
 
