@@ -249,6 +249,34 @@ static inline void hash_table_cleanup(hash_table_t *table)
 extern bool g_expect_virtual_addresses;
 extern uacpi_phys_addr g_rsdp;
 
+#ifndef UACPI_BAREBONES_MODE
+
+/*
+ * By default, all deferred work is executed right away by the thread that
+ * has scheduled it. This switches to executing it on dedicated threads
+ * instead, same as a real kernel would do, until the threads are stopped.
+ *
+ * A test that doesn't finish in a reasonable time after starting the threads is
+ * considered to have deadlocked, which terminates the runner.
+ *
+ * Not every toolchain that we're built with is able to produce a working
+ * program that has more than one thread. This is where a test ends if that's
+ * the case, with everything up to this point considered to be all there is.
+ */
+void work_threads_start(void);
+void work_threads_stop(void);
+
+/*
+ * Don't execute any work until work_release is called, or until someone waits
+ * for it to complete via uacpi_kernel_wait_for_work_completion. The latter
+ * makes it possible to reliably have work in flight while uACPI is waiting for
+ * it. Only valid while the work threads are running.
+ */
+void work_hold(void);
+void work_release(void);
+
+#endif // !UACPI_BAREBONES_MODE
+
 UACPI_PACKED(struct full_xsdt {
     struct acpi_sdt_hdr hdr;
     struct acpi_fadt *fadt;

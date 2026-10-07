@@ -18,6 +18,26 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address)
     return UACPI_STATUS_OK;
 }
 
+/*
+ * Protects the state below that might be accessed by multiple threads at the
+ * same time. It's only taken, as well as initialized, if the work threads are
+ * running: this is the only way to end up with more than one thread.
+ */
+static mutex_t interface_mutex;
+static bool interface_is_threaded;
+
+static void interface_lock(void)
+{
+    if (interface_is_threaded)
+        mutex_lock(&interface_mutex);
+}
+
+static void interface_unlock(void)
+{
+    if (interface_is_threaded)
+        mutex_unlock(&interface_mutex);
+}
+
 static uint8_t *io_space;
 
 #ifdef UACPI_KERNEL_INITIALIZATION
@@ -335,7 +355,7 @@ typedef struct {
 static hash_table_t virt_locations;
 static hash_table_t phys_locations;
 
-void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
+static void *do_map(uacpi_phys_addr addr, uacpi_size len)
 {
     if (!g_expect_virtual_addresses) {
         phys_location_t *phys_location = HASH_TABLE_FIND(
@@ -388,7 +408,7 @@ void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
     return (void*)((uintptr_t)addr);
 }
 
-void uacpi_kernel_unmap(void *addr, uacpi_size len)
+static void do_unmap(void *addr, uacpi_size len)
 {
     virt_location_t *virt_location = HASH_TABLE_FIND(
         &virt_locations, (uintptr_t)addr, virt_location_t, node
@@ -423,6 +443,24 @@ void uacpi_kernel_unmap(void *addr, uacpi_size len)
 
     free((void*)((uintptr_t)virt_location->node.key));
     HASH_TABLE_REMOVE(&virt_locations, virt_location, virt_location_t, node);
+}
+
+void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
+{
+    void *virt;
+
+    interface_lock();
+    virt = do_map(addr, len);
+    interface_unlock();
+
+    return virt;
+}
+
+void uacpi_kernel_unmap(void *addr, uacpi_size len)
+{
+    interface_lock();
+    do_unmap(addr, len);
+    interface_unlock();
 }
 
 #ifdef UACPI_SIZED_FREES
@@ -472,33 +510,45 @@ void *uacpi_kernel_alloc(uacpi_size size)
     if (ret == NULL)
         return ret;
 
+    interface_lock();
     allocation = HASH_TABLE_GET_OR_ADD(
         &allocations, (uintptr_t)ret, allocation_t, node
     );
     allocation->size = size;
+    interface_unlock();
+
     return ret;
 }
 
 void uacpi_kernel_free(void *mem, uacpi_size size_hint)
 {
     allocation_t *allocation;
+    bool is_known = false;
+    size_t size = 0;
 
     if (mem == NULL)
         return;
 
+    interface_lock();
     allocation = HASH_TABLE_FIND(
         &allocations, (uintptr_t)mem, allocation_t, node
     );
-    if (!allocation)
+    if (allocation != NULL) {
+        is_known = true;
+        size = allocation->size;
+        HASH_TABLE_REMOVE(&allocations, allocation, allocation_t, node);
+    }
+    interface_unlock();
+
+    if (!is_known)
         error("unable to find heap allocation %p\n", mem);
 
-    if (allocation->size != size_hint)
+    if (size != size_hint)
         error(
             "invalid free size: originally allocated %zu bytes, freeing as %zu",
-            allocation->size, size_hint
+            size, size_hint
         );
 
-    HASH_TABLE_REMOVE(&allocations, allocation, allocation_t, node);
     free(mem);
 }
 
@@ -770,17 +820,297 @@ void uacpi_kernel_unlock_spinlock(uacpi_handle handle, uacpi_cpu_flags flags)
     uacpi_kernel_release_mutex(handle);
 }
 
+#define WORK_TIMEOUT_SECONDS 30
+
+typedef struct work {
+    struct work *next;
+    uacpi_work_handler handler;
+    uacpi_handle ctx;
+} work_t;
+
+typedef struct {
+    thread_t thread;
+    void *thread_id;
+    condvar_t has_work;
+    work_t *head;
+    work_t *tail;
+} work_queue_t;
+
+/*
+ * One thread per work type, indexed by uacpi_work_type. This is what most
+ * kernels do, and what makes it possible for a GPE handler to execute at the
+ * same time as a notify handler.
+ */
+static work_queue_t work_queues[UACPI_WORK_NOTIFICATION + 1];
+
+static mutex_t work_mutex;
+static condvar_t work_done;
+static condvar_t work_watchdog_stop;
+static thread_t work_watchdog;
+
+// The amount of work that is either queued or is being executed right now
+static size_t work_num_pending;
+static bool work_is_held;
+static bool work_is_stopping;
+
+/*
+ * We can't use error() once the work threads are running: it resets the state
+ * of uACPI, which is not possible to do while another thread is inside of it.
+ */
+NORETURN static void work_fatal(const char *reason)
+{
+    fflush(stdout);
+    fprintf(stderr, "unexpected error: %s\n", reason);
+    exit(1);
+}
+
+static bool work_queue_should_wake(void *opaque)
+{
+    work_queue_t *queue = opaque;
+
+    return work_is_stopping || (!work_is_held && queue->head != NULL);
+}
+
+static void work_thread(void *opaque)
+{
+    work_queue_t *queue = opaque;
+    work_t *work;
+
+    mutex_lock(&work_mutex);
+    queue->thread_id = get_thread_id();
+
+    for (;;) {
+        condvar_wait(
+            &queue->has_work, &work_mutex, work_queue_should_wake, queue
+        );
+
+        // We're only asked to stop after all of the work is done
+        if (work_is_stopping)
+            break;
+
+        work = queue->head;
+        queue->head = work->next;
+        mutex_unlock(&work_mutex);
+
+        work->handler(work->ctx);
+        free(work);
+
+        mutex_lock(&work_mutex);
+        if (--work_num_pending == 0)
+            condvar_broadcast(&work_done);
+    }
+
+    mutex_unlock(&work_mutex);
+}
+
+static bool work_watchdog_should_stop(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return work_is_stopping;
+}
+
+static void work_watchdog_thread(void *opaque)
+{
+    bool stopped;
+
+    UACPI_UNUSED(opaque);
+
+    mutex_lock(&work_mutex);
+    stopped = condvar_wait_timeout(
+        &work_watchdog_stop, &work_mutex, work_watchdog_should_stop, NULL,
+        WORK_TIMEOUT_SECONDS * NANOSECONDS_PER_SECOND
+    );
+    mutex_unlock(&work_mutex);
+
+    if (!stopped) {
+        work_fatal(
+            "the work threads were not stopped in time, the test has most "
+            "likely deadlocked"
+        );
+    }
+}
+
+/*
+ * The C library of OpenWatcom is of no use to a program with more than one
+ * thread, at least not on Linux: a call to malloc() that is made by a few
+ * threads at once is enough to corrupt the heap, and pthread_join() is prone
+ * to never coming back.
+ */
+static bool work_threads_supported(void)
+{
+#ifdef __WATCOMC__
+    return false;
+#else
+    return true;
+#endif
+}
+
+void work_threads_start(void)
+{
+    size_t i;
+
+    if (interface_is_threaded)
+        error("the work threads are already running");
+
+    if (!work_threads_supported()) {
+        printf("no usable threads here, skipping the rest of the test\n");
+        exit(0);
+    }
+
+    mutex_init(&interface_mutex);
+    mutex_init(&work_mutex);
+    condvar_init(&work_done);
+    condvar_init(&work_watchdog_stop);
+
+    work_is_held = false;
+    work_is_stopping = false;
+    interface_is_threaded = true;
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i) {
+        work_queue_t *queue = &work_queues[i];
+
+        condvar_init(&queue->has_work);
+        thread_create(&queue->thread, work_thread, queue);
+    }
+
+    thread_create(&work_watchdog, work_watchdog_thread, NULL);
+}
+
+static void work_release_locked(void)
+{
+    size_t i;
+
+    work_is_held = false;
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i)
+        condvar_signal(&work_queues[i].has_work);
+}
+
+void work_threads_stop(void)
+{
+    size_t i;
+
+    if (!interface_is_threaded)
+        error("the work threads are not running");
+
+    uacpi_kernel_wait_for_work_completion();
+
+    mutex_lock(&work_mutex);
+    work_is_stopping = true;
+    work_release_locked();
+    condvar_signal(&work_watchdog_stop);
+    mutex_unlock(&work_mutex);
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i) {
+        work_queue_t *queue = &work_queues[i];
+
+        thread_join(&queue->thread);
+        condvar_free(&queue->has_work);
+        queue->thread_id = NULL;
+    }
+    thread_join(&work_watchdog);
+
+    interface_is_threaded = false;
+
+    condvar_free(&work_watchdog_stop);
+    condvar_free(&work_done);
+    mutex_free(&work_mutex);
+    mutex_free(&interface_mutex);
+}
+
+void work_hold(void)
+{
+    if (!interface_is_threaded)
+        error("work can only be held if the work threads are running");
+
+    mutex_lock(&work_mutex);
+    work_is_held = true;
+    mutex_unlock(&work_mutex);
+}
+
+void work_release(void)
+{
+    if (!interface_is_threaded)
+        error("work can only be released if the work threads are running");
+
+    mutex_lock(&work_mutex);
+    work_release_locked();
+    mutex_unlock(&work_mutex);
+}
+
 uacpi_status uacpi_kernel_schedule_work(
     uacpi_work_type type, uacpi_work_handler handler, uacpi_handle ctx
 )
 {
-    UACPI_UNUSED(type);
+    work_queue_t *queue;
+    work_t *work;
 
-    handler(ctx);
+    if (!interface_is_threaded) {
+        handler(ctx);
+        return UACPI_STATUS_OK;
+    }
+
+    if ((size_t)type >= UACPI_ARRAY_SIZE(work_queues))
+        return UACPI_STATUS_INVALID_ARGUMENT;
+
+    work = do_calloc(1, sizeof(*work));
+    work->handler = handler;
+    work->ctx = ctx;
+
+    mutex_lock(&work_mutex);
+
+    queue = &work_queues[type];
+    if (queue->head == NULL)
+        queue->head = work;
+    else
+        queue->tail->next = work;
+    queue->tail = work;
+
+    work_num_pending++;
+    if (!work_is_held)
+        condvar_signal(&queue->has_work);
+
+    mutex_unlock(&work_mutex);
     return UACPI_STATUS_OK;
+}
+
+static bool work_is_done(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return work_num_pending == 0;
 }
 
 uacpi_status uacpi_kernel_wait_for_work_completion(void)
 {
+    void *this_id;
+    size_t i;
+
+    if (!interface_is_threaded)
+        return UACPI_STATUS_OK;
+
+    this_id = get_thread_id();
+    mutex_lock(&work_mutex);
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i) {
+        if (work_queues[i].thread_id != this_id)
+            continue;
+
+        work_fatal(
+            "a work handler has attempted to wait for work completion, "
+            "which would never return"
+        );
+    }
+
+    /*
+     * There are no in-flight interrupts to wait for, as an interrupt handler
+     * is never invoked asynchronously.
+     *
+     * Someone is waiting for the work, so there's no point in holding it any
+     * longer: this is exactly what the hold is there to wait for.
+     */
+    work_release_locked();
+    condvar_wait(&work_done, &work_mutex, work_is_done, NULL);
+
+    mutex_unlock(&work_mutex);
     return UACPI_STATUS_OK;
 }
