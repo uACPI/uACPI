@@ -1558,3 +1558,45 @@ void test_gpe_block_without_fadt_gpes(void)
         CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
     }
 }
+
+/*
+ * Resets the state of uACPI with work still in flight, which is expected to
+ * get a chance to complete before anything that it relies upon is gone.
+ */
+static void do_test_state_reset_vs_work(bool has_gpes)
+{
+    uacpi_namespace_node *dev0 = find_node("\\DEV0");
+    notify_log_t log = { 0 };
+    size_t expected_count = 1;
+
+    CHECK_OK(uacpi_install_notify_handler(dev0, notify_a, &log));
+    CHECK_OK(uacpi_finalize_gpe_initialization());
+
+    work_threads_start();
+    work_hold();
+
+    // A notification that was already queued
+    CHECK_OK(uacpi_execute_simple(UACPI_NULL, "\\NTF0"));
+
+    // A GPE handler that hasn't even had a chance to produce one yet
+    if (has_gpes) {
+        gpe_fire(0);
+        expected_count++;
+    }
+
+    uacpi_state_reset();
+    CHECK(log.count == expected_count);
+
+    work_threads_stop();
+}
+
+void test_state_reset_vs_gpe_work(void)
+{
+    do_test_state_reset_vs_work(true);
+}
+
+// Expects a FADT that doesn't describe any GPE blocks
+void test_state_reset_vs_notifications(void)
+{
+    do_test_state_reset_vs_work(false);
+}
