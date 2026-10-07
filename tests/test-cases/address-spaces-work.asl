@@ -530,4 +530,33 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
 
         Return (Ones)
     }
+
+    // Same as IPMD, but ends up with an IPMI handler of its own
+    Device (IPM2) {
+        Name (_HID, "TEST0003")
+
+        OperationRegion (IPS2, IPMI, 0, 1)
+
+        Name (CONN, 0xFF)
+
+        Method (_REG, 2) {
+            If (Arg0 == 7) {
+                CONN = Arg1
+            }
+        }
+    }
+
+    /*
+     * Arg0 -> Whether IPS2 is expected to be connected
+     * Return -> Ones on success, Zero on failure
+     */
+    Method (CRG2, 1) {
+        If (\IPM2.CONN != Arg0) {
+            Printf("Unexpected IPS2 connection state %o, expected %o",
+                   \IPM2.CONN, Arg0)
+            Return (Zero)
+        }
+
+        Return (Ones)
+    }
 }
