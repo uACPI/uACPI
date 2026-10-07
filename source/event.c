@@ -9,6 +9,7 @@
 #include <uacpi/internal/utilities.h>
 #include <uacpi/internal/mutex.h>
 #include <uacpi/internal/stdlib.h>
+#include <uacpi/platform/atomic.h>
 #include <uacpi/acpi.h>
 
 #define UACPI_EVENT_DISABLED 0
@@ -624,13 +625,26 @@ static uacpi_interrupt_ret dispatch_gpe(
 {
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
+    uacpi_u8 handler_type;
+    uacpi_cpu_flags flags;
+
+    /*
+     * The handler of an event is set up with no regard for us, as the event
+     * is expected to be quiescent at the time. What tells us that it's ready
+     * is the event getting enabled, which is always done with this lock held,
+     * so taking it is what guarantees that we see the handler in its entirety
+     * even if it was set up by a different CPU just now.
+     */
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    handler_type = event->handler_type;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     /*
      * For raw handlers we don't do any management whatsoever, we just let the
      * handler know a GPE has triggered and let it handle disable/enable as
      * well as clearing.
      */
-    if (event->handler_type == GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW) {
+    if (handler_type == GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW) {
         return event->native_handler->cb(
             event->native_handler->ctx, device_node, event->idx
         );
@@ -655,7 +669,7 @@ static uacpi_interrupt_ret dispatch_gpe(
         }
     }
 
-    switch (event->handler_type) {
+    switch (handler_type) {
     case GPE_HANDLER_TYPE_NATIVE_HANDLER:
         int_ret = event->native_handler->cb(
             event->native_handler->ctx, device_node, event->idx
@@ -692,14 +706,28 @@ static uacpi_interrupt_ret dispatch_gpe(
     return UACPI_INTERRUPT_HANDLED;
 }
 
-static uacpi_interrupt_ret detect_gpes(struct gpe_block *block)
+/*
+ * The list of blocks is modified with the event lock held, but is walked by
+ * the interrupt handlers without it. A block is fully initialized before it's
+ * linked in, and is only freed after every interrupt handler that might've
+ * been looking at it at the time it was unlinked has returned.
+ */
+static struct gpe_block *load_gpe_block(struct gpe_block **block)
+{
+    return (struct gpe_block*)uacpi_atomic_load_ptr(block);
+}
+
+static uacpi_interrupt_ret detect_gpes(struct gpe_interrupt_ctx *ctx)
 {
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
+    struct gpe_block *block;
     struct gpe_register *reg;
     struct gp_event *event;
     uacpi_u64 status, enable;
     uacpi_size i, j;
+
+    block = load_gpe_block(&ctx->gpe_head);
 
     while (block) {
         for (i = 0; i < block->num_registers; ++i) {
@@ -728,7 +756,7 @@ static uacpi_interrupt_ret detect_gpes(struct gpe_block *block)
             }
         }
 
-        block = block->next;
+        block = load_gpe_block(&block->next);
     }
 
     return int_ret;
@@ -760,7 +788,7 @@ static uacpi_interrupt_ret handle_gpes(uacpi_handle opaque)
     if (uacpi_unlikely(ctx == UACPI_NULL))
         return UACPI_INTERRUPT_NOT_HANDLED;
 
-    return detect_gpes(ctx->gpe_head);
+    return detect_gpes(ctx);
 }
 
 static uacpi_status find_or_create_gpe_interrupt_ctx(
@@ -1008,13 +1036,13 @@ static void uninstall_gpe_block(struct gpe_block *block)
 
     // 4. Make sure the interrupt handler is no longer able to find the block
     if (block == ctx->gpe_head) {
-        ctx->gpe_head = block->next;
+        uacpi_atomic_store_ptr(&ctx->gpe_head, block->next);
     } else {
         struct gpe_block *prev_block = ctx->gpe_head;
 
         while (prev_block) {
             if (prev_block->next == block) {
-                prev_block->next = block->next;
+                uacpi_atomic_store_ptr(&prev_block->next, block->next);
                 break;
             }
 
@@ -1273,9 +1301,17 @@ static uacpi_status create_gpe_block(
     if (uacpi_unlikely_error(ret))
         goto error_out;
 
-    block->next = block->irq_ctx->gpe_head;
-    block->irq_ctx->gpe_head = block;
     match_ctx.block = block;
+
+    uacpi_namespace_do_for_each_child(
+        device_node, do_match_gpe_methods, UACPI_NULL,
+        UACPI_OBJECT_METHOD_BIT, UACPI_MAX_DEPTH_ANY,
+        UACPI_SHOULD_LOCK_YES, UACPI_PERMANENT_ONLY_YES, &match_ctx
+    );
+
+    // The block is complete, make it visible to the interrupt handler
+    block->next = block->irq_ctx->gpe_head;
+    uacpi_atomic_store_ptr(&block->irq_ctx->gpe_head, block);
 
     /*
      * The events of this block are only enabled once the initialization is
@@ -1283,12 +1319,6 @@ static uacpi_status create_gpe_block(
      * is the case for a block that is installed at runtime.
      */
     g_gpes_finalized = UACPI_FALSE;
-
-    uacpi_namespace_do_for_each_child(
-        device_node, do_match_gpe_methods, UACPI_NULL,
-        UACPI_OBJECT_METHOD_BIT, UACPI_MAX_DEPTH_ANY,
-        UACPI_SHOULD_LOCK_YES, UACPI_PERMANENT_ONLY_YES, &match_ctx
-    );
 
     uacpi_trace("initialized GPE block %.4s[%d->%d], %u AML handlers (IRQ %u)",
                 device_node->name.text, base_idx, base_idx + block->num_events,
@@ -1632,7 +1662,7 @@ uacpi_status uacpi_finalize_gpe_initialization(void)
         irq_ctx = g_gpe_interrupt_head;
 
         while (irq_ctx) {
-            detect_gpes(irq_ctx->gpe_head);
+            detect_gpes(irq_ctx);
             irq_ctx = irq_ctx->next;
         }
     }
