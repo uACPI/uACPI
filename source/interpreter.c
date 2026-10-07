@@ -3653,9 +3653,19 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
         if (timeout > 0xFFFF)
             timeout = 0xFFFF;
 
+        /*
+         * The namespace is unlocked while we wait, which makes it possible
+         * for someone else to get rid of the object, e.g. by overwriting it
+         * via CopyObject. All of the references that we have to it are gone
+         * if that happens, so take one that is ours alone.
+         */
+        uacpi_object_ref(obj);
+
         uacpi_namespace_write_unlock();
         ret = uacpi_kernel_wait_for_event(obj->event->handle, timeout);
         uacpi_namespace_write_lock();
+
+        uacpi_object_unref(obj);
 
         /*
          * The return value here is inverted, we return 0 for success and Ones
@@ -3717,18 +3727,28 @@ static uacpi_status handle_mutex_ctl(struct execution_context *ctx)
             break;
         }
 
-        ret = uacpi_acquire_aml_mutex(obj->mutex, timeout);
-        if (uacpi_unlikely_error(ret))
-            break;
+        /*
+         * The namespace is unlocked while we wait for the mutex, which makes
+         * it possible for someone else to get rid of the object, e.g. by
+         * overwriting it via CopyObject. All of the references that we have
+         * to it are gone if that happens, so take one that is ours alone.
+         */
+        uacpi_object_ref(obj);
 
-        ret = held_mutexes_array_push(&ctx->held_mutexes, obj->mutex);
-        if (uacpi_unlikely_error(ret)) {
-            uacpi_release_aml_mutex(obj->mutex);
-            return ret;
+        ret = uacpi_acquire_aml_mutex(obj->mutex, timeout);
+        if (uacpi_likely_success(ret)) {
+            ret = held_mutexes_array_push(&ctx->held_mutexes, obj->mutex);
+            if (uacpi_unlikely_error(ret)) {
+                uacpi_release_aml_mutex(obj->mutex);
+                uacpi_object_unref(obj);
+                return ret;
+            }
+
+            ctx->sync_level = obj->mutex->sync_level;
+            *return_value = 0;
         }
 
-        ctx->sync_level = obj->mutex->sync_level;
-        *return_value = 0;
+        uacpi_object_unref(obj);
         break;
     }
 
