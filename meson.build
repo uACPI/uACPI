@@ -9,7 +9,6 @@ src = [
     'source/opcodes.c',
     'source/namespace.c',
     'source/stdlib.c',
-    'source/shareable.c',
     'source/opregion.c',
     'source/default_handlers.c',
     'source/io.c',
