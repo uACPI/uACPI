@@ -1386,8 +1386,17 @@ static uacpi_status gpe_mask_unmask(
  */
 static uacpi_bool gpe_mask_safe(struct gp_event *event)
 {
+    uacpi_u8 mask = gpe_get_mask(event);
+
     // No need to flush or do anything if it's not currently enabled
-    if (!(event->reg->current_mask & gpe_get_mask(event)))
+    if (!(event->reg->current_mask & mask))
+        return UACPI_FALSE;
+
+    /*
+     * Same if it was already masked by the user: the event is known to be
+     * quiescent, and it's not up to us to unmask it once we're done.
+     */
+    if (event->reg->masked_mask & mask)
         return UACPI_FALSE;
 
     gpe_mask_unmask(event, UACPI_TRUE);
