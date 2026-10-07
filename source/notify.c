@@ -6,6 +6,7 @@
 #include <uacpi/internal/utilities.h>
 #include <uacpi/internal/stdlib.h>
 #include <uacpi/kernel_api.h>
+#include <uacpi/platform/atomic.h>
 
 #ifndef UACPI_BAREBONES_MODE
 
@@ -41,13 +42,29 @@ static void free_notification_ctx(struct notification_ctx *ctx)
     uacpi_free(ctx, sizeof(*ctx));
 }
 
+/*
+ * The handler lists are only modified with the notify mutex held, but are
+ * walked by do_notify without it: the kernel is allowed to run the work
+ * right from uacpi_kernel_schedule_work, which we call with the mutex held.
+ *
+ * This is safe because a handler is fully initialized before it's linked in,
+ * and because an unlinked handler is only freed after all of the in-flight
+ * notifications that might still be looking at it have finished.
+ */
+static uacpi_device_notify_handler *load_handler(
+    uacpi_device_notify_handler **handler
+)
+{
+    return (uacpi_device_notify_handler*)uacpi_atomic_load_ptr(handler);
+}
+
 static void do_notify(uacpi_handle opaque)
 {
     struct notification_ctx *ctx = opaque;
     uacpi_device_notify_handler *handler;
     uacpi_bool did_notify_root = UACPI_FALSE;
 
-    handler = ctx->node_object->handlers->notify_head;
+    handler = load_handler(&ctx->node_object->handlers->notify_head);
 
     for (;;) {
         if (handler == UACPI_NULL) {
@@ -56,13 +73,15 @@ static void do_notify(uacpi_handle opaque)
                 return;
             }
 
-            handler = g_uacpi_rt_ctx.root_object->handlers->notify_head;
+            handler = load_handler(
+                &g_uacpi_rt_ctx.root_object->handlers->notify_head
+            );
             did_notify_root = UACPI_TRUE;
             continue;
         }
 
         handler->callback(handler->user_context, ctx->node, ctx->value);
-        handler = handler->next;
+        handler = load_handler(&handler->next);
     }
 }
 
@@ -158,8 +177,6 @@ uacpi_status uacpi_install_notify_handler(
     if (uacpi_unlikely_error(ret))
         goto out_no_mutex;
 
-    uacpi_kernel_wait_for_work_completion();
-
     handlers = obj->handlers;
 
     if (handler_container(handlers, handler) != UACPI_NULL) {
@@ -177,7 +194,7 @@ uacpi_status uacpi_install_notify_handler(
     new_handler->user_context = handler_context;
     new_handler->next = handlers->notify_head;
 
-    handlers->notify_head = new_handler;
+    uacpi_atomic_store_ptr(&handlers->notify_head, new_handler);
 
 out:
     uacpi_release_native_mutex(notify_mutex);
@@ -214,8 +231,6 @@ uacpi_status uacpi_uninstall_notify_handler(
     if (uacpi_unlikely_error(ret))
         goto out_no_mutex;
 
-    uacpi_kernel_wait_for_work_completion();
-
     handlers = obj->handlers;
 
     containing = handler_container(handlers, handler);
@@ -228,14 +243,14 @@ uacpi_status uacpi_uninstall_notify_handler(
 
     // Are we the last linked handler?
     if (prev_handler == containing) {
-        handlers->notify_head = containing->next;
+        uacpi_atomic_store_ptr(&handlers->notify_head, containing->next);
         goto out;
     }
 
     // Nope, we're somewhere in the middle. Do a search.
     while (prev_handler) {
         if (prev_handler->next == containing) {
-            prev_handler->next = containing->next;
+            uacpi_atomic_store_ptr(&prev_handler->next, containing->next);
             goto out;
         }
 
@@ -248,8 +263,19 @@ out_no_mutex:
     if (node != uacpi_namespace_root())
         uacpi_object_unref(obj);
 
-    if (uacpi_likely_success(ret))
+    if (uacpi_likely_success(ret)) {
+        /*
+         * The handler is no longer reachable, but a notification that started
+         * before we unlinked it might still be about to call it. Wait for
+         * those to finish, this also guarantees that the handler is never
+         * invoked again after we return.
+         *
+         * This must be done without the notify mutex held: the work that we
+         * are waiting for needs it in order to dispatch a Notify().
+         */
+        uacpi_kernel_wait_for_work_completion();
         uacpi_free(containing, sizeof(*containing));
+    }
 
     return ret;
 }
