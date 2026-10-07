@@ -226,6 +226,49 @@ uacpi_status uacpi_clear_fixed_event(uacpi_fixed_event event)
     );
 }
 
+void uacpi_events_restore_buttons_post_wake(void)
+{
+    static const uacpi_u8 buttons[] = {
+        UACPI_FIXED_EVENT_POWER_BUTTON,
+        UACPI_FIXED_EVENT_SLEEP_BUTTON,
+    };
+    uacpi_size i;
+    uacpi_u8 event;
+
+    if (uacpi_is_hardware_reduced())
+        return;
+
+    /*
+     * Same as uacpi_enable_fixed_event, this must not enable a button that
+     * is in the process of having its handler removed.
+     */
+    if (uacpi_unlikely_error(event_config_lock()))
+        return;
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(buttons); ++i) {
+        event = buttons[i];
+
+        /*
+         * The button that has woken us up is still pending at this point. Get
+         * rid of it so that it's not delivered as if it was pressed once again,
+         * which tends to be handled by going right back to sleep, or by
+         * shutting down.
+         */
+        uacpi_write_register_field(
+            fixed_events[event].status_field, ACPI_PM1_STS_CLEAR
+        );
+
+        /*
+         * Don't rely on the button still being enabled after the sleep, it
+         * has to be if there's a handler that is waiting for it.
+         */
+        if (fixed_event_handlers[event].handler != UACPI_NULL)
+            set_event(event, UACPI_EVENT_ENABLED);
+    }
+
+    event_config_unlock();
+}
+
 static uacpi_interrupt_ret dispatch_fixed_event(
     const struct fixed_event *ev, uacpi_fixed_event event
 )
