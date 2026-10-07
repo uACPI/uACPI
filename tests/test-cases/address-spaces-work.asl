@@ -367,6 +367,87 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
     }
 
     /*
+     * The handler of this address space evaluates the DTCH method of the
+     * device that a region belongs to every time that the region is detached.
+     * Both of these get rid of the region in response.
+     */
+    Device (OEM0) {
+        Name (_HID, "TEST0001")
+
+        OperationRegion (REG0, 0x80, 0, 1)
+        Field (REG0, ByteAcc, NoLock, Preserve) {
+            FLD0, 8,
+        }
+
+        Name (DISS, 0)
+
+        Method (_REG, 2) {
+            If (Arg1 == 0) {
+                DISS++
+            }
+        }
+
+        Method (DTCH) {
+            CopyObject (Zero, REG0)
+        }
+    }
+
+    Device (OEM1) {
+        Name (_HID, "TEST0002")
+
+        OperationRegion (REG1, 0x80, 0, 1)
+        Field (REG1, ByteAcc, NoLock, Preserve) {
+            FLD1, 8,
+        }
+
+        Method (DTCH) {
+            CopyObject (Zero, REG1)
+        }
+    }
+
+    Method (DOEM) {
+        // Accessing a region is what gets it attached in the first place
+        If (\OEM0.FLD0 != 0x5A || \OEM1.FLD1 != 0x5A) {
+            Printf("Unexpected OEM field values")
+            Return (Zero)
+        }
+
+        /*
+         * A region is detached once it's overwritten, at which point REG0 is
+         * overwritten by the DTCH method as well. This must not prevent the
+         * rest from being done just once, and against the right object.
+         */
+        CopyObject (One, \OEM0.REG0)
+
+        If (\OEM0.DISS != 1) {
+            Printf("Unexpected number of _REG disconnects %o", \OEM0.DISS)
+            Return (Zero)
+        }
+
+        If (\OEM0.REG0 != One) {
+            Printf("REG0 was not overwritten: %o", \OEM0.REG0)
+            Return (Zero)
+        }
+
+        Return (Ones)
+    }
+
+    /*
+     * To be evaluated after OEM1 was given a handler of its own, which is what
+     * detaches REG1 from the one that it had before.
+     *
+     * Return -> Ones on success, Zero on failure
+     */
+    Method (COEM) {
+        If (ObjectType (\OEM1.REG1) != 1) {
+            Printf("REG1 was not overwritten: %o", ObjectType (\OEM1.REG1))
+            Return (Zero)
+        }
+
+        Return (Ones)
+    }
+
+    /*
      * Arg0 -> The address space type
      * Return -> Ones on succeess, Zero on failure
      */
@@ -399,6 +480,10 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
         }
         Case (0x7F) { // FFixedHW
             Local0 = DFHW()
+            Break
+        }
+        Case (0x80) { // The first one of the OEM defined address spaces
+            Local0 = DOEM()
             Break
         }
         }
