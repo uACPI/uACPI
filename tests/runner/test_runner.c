@@ -25,6 +25,9 @@
 #include <uacpi/utilities.h>
 #include <uacpi/sleep.h>
 
+// The test wants a FADT that doesn't describe any GPE blocks
+#define API_TEST_NO_FADT_GPE_BLOCKS (1 << 0)
+
 /*
  * Tests that exercise the API directly instead of evaluating \MAIN, selected
  * by the value that the test case is expected to return.
@@ -32,15 +35,20 @@
 static const struct api_test {
     const char *name;
     void (*run)(void);
+    unsigned flags;
 } api_tests[] = {
-    { "check-object-api-works", test_object_api },
-    { "check-address-spaces-work", test_address_spaces },
-    { "check-notify-install-handles-oom", test_notify_install_oom },
-    { "check-notify-handlers-dont-deadlock", test_notify_handlers_vs_work },
-    { "check-event-api-doesnt-deadlock", test_event_api_vs_work },
-    { "check-gpe-handlers-work", test_gpe_handlers },
-    { "check-wake-gpes-work", test_wake_gpes },
-    { "check-gpe-blocks-work", test_gpe_blocks },
+    { "check-object-api-works", test_object_api, 0 },
+    { "check-address-spaces-work", test_address_spaces, 0 },
+    { "check-notify-install-handles-oom", test_notify_install_oom, 0 },
+    { "check-notify-handlers-dont-deadlock", test_notify_handlers_vs_work, 0 },
+    { "check-event-api-doesnt-deadlock", test_event_api_vs_work, 0 },
+    { "check-gpe-handlers-work", test_gpe_handlers, 0 },
+    { "check-wake-gpes-work", test_wake_gpes, 0 },
+    { "check-gpe-blocks-work", test_gpe_blocks, 0 },
+    {
+        "check-gpe-block-works-without-fadt-gpes",
+        test_gpe_block_without_fadt_gpes, API_TEST_NO_FADT_GPE_BLOCKS
+    },
 };
 
 /*
@@ -48,7 +56,7 @@ static const struct api_test {
  * and are run against an empty DSDT.
  */
 static const struct api_test builtin_api_tests[] = {
-    { "fixed-events", test_fixed_events },
+    { "fixed-events", test_fixed_events, 0 },
 };
 
 static const struct api_test *find_api_test(
@@ -409,12 +417,16 @@ static void run_test(
 {
     static uint8_t early_table_buf[4096];
     struct acpi_rsdp rsdp = { 0 };
-    struct full_xsdt *xsdt = make_xsdt(&rsdp, dsdt_path, ssdt_paths);
+    struct full_xsdt *xsdt;
     uacpi_status st;
     uacpi_table tbl;
     bool is_test_mode;
     uacpi_object *ret = NULL;
 
+    g_no_fadt_gpe_blocks = api_test != NULL &&
+                           (api_test->flags & API_TEST_NO_FADT_GPE_BLOCKS);
+
+    xsdt = make_xsdt(&rsdp, dsdt_path, ssdt_paths);
     g_rsdp = (uacpi_phys_addr)((uintptr_t)&rsdp);
 
     st = uacpi_setup_early_table_access(
@@ -510,19 +522,21 @@ static void run_test(
     );
     ensure_ok_status(st);
 
-    st = uacpi_install_gpe_handler(
-        UACPI_NULL, 123, UACPI_GPE_TRIGGERING_EDGE, handle_gpe, NULL
-    );
-    ensure_ok_status(st);
+    if (!g_no_fadt_gpe_blocks) {
+        st = uacpi_install_gpe_handler(
+            UACPI_NULL, 123, UACPI_GPE_TRIGGERING_EDGE, handle_gpe, NULL
+        );
+        ensure_ok_status(st);
 
-    st = uacpi_enable_gpe(UACPI_NULL, 123);
-    ensure_ok_status(st);
+        st = uacpi_enable_gpe(UACPI_NULL, 123);
+        ensure_ok_status(st);
 
-    st = uacpi_disable_gpe(UACPI_NULL, 123);
-    ensure_ok_status(st);
+        st = uacpi_disable_gpe(UACPI_NULL, 123);
+        ensure_ok_status(st);
 
-    st = uacpi_uninstall_gpe_handler(UACPI_NULL, 123, handle_gpe);
-    ensure_ok_status(st);
+        st = uacpi_uninstall_gpe_handler(UACPI_NULL, 123, handle_gpe);
+        ensure_ok_status(st);
+    }
 
     st = uacpi_namespace_initialize();
     ensure_ok_status(st);

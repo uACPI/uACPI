@@ -5,6 +5,8 @@
 #include <string.h>
 #include <uacpi/acpi.h>
 
+bool g_no_fadt_gpe_blocks;
+
 static uacpi_u8 gen_checksum(void *table, uacpi_size size)
 {
     uacpi_u8 *bytes = table;
@@ -99,12 +101,14 @@ static struct full_xsdt *do_make_xsdt(
     fadt->pm2_cnt_blk = 0xCCDD;
     fadt->pm2_cnt_len = 1;
 
-    fadt->gpe0_blk_len = FAKE_GPE0_BLK_LEN;
-    fadt->gpe0_blk = FAKE_GPE0_BLK;
+    if (!g_no_fadt_gpe_blocks) {
+        fadt->gpe0_blk_len = FAKE_GPE0_BLK_LEN;
+        fadt->gpe0_blk = FAKE_GPE0_BLK;
 
-    fadt->gpe1_base = FAKE_GPE1_BASE;
-    fadt->gpe1_blk = FAKE_GPE1_BLK;
-    fadt->gpe1_blk_len = FAKE_GPE1_BLK_LEN;
+        fadt->gpe1_base = FAKE_GPE1_BASE;
+        fadt->gpe1_blk = FAKE_GPE1_BLK;
+        fadt->gpe1_blk_len = FAKE_GPE1_BLK_LEN;
+    }
 
     fadt->x_dsdt = (uacpi_phys_addr)((uintptr_t)tables[0].data);
     memcpy(

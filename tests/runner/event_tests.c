@@ -1420,3 +1420,42 @@ void test_fixed_events(void)
      * be taken care of when uACPI is deinitialized.
      */
 }
+
+// Expects a FADT that doesn't describe any GPE blocks
+void test_gpe_block_without_fadt_gpes(void)
+{
+    uacpi_namespace_node *gpeb = find_node("\\GPEB");
+    uacpi_event_info info;
+    uacpi_u64 round;
+
+    CHECK_STATUS(uacpi_gpe_info(UACPI_NULL, 0, &info), UACPI_STATUS_NOT_FOUND);
+    CHECK_OK(uacpi_finalize_gpe_initialization());
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    fake_io_set_write_one_to_clear(GPEB_ADDRESS, GPEB_NUM_REGISTERS);
+
+    /*
+     * The SCI is still expected to handle a block that asks for it. Do this
+     * more than once to make sure that it also survives the block going away.
+     */
+    for (round = 1; round <= 2; ++round) {
+        CHECK_OK(uacpi_install_gpe_block(
+            gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+            GPEB_NUM_REGISTERS, FAKE_SCI_IRQ
+        ));
+
+        fake_io_raise(GPEB_ADDRESS, 1 << 1);
+        CHECK_OK(uacpi_finalize_gpe_initialization());
+        CHECK(eval_integer("\\GPEB.CNT1") == round);
+        CHECK_GPE_INFO(gpeb, 0, GPE_INFO_ENABLED);
+        CHECK_GPE_INFO(gpeb, 1, GPE_INFO_ENABLED);
+
+        gpe_block_fire(GPEB_ADDRESS, FAKE_SCI_IRQ, 0);
+        CHECK(eval_integer("\\GPEB.CNT0") == round);
+
+        CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
+
+        fake_io_raise(GPEB_ADDRESS, 1 << 0);
+        CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    }
+}
