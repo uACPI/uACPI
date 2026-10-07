@@ -11,3 +11,5 @@ void test_wake_gpes(void);
 void test_gpe_blocks(void);
 void test_fixed_events(void);
 void test_gpe_block_without_fadt_gpes(void);
+void test_state_reset_vs_gpe_work(void);
+void test_state_reset_vs_notifications(void);

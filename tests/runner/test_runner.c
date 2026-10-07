@@ -49,6 +49,14 @@ static const struct api_test {
         "check-gpe-block-works-without-fadt-gpes",
         test_gpe_block_without_fadt_gpes, API_TEST_NO_FADT_GPE_BLOCKS
     },
+    {
+        "check-state-reset-waits-for-gpe-work",
+        test_state_reset_vs_gpe_work, 0
+    },
+    {
+        "check-state-reset-waits-for-notifications",
+        test_state_reset_vs_notifications, API_TEST_NO_FADT_GPE_BLOCKS
+    },
 };
 
 /*
