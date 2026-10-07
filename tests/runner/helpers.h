@@ -249,6 +249,9 @@ static inline void hash_table_cleanup(hash_table_t *table)
 extern bool g_expect_virtual_addresses;
 extern uacpi_phys_addr g_rsdp;
 
+// Don't describe any GPE blocks in the FADT, must be set prior to make_xsdt
+extern bool g_no_fadt_gpe_blocks;
+
 /*
  * The fake hardware that we describe via the FADT. The event registers are
  * emulated closely enough to make it possible to trigger a fixed or a general
