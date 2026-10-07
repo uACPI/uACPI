@@ -1074,7 +1074,7 @@ io_done:
     }
 
     if (orig_op == UACPI_REGION_OP_READ) {
-        switch (region->space) {
+        switch (space) {
         case UACPI_ADDRESS_SPACE_PCC:
         case UACPI_ADDRESS_SPACE_IPMI:
         case UACPI_ADDRESS_SPACE_FFIXEDHW:
