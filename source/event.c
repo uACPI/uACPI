@@ -2504,7 +2504,7 @@ static uacpi_interrupt_ret handle_global_lock(uacpi_handle ctx)
 
     uacpi_trace("received a firmware global lock release notification");
 
-    uacpi_kernel_signal_event(g_uacpi_rt_ctx.global_lock_event);
+    uacpi_kernel_signal_semaphore(g_uacpi_rt_ctx.global_lock_event);
     g_uacpi_rt_ctx.global_lock_pending = UACPI_FALSE;
 
 out:
@@ -2584,7 +2584,7 @@ uacpi_status uacpi_initialize_events(void)
     }
     g_uacpi_rt_ctx.sci_handle_valid = UACPI_TRUE;
 
-    g_uacpi_rt_ctx.global_lock_event = uacpi_kernel_create_event();
+    g_uacpi_rt_ctx.global_lock_event = uacpi_kernel_create_semaphore(0);
     if (uacpi_unlikely(g_uacpi_rt_ctx.global_lock_event == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 

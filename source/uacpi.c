@@ -164,7 +164,7 @@ void uacpi_state_reset(void)
 
 #ifndef UACPI_REDUCED_HARDWARE
     if (g_uacpi_rt_ctx.global_lock_event)
-        uacpi_kernel_free_event(g_uacpi_rt_ctx.global_lock_event);
+        uacpi_kernel_free_semaphore(g_uacpi_rt_ctx.global_lock_event);
     if (g_uacpi_rt_ctx.global_lock_spinlock)
         uacpi_kernel_free_spinlock(g_uacpi_rt_ctx.global_lock_spinlock);
 #endif

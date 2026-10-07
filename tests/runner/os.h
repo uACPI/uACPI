@@ -136,21 +136,6 @@ static inline void mutex_free(mutex_t *mutex)
 #endif
 }
 
-static inline bool mutex_try_lock(mutex_t *mutex)
-{
-#ifdef _WIN32
-    return TryEnterCriticalSection(mutex);
-#else
-    int err = pthread_mutex_trylock(mutex);
-
-    if (err == 0)
-        return true;
-    if (err != EBUSY)
-        error("pthread_mutex_trylock failed");
-    return false;
-#endif
-}
-
 static inline void mutex_lock(mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -158,36 +143,6 @@ static inline void mutex_lock(mutex_t *mutex)
 #else
     if (pthread_mutex_lock(mutex))
         error("pthread_mutex_lock failed");
-#endif
-}
-
-static inline bool mutex_lock_timeout(mutex_t *mutex, uint64_t timeout_ns)
-{
-#if !HAVE_TIMED_WAIT
-    uint64_t end = get_nanosecond_timer() + timeout_ns;
-
-    do {
-        if (mutex_try_lock(mutex))
-            return true;
-        millisecond_sleep(1);
-    } while (get_nanosecond_timer() < end);
-
-    return false;
-#else
-    struct timespec spec;
-    int err;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &spec))
-        error("clock_gettime failed");
-
-    timespec_add_nanoseconds(&spec, timeout_ns);
-
-    err = pthread_mutex_clocklock(mutex, CLOCK_MONOTONIC, &spec);
-    if (err == 0)
-        return true;
-    if (err != ETIMEDOUT)
-        error("pthread_mutex_clocklock failed");
-    return false;
 #endif
 }
 

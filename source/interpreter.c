@@ -3725,6 +3725,7 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
 {
     struct op_context *op_ctx = ctx->cur_op_ctx;
     uacpi_object *obj;
+    uacpi_handle event;
 
     obj = uacpi_unwrap_internal_reference(
         item_array_at(&op_ctx->items, 0)->obj
@@ -3737,17 +3738,27 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
         return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
     }
 
+    event = obj->event->handle;
+
     switch (op_ctx->op->code)
     {
     case UACPI_AML_OP_SignalOp:
-        uacpi_kernel_signal_event(obj->event->handle);
+        uacpi_kernel_signal_semaphore(event);
         break;
     case UACPI_AML_OP_ResetOp:
-        uacpi_kernel_reset_event(obj->event->handle);
+        /*
+         * An event is a semaphore that is signaled once per every Signal, so
+         * resetting it comes down to taking all of the units that it has.
+         * There's no way for it to gain any more in the meantime, since that
+         * takes executing AML, which we don't allow by holding the namespace
+         * lock.
+         */
+        while (uacpi_kernel_wait_for_semaphore(event, 0) == UACPI_STATUS_OK)
+            continue;
         break;
     case UACPI_AML_OP_WaitOp: {
         uacpi_u64 timeout;
-        uacpi_bool ret;
+        uacpi_status ret;
 
         timeout = item_array_at(&op_ctx->items, 1)->obj->integer;
         if (timeout > 0xFFFF)
@@ -3762,7 +3773,7 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
         uacpi_object_ref(obj);
 
         uacpi_namespace_write_unlock();
-        ret = uacpi_kernel_wait_for_event(obj->event->handle, timeout);
+        ret = uacpi_kernel_wait_for_semaphore(event, timeout);
         uacpi_namespace_write_lock();
 
         uacpi_object_unref(obj);
@@ -3771,7 +3782,7 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
          * The return value here is inverted, we return 0 for success and Ones
          * for timeout and everything else.
          */
-        if (ret)
+        if (ret == UACPI_STATUS_OK)
             item_array_at(&op_ctx->items, 2)->obj->integer = 0;
         break;
     }

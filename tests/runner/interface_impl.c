@@ -755,151 +755,103 @@ void uacpi_kernel_sleep(uacpi_u64 msec)
     millisecond_sleep(msec);
 }
 
-uacpi_handle uacpi_kernel_create_mutex(void)
-{
-    mutex_t *mutex = do_malloc(sizeof(*mutex));
-
-    mutex_init(mutex);
-    return mutex;
-}
-
-void uacpi_kernel_free_mutex(uacpi_handle handle)
-{
-    mutex_free(handle);
-    free(handle);
-}
-
 uacpi_thread_id uacpi_kernel_get_thread_id(void)
 {
     return get_thread_id();
 }
 
-uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout)
-{
-    if (timeout == 0)
-        return mutex_try_lock(handle) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
-
-    if (timeout == 0xFFFF) {
-        mutex_lock(handle);
-        return UACPI_STATUS_OK;
-    }
-
-    if (mutex_lock_timeout(handle, timeout * 1000000ull))
-        return UACPI_STATUS_OK;
-
-    return UACPI_STATUS_TIMEOUT;
-}
-
-void uacpi_kernel_release_mutex(uacpi_handle handle)
-{
-    mutex_unlock(handle);
-}
-
 typedef struct {
     mutex_t mutex;
     condvar_t condvar;
-    size_t counter;
+    size_t units;
     size_t num_waiters;
-} event_t;
+} semaphore_t;
 
 // Safe to use no matter how many threads there are, unlike error()
 NORETURN static void work_fatal(const char *reason);
 
-uacpi_handle uacpi_kernel_create_event(void)
+uacpi_handle uacpi_kernel_create_semaphore(uacpi_u32 initial_units)
 {
-    event_t *event = do_calloc(1, sizeof(*event));
+    semaphore_t *semaphore = do_calloc(1, sizeof(*semaphore));
 
-    mutex_init(&event->mutex);
-    condvar_init(&event->condvar);
-    return event;
+    mutex_init(&semaphore->mutex);
+    condvar_init(&semaphore->condvar);
+    semaphore->units = initial_units;
+
+    return semaphore;
 }
 
-void uacpi_kernel_free_event(uacpi_handle handle)
+void uacpi_kernel_free_semaphore(uacpi_handle handle)
 {
-    event_t *event = handle;
+    semaphore_t *semaphore = handle;
     bool has_waiters;
 
-    mutex_lock(&event->mutex);
-    has_waiters = event->num_waiters != 0;
-    mutex_unlock(&event->mutex);
+    mutex_lock(&semaphore->mutex);
+    has_waiters = semaphore->num_waiters != 0;
+    mutex_unlock(&semaphore->mutex);
 
-    if (has_waiters)
-        work_fatal("an event was freed while a thread was still waiting on it");
+    if (has_waiters) {
+        work_fatal(
+            "a semaphore was freed while a thread was still waiting on it"
+        );
+    }
 
-    condvar_free(&event->condvar);
-    mutex_free(&event->mutex);
+    condvar_free(&semaphore->condvar);
+    mutex_free(&semaphore->mutex);
     free(handle);
 }
 
-static bool event_pred(void *ptr)
+static bool semaphore_has_units(void *ptr)
 {
-    event_t *event = ptr;
+    semaphore_t *semaphore = ptr;
 
-    return event->counter != 0;
+    return semaphore->units != 0;
 }
 
-uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
+uacpi_status uacpi_kernel_wait_for_semaphore(
+    uacpi_handle handle, uacpi_u16 timeout
+)
 {
-    event_t *event = handle;
-    bool ok;
+    semaphore_t *semaphore = handle;
+    bool has_units;
 
-    mutex_lock(&event->mutex);
+    mutex_lock(&semaphore->mutex);
 
-    if (event->counter > 0) {
-        event->counter -= 1;
-        mutex_unlock(&event->mutex);
-        return UACPI_TRUE;
+    has_units = semaphore->units != 0;
+    semaphore->num_waiters += 1;
+
+    if (!has_units && timeout == 0xFFFF) {
+        condvar_wait(
+            &semaphore->condvar, &semaphore->mutex, semaphore_has_units,
+            semaphore
+        );
+        has_units = true;
+    } else if (!has_units && timeout != 0) {
+        has_units = condvar_wait_timeout(
+            &semaphore->condvar, &semaphore->mutex, semaphore_has_units,
+            semaphore, timeout * 1000000ull
+        );
     }
 
-    if (timeout == 0) {
-        mutex_unlock(&event->mutex);
-        return UACPI_FALSE;
-    }
+    semaphore->num_waiters -= 1;
 
-    event->num_waiters += 1;
+    if (has_units)
+        semaphore->units -= 1;
 
-    if (timeout == 0xFFFF) {
-        condvar_wait(&event->condvar, &event->mutex, event_pred, event);
-
-        event->num_waiters -= 1;
-        event->counter -= 1;
-        mutex_unlock(&event->mutex);
-        return UACPI_TRUE;
-    }
-
-    ok = condvar_wait_timeout(
-        &event->condvar, &event->mutex, event_pred, event, timeout * 1000000ull
-    );
-    event->num_waiters -= 1;
-
-    if (ok)
-        event->counter -= 1;
-
-    mutex_unlock(&event->mutex);
-    return ok ? UACPI_TRUE : UACPI_FALSE;
+    mutex_unlock(&semaphore->mutex);
+    return has_units ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
 }
 
-void uacpi_kernel_signal_event(uacpi_handle handle)
+void uacpi_kernel_signal_semaphore(uacpi_handle handle)
 {
-    event_t *event = handle;
+    semaphore_t *semaphore = handle;
 
-    mutex_lock(&event->mutex);
+    mutex_lock(&semaphore->mutex);
 
-    event->counter += 1;
-    condvar_signal(&event->condvar);
+    semaphore->units += 1;
+    condvar_signal(&semaphore->condvar);
 
-    mutex_unlock(&event->mutex);
-}
-
-void uacpi_kernel_reset_event(uacpi_handle handle)
-{
-    event_t *event = handle;
-
-    mutex_lock(&event->mutex);
-
-    event->counter = 0;
-
-    mutex_unlock(&event->mutex);
+    mutex_unlock(&semaphore->mutex);
 }
 
 uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req)
@@ -1009,17 +961,21 @@ uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq)
 
 uacpi_handle uacpi_kernel_create_spinlock(void)
 {
-    return uacpi_kernel_create_mutex();
+    mutex_t *mutex = do_malloc(sizeof(*mutex));
+
+    mutex_init(mutex);
+    return mutex;
 }
 
 void uacpi_kernel_free_spinlock(uacpi_handle handle)
 {
-    uacpi_kernel_free_mutex(handle);
+    mutex_free(handle);
+    free(handle);
 }
 
 uacpi_cpu_flags uacpi_kernel_lock_spinlock(uacpi_handle handle)
 {
-    uacpi_kernel_acquire_mutex(handle, 0xFFFF);
+    mutex_lock(handle);
     return 0;
 }
 
@@ -1027,7 +983,7 @@ void uacpi_kernel_unlock_spinlock(uacpi_handle handle, uacpi_cpu_flags flags)
 {
     UACPI_UNUSED(flags);
 
-    uacpi_kernel_release_mutex(handle);
+    mutex_unlock(handle);
 }
 
 #define WORK_TIMEOUT_SECONDS 30

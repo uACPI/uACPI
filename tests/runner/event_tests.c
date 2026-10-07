@@ -204,7 +204,7 @@ static uacpi_status notify_slow(
     UACPI_UNUSED(node);
     UACPI_UNUSED(value);
 
-    uacpi_kernel_signal_event(slow->entered);
+    uacpi_kernel_signal_semaphore(slow->entered);
 
     /*
      * Don't go anywhere until we're waited for, which is what whoever is
@@ -303,12 +303,12 @@ void test_notify_handlers_vs_work(void)
      * A handler that is running at the time of the uninstall must be waited
      * for, as it's free to go away as soon as the uninstall returns.
      */
-    slow.entered = uacpi_kernel_create_event();
+    slow.entered = uacpi_kernel_create_semaphore(0);
     CHECK(slow.entered != UACPI_NULL);
     CHECK_OK(uacpi_install_notify_handler(dev0, notify_slow, &slow));
 
     CHECK_OK(uacpi_execute_simple(UACPI_NULL, "\\NTF0"));
-    CHECK(uacpi_kernel_wait_for_event(slow.entered, 0xFFFF));
+    CHECK_OK(uacpi_kernel_wait_for_semaphore(slow.entered, 0xFFFF));
 
     CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_slow));
     CHECK(slow.finished);
@@ -319,7 +319,7 @@ void test_notify_handlers_vs_work(void)
     CHECK(a.count == 1);
     CHECK(b.count == 1);
 
-    uacpi_kernel_free_event(slow.entered);
+    uacpi_kernel_free_semaphore(slow.entered);
     CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_c));
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
 
