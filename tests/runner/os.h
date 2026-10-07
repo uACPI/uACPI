@@ -303,3 +303,67 @@ static inline void condvar_signal(condvar_t *var)
         error("pthread_cond_signal failed");
 #endif
 }
+
+static inline void condvar_broadcast(condvar_t *var)
+{
+#ifdef _WIN32
+    WakeAllConditionVariable(var);
+#else
+    if (pthread_cond_broadcast(var))
+        error("pthread_cond_broadcast failed");
+#endif
+}
+
+typedef void (*thread_entry_t)(void *ctx);
+
+typedef struct {
+#ifdef _WIN32
+    HANDLE handle;
+#else
+    pthread_t handle;
+#endif
+    thread_entry_t entry;
+    void *ctx;
+} thread_t;
+
+#ifdef _WIN32
+static inline DWORD WINAPI thread_trampoline(LPVOID opaque)
+#else
+static inline void *thread_trampoline(void *opaque)
+#endif
+{
+    thread_t *thread = opaque;
+
+    thread->entry(thread->ctx);
+    return 0;
+}
+
+// The thread object must stay alive until the thread is joined
+static inline void thread_create(
+    thread_t *thread, thread_entry_t entry, void *ctx
+)
+{
+    thread->entry = entry;
+    thread->ctx = ctx;
+
+#ifdef _WIN32
+    thread->handle = CreateThread(NULL, 0, thread_trampoline, thread, 0, NULL);
+    if (thread->handle == NULL)
+        error("CreateThread failed");
+#else
+    if (pthread_create(&thread->handle, NULL, thread_trampoline, thread))
+        error("pthread_create failed");
+#endif
+}
+
+static inline void thread_join(thread_t *thread)
+{
+#ifdef _WIN32
+    if (WaitForSingleObject(thread->handle, INFINITE) != WAIT_OBJECT_0)
+        error("WaitForSingleObject failed");
+    CloseHandle(thread->handle);
+#else
+    if (pthread_join(thread->handle, NULL))
+        error("pthread_join failed");
+#endif
+}
