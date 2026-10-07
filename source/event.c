@@ -675,6 +675,68 @@ out_no_unlock:
     }
 }
 
+/*
+ * Makes sure that an event is only ever dispatched by one of those who notice
+ * that it's pending, which besides the interrupt handler might be someone who
+ * is polling it, possibly on a different CPU.
+ *
+ * This is done by disabling the event if it's both pending and enabled, with
+ * the lock held from the moment it's looked at and until it's disabled. Anyone
+ * else finds it disabled, and leaves it alone. A raw handler is the exception:
+ * the event is not ours to manage in that case, so it's only checked for being
+ * able to fire to begin with, and is otherwise left the way it was found.
+ */
+static uacpi_status gpe_try_claim(
+    struct gp_event *event, uacpi_u8 *out_handler_type,
+    uacpi_bool *out_did_claim
+)
+{
+    uacpi_status ret = UACPI_STATUS_OK;
+    struct gpe_register *reg = event->reg;
+    uacpi_u64 status, enable;
+    uacpi_u8 event_bit;
+    uacpi_cpu_flags flags;
+
+    *out_did_claim = UACPI_FALSE;
+    event_bit = gpe_get_mask(event);
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+
+    /*
+     * The caller goes by this snapshot, as the handler might be replaced as
+     * soon as we let go of the lock. It's always replaced with the lock held,
+     * which is also what orders these loads against whoever has set it up,
+     * possibly on a different CPU just now.
+     */
+    *out_handler_type = event->handler_type;
+
+    ret = uacpi_gas_read_mapped(&reg->status, &status);
+    if (uacpi_unlikely_error(ret))
+        goto out;
+
+    ret = uacpi_gas_read_mapped(&reg->enable, &enable);
+    if (uacpi_unlikely_error(ret))
+        goto out;
+
+    if (!(status & enable & event_bit))
+        goto out;
+
+    if (*out_handler_type == GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW) {
+        *out_did_claim = UACPI_TRUE;
+        goto out;
+    }
+
+    ret = uacpi_gas_write_mapped(&reg->enable, enable & ~event_bit);
+    if (uacpi_likely_success(ret)) {
+        event->block_interrupts = UACPI_TRUE;
+        *out_did_claim = UACPI_TRUE;
+    }
+
+out:
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+    return ret;
+}
+
 static uacpi_interrupt_ret dispatch_gpe(
     uacpi_namespace_node *device_node, struct gp_event *event
 )
@@ -682,16 +744,18 @@ static uacpi_interrupt_ret dispatch_gpe(
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
     uacpi_u8 handler_type;
-    uacpi_cpu_flags flags;
+    uacpi_bool did_claim;
 
-    /*
-     * The handler of an event is always replaced with this lock held, so
-     * taking it is what guarantees that we see the handler in its entirety
-     * even if it was set up by a different CPU just now.
-     */
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-    handler_type = event->handler_type;
-    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+    ret = gpe_try_claim(event, &handler_type, &did_claim);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_error("failed to claim GPE(%02X): %s",
+                    event->idx, uacpi_status_to_string(ret));
+        return int_ret;
+    }
+
+    // Either someone else got to it first, or there's nothing to handle
+    if (!did_claim)
+        return int_ret;
 
     /*
      * For raw handlers we don't do any management whatsoever, we just let the
@@ -702,18 +766,6 @@ static uacpi_interrupt_ret dispatch_gpe(
         return event->native_handler->cb(
             event->native_handler->ctx, device_node, event->idx
         );
-    }
-
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-    ret = set_gpe_state_unlocked(event, GPE_STATE_DISABLED);
-    if (uacpi_likely_success(ret))
-        event->block_interrupts = UACPI_TRUE;
-    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
-
-    if (uacpi_unlikely_error(ret)) {
-        uacpi_error("failed to disable GPE(%02X): %s",
-                    event->idx, uacpi_status_to_string(ret));
-        return int_ret;
     }
 
     if (event->triggering == UACPI_GPE_TRIGGERING_EDGE) {
