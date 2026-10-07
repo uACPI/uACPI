@@ -273,7 +273,12 @@ uacpi_status uacpi_finish_handling_gpe(
  * This is used to permanently silence an event so that further calls to
  * enable/disable as well as suspend/resume get ignored. This might be necessary
  * for GPEs that cause an event storm due to the kernel's inability to properly
- * handle them. The only way to enable a masked event is by a call to unmask.
+ * handle them. The only way to enable a masked event at runtime is by a call
+ * to unmask.
+ *
+ * Note that the mask only applies while the system is running: an event that
+ * is enabled for wake is still going to be enabled by
+ * uacpi_enable_all_wake_gpes even if it's masked.
  *
  * NOTE:
  * - 'gpe_device' may be null for GPEs managed by \_GPE
