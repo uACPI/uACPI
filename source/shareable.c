@@ -16,7 +16,7 @@ uacpi_bool uacpi_bugged_shareable(uacpi_handle handle)
 {
     struct uacpi_shareable *shareable = handle;
 
-    if (uacpi_unlikely(shareable->reference_count == 0))
+    if (uacpi_unlikely(uacpi_atomic_load32(&shareable->reference_count) == 0))
         uacpi_make_shareable_bugged(shareable);
 
     return uacpi_atomic_load32(&shareable->reference_count) == BUGGED_REFCOUNT;
