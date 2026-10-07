@@ -432,10 +432,49 @@ static uacpi_status generic_serial_bus_handler(
     return UACPI_STATUS_OK;
 }
 
+#define OEM_ADDRESS_SPACE ((uacpi_address_space)0x80)
+
+/*
+ * Lets AML know that a region was detached, which is not something that it's
+ * able to tell by itself, by evaluating the DTCH method of the device that
+ * the region belongs to.
+ */
+static uacpi_status oem_handler(uacpi_region_op op, uacpi_handle op_data)
+{
+    switch (op) {
+    case UACPI_REGION_OP_DETACH: {
+        uacpi_region_detach_data *detach_data = op_data;
+        uacpi_namespace_node *device;
+        uacpi_status st;
+
+        device = uacpi_namespace_node_parent(detach_data->region_node);
+
+        st = uacpi_eval(device, "DTCH", NULL, NULL);
+        if (st != UACPI_STATUS_NOT_FOUND)
+            ensure_ok_status(st);
+
+        return UACPI_STATUS_OK;
+    }
+    case UACPI_REGION_OP_READ: {
+        uacpi_region_rw_data *rw_data = op_data;
+
+        rw_data->value = 0x5A;
+        return UACPI_STATUS_OK;
+    }
+    case UACPI_REGION_OP_ATTACH:
+    case UACPI_REGION_OP_WRITE:
+        return UACPI_STATUS_OK;
+    default:
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+}
+
 void test_address_spaces(void)
 {
     uacpi_status st;
     uacpi_object *arg;
+    uacpi_namespace_node *oem_device;
+    uacpi_u64 out_value;
 
     arg = uacpi_object_create_integer(0);
 
@@ -477,6 +516,29 @@ void test_address_spaces(void)
     );
     ensure_ok_status(st);
     eval_one(arg, UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS);
+
+    st = uacpi_install_address_space_handler(
+        uacpi_namespace_root(), OEM_ADDRESS_SPACE, oem_handler, NULL
+    );
+    ensure_ok_status(st);
+    eval_one(arg, OEM_ADDRESS_SPACE);
+
+    /*
+     * A region is also detached when a handler that is closer to it comes
+     * along, which is the case for the only region that this device has.
+     */
+    st = uacpi_namespace_node_find(NULL, "\\OEM1", &oem_device);
+    ensure_ok_status(st);
+
+    st = uacpi_install_address_space_handler(
+        oem_device, OEM_ADDRESS_SPACE, oem_handler, NULL
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_eval_simple_integer(NULL, "COEM", &out_value);
+    ensure_ok_status(st);
+    if (!out_value)
+        error("OEM address space test failed");
 
     uacpi_object_unref(arg);
 }
