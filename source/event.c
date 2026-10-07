@@ -941,7 +941,7 @@ static struct gp_event *gpe_from_block(struct gpe_block *block, uacpi_u16 idx)
         return UACPI_NULL;
 
     offset = idx - block->base_idx;
-    if (offset > block->num_events)
+    if (offset >= block->num_events)
         return UACPI_NULL;
 
     return &block->events[offset];
