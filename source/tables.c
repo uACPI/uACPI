@@ -767,14 +767,14 @@ static uacpi_status handle_table_override(
     uacpi_status ret;
 
     switch (disposition) {
-    case UACPI_TABLE_INSTALLATION_DISPOSITON_VIRTUAL_OVERRIDE:
+    case UACPI_TABLE_INSTALLATION_DISPOSITION_VIRTUAL_OVERRIDE:
         ret = table_install_with_origin_unlocked(
             UACPI_VIRT_ADDR_TO_PTR((uacpi_virt_addr)address),
             UACPI_TABLE_ORIGIN_HOST_VIRTUAL,
             out_table
         );
         return ret;
-    case UACPI_TABLE_INSTALLATION_DISPOSITON_PHYSICAL_OVERRIDE:
+    case UACPI_TABLE_INSTALLATION_DISPOSITION_PHYSICAL_OVERRIDE:
         return table_install_physical_with_origin_unlocked(
             (uacpi_phys_addr)address,
             UACPI_TABLE_ORIGIN_HOST_PHYSICAL,
@@ -827,9 +827,9 @@ static uacpi_status table_install_physical_with_origin_unlocked(
         disposition = installation_handler(virt, &override);
 
         switch (disposition) {
-        case UACPI_TABLE_INSTALLATION_DISPOSITON_ALLOW:
+        case UACPI_TABLE_INSTALLATION_DISPOSITION_ALLOW:
             break;
-        case UACPI_TABLE_INSTALLATION_DISPOSITON_DENY:
+        case UACPI_TABLE_INSTALLATION_DISPOSITION_DENY:
             uacpi_info(
                 "table '%.4s' (0x%016"UACPI_PRIX64") installation denied "
                 "by host", hdr.signature, UACPI_FMT64(phys)
@@ -901,9 +901,9 @@ static uacpi_status table_install_with_origin_unlocked(
         disposition = installation_handler(virt, &override);
 
         switch (disposition) {
-        case UACPI_TABLE_INSTALLATION_DISPOSITON_ALLOW:
+        case UACPI_TABLE_INSTALLATION_DISPOSITION_ALLOW:
             break;
-        case UACPI_TABLE_INSTALLATION_DISPOSITON_DENY:
+        case UACPI_TABLE_INSTALLATION_DISPOSITION_DENY:
             uacpi_info(
                 "table "UACPI_PRI_TBL_HDR" installation denied by host",
                 UACPI_FMT_TBL_HDR(hdr)
