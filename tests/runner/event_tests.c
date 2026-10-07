@@ -1123,6 +1123,38 @@ static uacpi_status notify_use_gpe_block(
     return UACPI_STATUS_OK;
 }
 
+typedef struct {
+    // The IO access to take the interrupt at
+    fake_io_op op;
+    uacpi_io_addr addr;
+
+    // The interrupt to take, and the register to park its handler at
+    uacpi_u32 irq;
+    uacpi_io_addr park_addr;
+
+    bool was_taken;
+    bool was_parked;
+} irq_injection_t;
+
+/*
+ * Takes an interrupt on a different thread right before a specific IO access
+ * is made, and leaves the handler parked in case it gets to look at the
+ * register that we're interested in.
+ */
+static void inject_irq(void *ctx, fake_io_op op, uacpi_io_addr addr)
+{
+    irq_injection_t *injection = ctx;
+
+    if (injection->was_taken || op != injection->op ||
+        addr != injection->addr)
+        return;
+
+    injection->was_taken = true;
+    injection->was_parked = fake_irq_raise_parked(
+        injection->irq, injection->park_addr
+    );
+}
+
 void test_gpe_blocks(void)
 {
     uacpi_namespace_node *dev0 = find_node("\\DEV0");
@@ -1130,6 +1162,7 @@ void test_gpe_blocks(void)
     uacpi_namespace_node *gpec = find_node("\\GPEC");
     notify_log_t log = { 0 };
     gpe_block_user_t user = { 0 };
+    irq_injection_t injection = { 0 };
     uacpi_event_info info;
 
     fake_io_set_write_one_to_clear(GPEB_ADDRESS, GPEB_NUM_REGISTERS);
@@ -1319,6 +1352,58 @@ void test_gpe_blocks(void)
     CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
     CHECK(user.count == 2);
     CHECK(eval_integer("\\GPEB.CNT0") == 4);
+
+    /*
+     * Take an interrupt on a different CPU right as the last of the events is
+     * disabled. Its handler is in the middle of looking at the block, which
+     * therefore must not go away until the handler has returned.
+     */
+    CHECK_OK(uacpi_install_gpe_block(
+        gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+        GPEB_NUM_REGISTERS, GPE_BLOCK_OTHER_IRQ
+    ));
+    CHECK_OK(uacpi_enable_gpe(gpeb, 0));
+
+    injection.op = FAKE_IO_OP_WRITE;
+    injection.addr = GPEB_ADDRESS + GPEB_NUM_REGISTERS * 2 - 1;
+    injection.irq = GPE_BLOCK_OTHER_IRQ;
+    injection.park_addr = GPEB_ADDRESS;
+    fake_io_set_hook(inject_irq, &injection);
+
+    CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
+    CHECK(injection.was_taken);
+    CHECK(injection.was_parked);
+    CHECK(!fake_irq_is_parked());
+
+    /*
+     * Same thing, but this time take it right as the registers of the block
+     * are unmapped. The block is not supposed to be reachable by an interrupt
+     * handler at that point.
+     *
+     * The block shares the SCI this time around: that is the one interrupt
+     * whose handler is guaranteed to still be there, with nothing but the
+     * block being unlinked to keep it away.
+     */
+    fake_io_set_hook(UACPI_NULL, UACPI_NULL);
+
+    CHECK_OK(uacpi_install_gpe_block(
+        gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+        GPEB_NUM_REGISTERS, FAKE_SCI_IRQ
+    ));
+    CHECK_OK(uacpi_enable_gpe(gpeb, 0));
+
+    injection.op = FAKE_IO_OP_UNMAP;
+    injection.addr = GPEB_ADDRESS;
+    injection.irq = FAKE_SCI_IRQ;
+    injection.was_taken = false;
+    injection.was_parked = false;
+    fake_io_set_hook(inject_irq, &injection);
+
+    CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
+    CHECK(injection.was_taken);
+    CHECK(!injection.was_parked);
+
+    fake_io_set_hook(UACPI_NULL, UACPI_NULL);
 
     work_threads_stop();
 
