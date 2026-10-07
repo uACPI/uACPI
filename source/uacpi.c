@@ -133,9 +133,18 @@ const uacpi_char *uacpi_status_to_string(uacpi_status st)
 void uacpi_state_reset(void)
 {
 #ifndef UACPI_BAREBONES_MODE
+    /*
+     * Get rid of everything that is able to produce deferred work first, and
+     * then make sure there's none left, be it a GPE handler or a notification.
+     * Neither would survive the namespace being torn down underneath it.
+     */
+    uacpi_deinitialize_events();
+
+    if (g_uacpi_rt_ctx.init_level >= UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED)
+        uacpi_kernel_wait_for_work_completion();
+
     uacpi_deinitialize_namespace();
     uacpi_deinitialize_interfaces();
-    uacpi_deinitialize_events();
     uacpi_deinitialize_notify();
     uacpi_deinitialize_opregion();
 #endif

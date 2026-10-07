@@ -281,6 +281,11 @@ uacpi_status uacpi_release_global_lock(uacpi_u32 seq);
  * This is called by uACPI automatically if a fatal error occurs during a call
  * to uacpi_initialize/uacpi_namespace_load etc. in order to prevent accidental
  * use of partially uninitialized subsystems.
+ *
+ * NOTE: this waits for all of the in-flight interrupts & deferred work to
+ *       complete, see uacpi_kernel_wait_for_work_completion, and therefore
+ *       must not be called from an interrupt handler, nor from any work that
+ *       was scheduled via uacpi_kernel_schedule_work.
  */
 void uacpi_state_reset(void);
 
