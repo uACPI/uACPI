@@ -799,7 +799,11 @@ typedef struct {
     mutex_t mutex;
     condvar_t condvar;
     size_t counter;
+    size_t num_waiters;
 } event_t;
+
+// Safe to use no matter how many threads there are, unlike error()
+NORETURN static void work_fatal(const char *reason);
 
 uacpi_handle uacpi_kernel_create_event(void)
 {
@@ -813,6 +817,14 @@ uacpi_handle uacpi_kernel_create_event(void)
 void uacpi_kernel_free_event(uacpi_handle handle)
 {
     event_t *event = handle;
+    bool has_waiters;
+
+    mutex_lock(&event->mutex);
+    has_waiters = event->num_waiters != 0;
+    mutex_unlock(&event->mutex);
+
+    if (has_waiters)
+        work_fatal("an event was freed while a thread was still waiting on it");
 
     condvar_free(&event->condvar);
     mutex_free(&event->mutex);
@@ -844,9 +856,12 @@ uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
         return UACPI_FALSE;
     }
 
+    event->num_waiters += 1;
+
     if (timeout == 0xFFFF) {
         condvar_wait(&event->condvar, &event->mutex, event_pred, event);
 
+        event->num_waiters -= 1;
         event->counter -= 1;
         mutex_unlock(&event->mutex);
         return UACPI_TRUE;
@@ -855,6 +870,8 @@ uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
     ok = condvar_wait_timeout(
         &event->condvar, &event->mutex, event_pred, event, timeout * 1000000ull
     );
+    event->num_waiters -= 1;
+
     if (ok)
         event->counter -= 1;
 
