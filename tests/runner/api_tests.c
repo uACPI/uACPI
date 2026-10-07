@@ -539,7 +539,7 @@ void test_address_spaces(void)
     uacpi_status st;
     uacpi_object *arg;
     struct uninstaller_ctx self_ctx = { 0 };
-    uacpi_namespace_node *oem_device;
+    uacpi_namespace_node *oem_device, *ipmi_device;
     uacpi_u64 out_value;
 
     arg = uacpi_object_create_integer(0);
@@ -667,6 +667,16 @@ void test_address_spaces(void)
     if (!out_value)
         error("OEM address space test failed");
 
+    // Give one of the IPMI regions a handler that is closer to it
+    st = uacpi_namespace_node_find(NULL, "\\IPM2", &ipmi_device);
+    ensure_ok_status(st);
+
+    st = uacpi_install_address_space_handler(
+        ipmi_device, UACPI_ADDRESS_SPACE_IPMI, ipmi_handler, NULL
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CRG2", true);
+
     /*
      * The regions of an address space are disconnected once its handler is
      * gone, no matter how many other handlers were installed after it.
@@ -676,6 +686,15 @@ void test_address_spaces(void)
     );
     ensure_ok_status(st);
     check_connected(arg, "CREG", false);
+
+    // This only applies to the regions that the handler was actually serving
+    check_connected(arg, "CRG2", true);
+
+    st = uacpi_uninstall_address_space_handler(
+        ipmi_device, UACPI_ADDRESS_SPACE_IPMI, ipmi_handler
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CRG2", false);
 
     uacpi_object_unref(arg);
 }
