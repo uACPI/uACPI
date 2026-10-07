@@ -365,13 +365,13 @@ static uacpi_table_installation_disposition handle_table_install(
 )
 {
     if (!strncmp(hdr->oem_table_id, "DENYTABL", sizeof(hdr->oem_table_id)))
-        return UACPI_TABLE_INSTALLATION_DISPOSITON_DENY;
+        return UACPI_TABLE_INSTALLATION_DISPOSITION_DENY;
 
     if (strncmp(hdr->oem_table_id, "OVERTABL", sizeof(hdr->oem_table_id)))
-        return UACPI_TABLE_INSTALLATION_DISPOSITON_ALLOW;
+        return UACPI_TABLE_INSTALLATION_DISPOSITION_ALLOW;
 
     *out_override = (uacpi_virt_addr)table_override;
-    return UACPI_TABLE_INSTALLATION_DISPOSITON_VIRTUAL_OVERRIDE;
+    return UACPI_TABLE_INSTALLATION_DISPOSITION_VIRTUAL_OVERRIDE;
 }
 
 static uacpi_status handle_notify(
