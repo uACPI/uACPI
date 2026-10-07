@@ -1027,3 +1027,200 @@ void test_wake_gpes(void)
     CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_a));
     CHECK_OK(uacpi_uninstall_notify_handler(dev2, notify_a));
 }
+
+#define GPEB_ADDRESS 0x1000
+#define GPEB_NUM_REGISTERS 2
+
+#define GPEC_ADDRESS 0x1100
+#define GPEC_NUM_REGISTERS 1
+
+#define GPE_BLOCK_IRQ 11
+#define GPE_BLOCK_OTHER_IRQ 12
+
+static void gpe_block_fire(uacpi_io_addr base, uacpi_u32 irq, uacpi_u16 idx)
+{
+    fake_io_raise(base + idx / 8, (uint8_t)(1 << (idx % 8)));
+    CHECK(fake_irq_raise(irq) == UACPI_INTERRUPT_HANDLED);
+}
+
+typedef struct {
+    uacpi_namespace_node *gpe_device;
+    size_t count;
+} gpe_block_user_t;
+
+/*
+ * Called while the block is in the middle of being uninstalled. Enable an
+ * event from a register that might've not been looked at just yet.
+ */
+static uacpi_status notify_use_gpe_block(
+    uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value
+)
+{
+    gpe_block_user_t *user = ctx;
+    uacpi_event_info info;
+
+    UACPI_UNUSED(node);
+    UACPI_UNUSED(value);
+
+    CHECK_OK(uacpi_gpe_info(user->gpe_device, 0, &info));
+    CHECK_OK(uacpi_enable_gpe(user->gpe_device, 9));
+
+    user->count++;
+    return UACPI_STATUS_OK;
+}
+
+void test_gpe_blocks(void)
+{
+    uacpi_namespace_node *dev0 = find_node("\\DEV0");
+    uacpi_namespace_node *gpeb = find_node("\\GPEB");
+    uacpi_namespace_node *gpec = find_node("\\GPEC");
+    notify_log_t log = { 0 };
+    gpe_block_user_t user = { 0 };
+    uacpi_event_info info;
+
+    fake_io_set_write_one_to_clear(GPEB_ADDRESS, GPEB_NUM_REGISTERS);
+    fake_io_set_write_one_to_clear(GPEC_ADDRESS, GPEC_NUM_REGISTERS);
+
+    CHECK_STATUS(uacpi_gpe_info(gpeb, 0, &info), UACPI_STATUS_NOT_FOUND);
+    CHECK_STATUS(uacpi_uninstall_gpe_block(gpeb), UACPI_STATUS_NOT_FOUND);
+    CHECK_STATUS(
+        uacpi_install_gpe_block(
+            find_node("\\MAIN"), GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+            GPEB_NUM_REGISTERS, GPE_BLOCK_IRQ
+        ), UACPI_STATUS_INVALID_ARGUMENT
+    );
+
+    CHECK_OK(uacpi_install_gpe_block(
+        gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+        GPEB_NUM_REGISTERS, GPE_BLOCK_IRQ
+    ));
+    CHECK_STATUS(
+        uacpi_install_gpe_block(
+            gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+            GPEB_NUM_REGISTERS, GPE_BLOCK_IRQ
+        ), UACPI_STATUS_ALREADY_EXISTS
+    );
+
+    // The methods are looked up in the scope of the device
+    CHECK_GPE_INFO(gpeb, 0, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(gpeb, 1, 0);
+    CHECK_GPE_INFO(gpeb, 9, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(gpeb, 15, 0);
+    CHECK_STATUS(uacpi_gpe_info(gpeb, 16, &info), UACPI_STATUS_NOT_FOUND);
+
+    // And have nothing to do with the events described by the FADT
+    CHECK_GPE_INFO(UACPI_NULL, 0, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(UACPI_NULL, 9, 0);
+
+    // The events of every block that exists at this point get enabled
+    CHECK_OK(uacpi_finalize_gpe_initialization());
+    CHECK_GPE_INFO(gpeb, 0, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(gpeb, 9, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+
+    // This is not the case for a block that is installed later on
+    CHECK_OK(uacpi_install_gpe_block(
+        gpec, GPEC_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+        GPEC_NUM_REGISTERS, GPE_BLOCK_IRQ
+    ));
+    CHECK_GPE_INFO(gpec, 1, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_STATUS(uacpi_gpe_info(gpec, 8, &info), UACPI_STATUS_NOT_FOUND);
+    CHECK_OK(uacpi_enable_gpe(gpec, 1));
+
+    CHECK_OK(uacpi_install_notify_handler(dev0, notify_a, &log));
+
+    gpe_block_fire(GPEB_ADDRESS, GPE_BLOCK_IRQ, 0);
+    CHECK(eval_integer("\\GPEB.CNT0") == 1);
+    CHECK(log.count == 1);
+    CHECK_GPE_INFO(gpeb, 0, GPE_INFO_ENABLED);
+
+    gpe_block_fire(GPEB_ADDRESS, GPE_BLOCK_IRQ, 9);
+    CHECK(eval_integer("\\GPEB.CNT9") == 1);
+
+    gpe_block_fire(GPEC_ADDRESS, GPE_BLOCK_IRQ, 1);
+    CHECK(eval_integer("\\GPEC.CNT1") == 1);
+
+    gpe_fire(0);
+    CHECK(eval_integer("\\_GPE.CNT0") == 1);
+    CHECK(eval_integer("\\GPEB.CNT0") == 1);
+
+    // A block is only serviced by the interrupt that it was installed for
+    fake_io_raise(GPEB_ADDRESS, 1);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(fake_irq_raise(GPE_BLOCK_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(eval_integer("\\GPEB.CNT0") == 2);
+
+    // The interrupt stays around for as long as there's a block that uses it
+    CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
+    CHECK_STATUS(uacpi_gpe_info(gpeb, 0, &info), UACPI_STATUS_NOT_FOUND);
+
+    fake_io_raise(GPEB_ADDRESS, 1);
+    CHECK(fake_irq_raise(GPE_BLOCK_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    gpe_block_fire(GPEC_ADDRESS, GPE_BLOCK_IRQ, 1);
+    CHECK(eval_integer("\\GPEC.CNT1") == 2);
+
+    CHECK_OK(uacpi_uninstall_gpe_block(gpec));
+    CHECK_STATUS(uacpi_uninstall_gpe_block(gpec), UACPI_STATUS_NOT_FOUND);
+
+    fake_io_raise(GPEC_ADDRESS, 2);
+    CHECK(fake_irq_raise(GPE_BLOCK_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    // None of the above is supposed to have any effect on the other blocks
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+    gpe_fire(0);
+    CHECK(eval_integer("\\_GPE.CNT0") == 2);
+
+    // A block that shares the interrupt with the FADT ones
+    CHECK_OK(uacpi_install_gpe_block(
+        gpec, GPEC_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+        GPEC_NUM_REGISTERS, FAKE_SCI_IRQ
+    ));
+    CHECK_GPE_INFO(gpec, 1, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_OK(uacpi_enable_gpe(gpec, 1));
+
+    gpe_block_fire(GPEC_ADDRESS, FAKE_SCI_IRQ, 1);
+    CHECK(eval_integer("\\GPEC.CNT1") == 3);
+
+    CHECK_OK(uacpi_uninstall_gpe_block(gpec));
+    gpe_fire(0);
+    CHECK(eval_integer("\\_GPE.CNT0") == 3);
+
+    /*
+     * Uninstall a block while one of its events is being handled. The handler
+     * notifies DEV0, which then goes on to enable an event from the second
+     * register of that very block.
+     */
+    CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_a));
+
+    CHECK_OK(uacpi_install_gpe_block(
+        gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
+        GPEB_NUM_REGISTERS, GPE_BLOCK_OTHER_IRQ
+    ));
+    CHECK_GPE_INFO(gpeb, 0, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_OK(uacpi_enable_gpe(gpeb, 0));
+
+    user.gpe_device = gpeb;
+    CHECK_OK(uacpi_install_notify_handler(dev0, notify_use_gpe_block, &user));
+
+    work_threads_start();
+
+    work_hold();
+    gpe_block_fire(GPEB_ADDRESS, GPE_BLOCK_OTHER_IRQ, 0);
+
+    CHECK_OK(uacpi_uninstall_gpe_block(gpeb));
+    CHECK(user.count == 1);
+    CHECK(eval_integer("\\GPEB.CNT0") == 3);
+
+    work_threads_stop();
+
+    CHECK_STATUS(uacpi_gpe_info(gpeb, 9, &info), UACPI_STATUS_NOT_FOUND);
+
+    fake_io_raise(GPEB_ADDRESS + 1, 2);
+    CHECK(
+        fake_irq_raise(GPE_BLOCK_OTHER_IRQ) == UACPI_INTERRUPT_NOT_HANDLED
+    );
+
+    CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_use_gpe_block));
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+}
