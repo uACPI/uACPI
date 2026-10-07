@@ -238,7 +238,7 @@ static inline bool condvar_wait_timeout(
             return false;
 
 #ifdef _WIN32
-        milliseconds = (end - cur) / 1000;
+        milliseconds = (end - cur) / 1000000;
         if (milliseconds == 0)
             milliseconds = 1;
 
