@@ -4,6 +4,7 @@
 #include <uacpi/internal/shareable.h>
 #include <uacpi/internal/dynamic_array.h>
 #include <uacpi/internal/log.h>
+#include <uacpi/internal/mutex.h>
 #include <uacpi/internal/namespace.h>
 #include <uacpi/internal/tables.h>
 #include <uacpi/kernel_api.h>
@@ -188,7 +189,7 @@ uacpi_mutex *uacpi_create_mutex(void)
 
     mutex->owner = UACPI_THREAD_ID_NONE;
 
-    mutex->handle = uacpi_kernel_create_mutex();
+    mutex->handle = uacpi_create_native_mutex();
     if (mutex->handle == UACPI_NULL) {
         uacpi_free(mutex, sizeof(*mutex));
         return UACPI_NULL;
@@ -488,7 +489,7 @@ static void free_mutex(uacpi_handle handle)
 {
     uacpi_mutex *mutex = handle;
 
-    uacpi_kernel_free_mutex(mutex->handle);
+    uacpi_free_native_mutex(mutex->handle);
     uacpi_free(mutex, sizeof(*mutex));
 }
 

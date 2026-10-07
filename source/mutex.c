@@ -255,7 +255,7 @@ uacpi_status uacpi_release_aml_mutex(uacpi_mutex *mutex)
 
 uacpi_status uacpi_recursive_lock_init(struct uacpi_recursive_lock *lock)
 {
-    lock->mutex = uacpi_kernel_create_mutex();
+    lock->mutex = uacpi_create_native_mutex();
     if (uacpi_unlikely(lock->mutex == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
@@ -278,7 +278,7 @@ uacpi_status uacpi_recursive_lock_deinit(struct uacpi_recursive_lock *lock)
     lock->owner = UACPI_THREAD_ID_NONE;
 
     if (lock->mutex != UACPI_NULL) {
-        uacpi_kernel_free_mutex(lock->mutex);
+        uacpi_free_native_mutex(lock->mutex);
         lock->mutex = UACPI_NULL;
     }
 
@@ -316,13 +316,13 @@ uacpi_status uacpi_recursive_lock_release(struct uacpi_recursive_lock *lock)
 
 uacpi_status uacpi_rw_lock_init(struct uacpi_rw_lock *lock)
 {
-    lock->read_mutex = uacpi_kernel_create_mutex();
+    lock->read_mutex = uacpi_create_native_mutex();
     if (uacpi_unlikely(lock->read_mutex == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
-    lock->write_mutex = uacpi_kernel_create_mutex();
+    lock->write_mutex = uacpi_create_native_mutex();
     if (uacpi_unlikely(lock->write_mutex == UACPI_NULL)) {
-        uacpi_kernel_free_mutex(lock->read_mutex);
+        uacpi_free_native_mutex(lock->read_mutex);
         lock->read_mutex = UACPI_NULL;
         return UACPI_STATUS_OUT_OF_MEMORY;
     }
@@ -340,11 +340,11 @@ uacpi_status uacpi_rw_lock_deinit(struct uacpi_rw_lock *lock)
     }
 
     if (lock->read_mutex != UACPI_NULL) {
-        uacpi_kernel_free_mutex(lock->read_mutex);
+        uacpi_free_native_mutex(lock->read_mutex);
         lock->read_mutex = UACPI_NULL;
     }
     if (lock->write_mutex != UACPI_NULL) {
-        uacpi_kernel_free_mutex(lock->write_mutex);
+        uacpi_free_native_mutex(lock->write_mutex);
         lock->write_mutex = UACPI_NULL;
     }
 
@@ -365,7 +365,7 @@ uacpi_status uacpi_rw_lock_read(struct uacpi_rw_lock *lock)
             lock->num_readers = 0;
     }
 
-    uacpi_kernel_release_mutex(lock->read_mutex);
+    uacpi_release_native_mutex(lock->read_mutex);
     return ret;
 }
 
@@ -380,7 +380,7 @@ uacpi_status uacpi_rw_unlock_read(struct uacpi_rw_lock *lock)
     if (lock->num_readers-- == 1)
         uacpi_release_native_mutex(lock->write_mutex);
 
-    uacpi_kernel_release_mutex(lock->read_mutex);
+    uacpi_release_native_mutex(lock->read_mutex);
     return ret;
 }
 

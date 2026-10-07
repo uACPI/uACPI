@@ -14,7 +14,7 @@ static uacpi_handle notify_mutex;
 
 uacpi_status uacpi_initialize_notify(void)
 {
-    notify_mutex = uacpi_kernel_create_mutex();
+    notify_mutex = uacpi_create_native_mutex();
     if (uacpi_unlikely(notify_mutex == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
@@ -24,7 +24,7 @@ uacpi_status uacpi_initialize_notify(void)
 void uacpi_deinitialize_notify(void)
 {
     if (notify_mutex != UACPI_NULL)
-        uacpi_kernel_free_mutex(notify_mutex);
+        uacpi_free_native_mutex(notify_mutex);
 
     notify_mutex = UACPI_NULL;
 }

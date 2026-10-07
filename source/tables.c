@@ -340,7 +340,7 @@ uacpi_status uacpi_initialize_tables(void)
         }
     }
 
-    table_mutex = uacpi_kernel_create_mutex();
+    table_mutex = uacpi_create_native_mutex();
     if (uacpi_unlikely(table_mutex == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
@@ -383,7 +383,7 @@ void uacpi_deinitialize_tables(void)
 
 #ifndef UACPI_BAREBONES_MODE
     if (table_mutex)
-        uacpi_kernel_free_mutex(table_mutex);
+        uacpi_free_native_mutex(table_mutex);
 
     table_mutex = UACPI_NULL;
 #endif

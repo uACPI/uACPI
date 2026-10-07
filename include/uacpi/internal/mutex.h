@@ -10,6 +10,16 @@ uacpi_bool uacpi_this_thread_owns_aml_mutex(uacpi_mutex*);
 uacpi_status uacpi_acquire_aml_mutex(uacpi_mutex*, uacpi_u16 timeout);
 uacpi_status uacpi_release_aml_mutex(uacpi_mutex*);
 
+static inline uacpi_handle uacpi_create_native_mutex(void)
+{
+    return uacpi_kernel_create_mutex();
+}
+
+static inline void uacpi_free_native_mutex(uacpi_handle mtx)
+{
+    uacpi_kernel_free_mutex(mtx);
+}
+
 static inline uacpi_status uacpi_acquire_native_mutex(uacpi_handle mtx)
 {
     if (uacpi_unlikely(mtx == UACPI_NULL))
