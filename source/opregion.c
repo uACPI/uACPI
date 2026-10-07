@@ -282,18 +282,48 @@ uacpi_status uacpi_opregion_attach(uacpi_namespace_node *node)
 
     attach_data.handler_context = handler->user_context;
 
+    /*
+     * The handler is invoked with the namespace unlocked, and is free to do
+     * whatever it wants in the meantime, which includes evaluating a method
+     * that gets rid of the region, as well as uninstalling itself. Keep both
+     * of them alive until we're done.
+     */
     uacpi_object_ref(obj);
+    uacpi_shareable_ref(handler);
+
     uacpi_namespace_write_unlock();
     ret = handler->callback(UACPI_REGION_OP_ATTACH, &attach_data);
     uacpi_namespace_write_lock();
 
-    if (uacpi_unlikely_error(ret)) {
-        uacpi_object_unref(obj);
-        return ret;
+    if (uacpi_unlikely_error(ret))
+        goto out;
+
+    if (uacpi_unlikely(region->handler != handler)) {
+        uacpi_region_detach_data detach_data = { 0 };
+
+        /*
+         * The region was taken away from the handler before it was done
+         * attaching it. This is not something that the handler was told
+         * about, as the region was not attached at the time, so do it now:
+         * a region that was attached is always detached as well.
+         */
+        detach_data.region_node = node;
+        detach_data.region_context = attach_data.out_region_context;
+        detach_data.handler_context = handler->user_context;
+
+        uacpi_namespace_write_unlock();
+        handler->callback(UACPI_REGION_OP_DETACH, &detach_data);
+        uacpi_namespace_write_lock();
+
+        ret = UACPI_STATUS_NO_HANDLER;
+        goto out;
     }
 
     region->state_flags |= UACPI_OP_REGION_STATE_ATTACHED;
     region->user_context = attach_data.out_region_context;
+
+out:
+    uacpi_address_space_handler_unref(handler);
     uacpi_object_unref(obj);
     return ret;
 }
