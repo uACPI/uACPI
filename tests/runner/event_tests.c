@@ -868,3 +868,162 @@ void test_gpe_handlers(void)
     do_test_gpe_handlers();
     work_threads_stop();
 }
+
+void test_wake_gpes(void)
+{
+    uacpi_namespace_node *dev0 = find_node("\\DEV0");
+    uacpi_namespace_node *dev1 = find_node("\\DEV1");
+    uacpi_namespace_node *dev2 = find_node("\\DEV2");
+    notify_log_t log0 = { 0 }, log1 = { 0 }, log2 = { 0 };
+
+    /*
+     * An event that is marked as wake is not enabled along with the rest of
+     * the events that have a handler, it's on whoever marked it to do that.
+     */
+    CHECK_STATUS(
+        uacpi_setup_gpe_for_wake(UACPI_NULL, 3, find_node("\\MAIN")),
+        UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 3, UACPI_NULL));
+
+    CHECK_OK(uacpi_finalize_gpe_initialization());
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(UACPI_NULL, 3, UACPI_EVENT_INFO_HAS_HANDLER);
+
+    // The handler of GPE 03 is expected to notify the device as needed
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 3, dev0));
+    CHECK_GPE_INFO(UACPI_NULL, 3, UACPI_EVENT_INFO_HAS_HANDLER);
+
+    // GPEs 10 and 11 have no handler, so that is something we do ourselves
+    CHECK_GPE_INFO(UACPI_NULL, 0x10, 0);
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x10, dev1));
+    CHECK_GPE_INFO(UACPI_NULL, 0x10, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_STATUS(
+        uacpi_setup_gpe_for_wake(UACPI_NULL, 0x10, dev1),
+        UACPI_STATUS_ALREADY_EXISTS
+    );
+
+    // An event may be shared by multiple devices
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x10, dev2));
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x11, dev2));
+
+    CHECK_OK(uacpi_install_notify_handler(dev0, notify_a, &log0));
+    CHECK_OK(uacpi_install_notify_handler(dev1, notify_a, &log1));
+    CHECK_OK(uacpi_install_notify_handler(dev2, notify_a, &log2));
+
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 3));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0x10));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0x11));
+
+    gpe_fire(3);
+    CHECK(eval_integer("\\_GPE.CNT3") == 1);
+    CHECK(log0.count == 1);
+    CHECK(log0.node == dev0);
+    CHECK(log0.value == 2);
+    CHECK_GPE_INFO(UACPI_NULL, 3, GPE_INFO_ENABLED);
+
+    gpe_fire(0x10);
+    CHECK(log1.count == 1);
+    CHECK(log1.node == dev1);
+    CHECK(log1.value == 2);
+    CHECK(log2.count == 1);
+    CHECK(log2.node == dev2);
+    CHECK(log2.value == 2);
+    CHECK_GPE_INFO(UACPI_NULL, 0x10, GPE_INFO_ENABLED);
+
+    // Same thing, but with the notifications delivered by the work threads
+    work_threads_start();
+
+    gpe_fire(0x11);
+    flush_work();
+    CHECK(log1.count == 1);
+    CHECK(log2.count == 2);
+    CHECK_GPE_INFO(UACPI_NULL, 0x11, GPE_INFO_ENABLED);
+
+    work_threads_stop();
+
+    // Only an event that is marked as wake can be enabled for it
+    CHECK_STATUS(
+        uacpi_enable_gpe_for_wake(UACPI_NULL, 0),
+        UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_OK(uacpi_enable_gpe_for_wake(UACPI_NULL, 3));
+    CHECK_OK(uacpi_enable_gpe_for_wake(UACPI_NULL, 0x10));
+    CHECK_OK(uacpi_enable_gpe_for_wake(UACPI_NULL, 0x11));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0x10,
+        GPE_INFO_ENABLED | UACPI_EVENT_INFO_ENABLED_FOR_WAKE
+    );
+
+    // This must not affect GPE 11, which lives in the same register
+    CHECK_OK(uacpi_disable_gpe_for_wake(UACPI_NULL, 0x10));
+    CHECK_GPE_INFO(UACPI_NULL, 0x10, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0x11,
+        GPE_INFO_ENABLED | UACPI_EVENT_INFO_ENABLED_FOR_WAKE
+    );
+    CHECK_GPE_INFO(
+        UACPI_NULL, 3, GPE_INFO_ENABLED | UACPI_EVENT_INFO_ENABLED_FOR_WAKE
+    );
+
+    // Only the events that are enabled for wake stay on when going to sleep
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 3));
+    CHECK_OK(uacpi_enable_all_wake_gpes());
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+    CHECK_GPE_INFO(
+        UACPI_NULL, 3,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED_FOR_WAKE |
+        UACPI_EVENT_INFO_HW_ENABLED
+    );
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0x10,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0x11,
+        GPE_INFO_ENABLED | UACPI_EVENT_INFO_ENABLED_FOR_WAKE
+    );
+
+    // And the other way around once we're back
+    CHECK_OK(uacpi_enable_all_runtime_gpes());
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 3,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED_FOR_WAKE
+    );
+    CHECK_GPE_INFO(UACPI_NULL, 0x10, GPE_INFO_ENABLED);
+
+    CHECK_OK(uacpi_disable_all_gpes());
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0x11,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_ENABLED_FOR_WAKE
+    );
+
+    gpe_set_status(0);
+    gpe_set_status(0x10);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 0));
+    CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 0x10));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+
+    CHECK_OK(uacpi_enable_all_runtime_gpes());
+    gpe_fire(0);
+    CHECK(eval_integer("\\_GPE.CNT0") == 1);
+    CHECK(log1.count == 1);
+
+    CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_a));
+    CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_a));
+    CHECK_OK(uacpi_uninstall_notify_handler(dev2, notify_a));
+}
