@@ -808,6 +808,33 @@ static void do_test_gpe_handlers(void)
     CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
     CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
 
+    /*
+     * This only applies to an event that is actually able to fire, which is
+     * not the case for one that is masked: it must be left alone until it's
+     * unmasked.
+     */
+    CHECK_OK(uacpi_mask_gpe(UACPI_NULL, 1));
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 1, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+
+    gpe_set_status(1);
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 1, log_gpe));
+    flush_work();
+    CHECK(log.count == 1);
+    CHECK(eval_integer("\\_GPE.CNT1") == cnt1);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 1,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_MASKED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 1));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
     // A raw handler is on its own, we don't touch the event in any way
     log.count = 0;
     log.ret = UACPI_INTERRUPT_HANDLED;
@@ -831,6 +858,31 @@ static void do_test_gpe_handlers(void)
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
     CHECK(log.count == 2);
 
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+
+    /*
+     * That still doesn't make it okay to invoke the handler for an event that
+     * is not able to fire, which is the case for the one that is masked, even
+     * if it happens to be pending at the time that it's polled.
+     */
+    CHECK_OK(uacpi_install_gpe_handler_raw(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_OK(uacpi_mask_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+
+    gpe_set_status(11);
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+    CHECK(log.count == 2);
+
+    CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 11));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(log.count == 3);
+
+    CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
     CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
     CHECK_GPE_INFO(UACPI_NULL, 11, 0);
