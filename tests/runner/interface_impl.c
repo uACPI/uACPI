@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <uacpi/kernel_api.h>
+#include <uacpi/platform/atomic.h>
 #include <uacpi/status.h>
 #include <uacpi/types.h>
 
@@ -583,6 +584,21 @@ void interface_cleanup(void)
 #endif
 }
 
+static uacpi_u32 alloc_fail_next;
+
+void fail_next_alloc(void)
+{
+    uacpi_atomic_store32(&alloc_fail_next, 1);
+}
+
+static bool alloc_should_fail(void)
+{
+    uacpi_u32 expected = 1;
+
+    // Only one of the allocations gets to fail, no matter how many there are
+    return uacpi_atomic_cmpxchg32(&alloc_fail_next, &expected, 0);
+}
+
 #ifdef UACPI_SIZED_FREES
 
 typedef struct {
@@ -597,6 +613,8 @@ void *uacpi_kernel_alloc(uacpi_size size)
 
     if (size == 0)
         abort();
+    if (alloc_should_fail())
+        return NULL;
 
     ret = malloc(size);
     if (ret == NULL)
@@ -650,6 +668,8 @@ void *uacpi_kernel_alloc(uacpi_size size)
 {
     if (size == 0)
         error("attempted to allocate zero bytes");
+    if (alloc_should_fail())
+        return NULL;
 
     return malloc(size);
 }

@@ -305,6 +305,9 @@ void work_threads_stop(void);
 void work_hold(void);
 void work_release(void);
 
+// Make the next call to uacpi_kernel_alloc(_zeroed) fail
+void fail_next_alloc(void);
+
 // Free whatever the kernel interface uses to track mappings & allocations
 void interface_cleanup(void);
 

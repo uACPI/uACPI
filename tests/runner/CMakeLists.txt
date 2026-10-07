@@ -79,6 +79,7 @@ define_test_runner(
     interface_impl.c
     resource_tests.c
     api_tests.c
+    event_tests.c
 )
 find_package(Threads REQUIRED)
 target_link_libraries(test-runner PRIVATE Threads::Threads)
