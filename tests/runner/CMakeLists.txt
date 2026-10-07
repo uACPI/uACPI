@@ -79,6 +79,7 @@ define_test_runner(
     interface_impl.c
     resource_tests.c
     api_tests.c
+    aml_threads.c
     event_tests.c
 )
 find_package(Threads REQUIRED)
