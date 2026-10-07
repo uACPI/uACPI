@@ -97,6 +97,25 @@ static inline void millisecond_sleep(uint64_t milliseconds)
 #endif
 }
 
+#if HAVE_TIMED_WAIT
+static inline void timespec_add_nanoseconds(
+    struct timespec *spec, uint64_t nanoseconds
+)
+{
+    /*
+     * The nanosecond field might be as small as 32 bits, so make sure it never
+     * has to hold more than two seconds worth of them.
+     */
+    spec->tv_sec += nanoseconds / NANOSECONDS_PER_SECOND;
+    spec->tv_nsec += nanoseconds % NANOSECONDS_PER_SECOND;
+
+    if ((uint64_t)spec->tv_nsec >= NANOSECONDS_PER_SECOND) {
+        spec->tv_sec += 1;
+        spec->tv_nsec -= NANOSECONDS_PER_SECOND;
+    }
+}
+#endif
+
 static inline void mutex_init(mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -161,9 +180,7 @@ static inline bool mutex_lock_timeout(mutex_t *mutex, uint64_t timeout_ns)
     if (clock_gettime(CLOCK_MONOTONIC, &spec))
         error("clock_gettime failed");
 
-    spec.tv_nsec += timeout_ns;
-    spec.tv_sec += spec.tv_nsec / NANOSECONDS_PER_SECOND;
-    spec.tv_nsec %= NANOSECONDS_PER_SECOND;
+    timespec_add_nanoseconds(&spec, timeout_ns);
 
     err = pthread_mutex_clocklock(mutex, CLOCK_MONOTONIC, &spec);
     if (err == 0)
@@ -261,9 +278,7 @@ static inline bool condvar_wait_timeout(
     if (clock_gettime(CLOCK_MONOTONIC, &spec))
         error("clock_gettime failed");
 
-    spec.tv_nsec += timeout_ns;
-    spec.tv_sec += spec.tv_nsec / NANOSECONDS_PER_SECOND;
-    spec.tv_nsec %= NANOSECONDS_PER_SECOND;
+    timespec_add_nanoseconds(&spec, timeout_ns);
 
     while (!pred(ctx)) {
         int err = pthread_cond_clockwait(var, mutex, CLOCK_MONOTONIC, &spec);
