@@ -36,6 +36,7 @@ static const struct {
     { "check-object-api-works", test_object_api },
     { "check-address-spaces-work", test_address_spaces },
     { "check-notify-install-handles-oom", test_notify_install_oom },
+    { "check-notify-handlers-dont-deadlock", test_notify_handlers_vs_work },
 };
 
 static uacpi_object_type string_to_object_type(const char *str)
