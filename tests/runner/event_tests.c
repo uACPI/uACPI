@@ -1380,6 +1380,30 @@ void test_fixed_events(void)
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
     CHECK(power.count == 2);
 
+    /*
+     * Acknowledging an event must not affect any other event that happens to
+     * be pending at the same time, be it done by us or by hand.
+     */
+    fixed_event_set_status(
+        ACPI_PM1_STS_PWRBTN_STS_MASK | ACPI_PM1_STS_SLPBTN_STS_MASK
+    );
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(power.count == 3);
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_POWER_BUTTON, FIXED_INFO_ENABLED);
+    CHECK_FIXED_INFO(
+        UACPI_FIXED_EVENT_SLEEP_BUTTON, UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    fixed_event_set_status(ACPI_PM1_STS_PWRBTN_STS_MASK);
+    CHECK_OK(uacpi_clear_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON));
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_POWER_BUTTON, FIXED_INFO_ENABLED);
+    CHECK_FIXED_INFO(
+        UACPI_FIXED_EVENT_SLEEP_BUTTON, UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK_OK(uacpi_clear_fixed_event(UACPI_FIXED_EVENT_SLEEP_BUTTON));
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_SLEEP_BUTTON, 0);
+
     // The very last fixed event
     CHECK_OK(uacpi_install_fixed_event_handler(
         UACPI_FIXED_EVENT_RTC, log_fixed_event, &rtc
@@ -1389,7 +1413,7 @@ void test_fixed_events(void)
     fixed_event_set_status(ACPI_PM1_STS_RTC_STS_MASK);
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
     CHECK(rtc.count == 1);
-    CHECK(power.count == 2);
+    CHECK(power.count == 3);
     CHECK_FIXED_INFO(UACPI_FIXED_EVENT_RTC, FIXED_INFO_ENABLED);
 
     // More than one event may be pending at once
@@ -1397,7 +1421,7 @@ void test_fixed_events(void)
         ACPI_PM1_STS_PWRBTN_STS_MASK | ACPI_PM1_STS_RTC_STS_MASK
     );
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
-    CHECK(power.count == 3);
+    CHECK(power.count == 4);
     CHECK(rtc.count == 2);
 
     // An event is disabled along with the removal of its handler
@@ -1412,7 +1436,7 @@ void test_fixed_events(void)
 
     fixed_event_set_status(ACPI_PM1_STS_PWRBTN_STS_MASK);
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
-    CHECK(power.count == 3);
+    CHECK(power.count == 4);
     CHECK_OK(uacpi_clear_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON));
 
     /*
