@@ -37,9 +37,17 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
         Name (_HID, "ACPI0006")
 
         Name (CNT1, 0)
+        Name (CNT3, 0)
 
         Method (_L01) {
             CNT1++
+        }
+
+        // Marked as a wake event by the test
+        Method (_L02) { }
+
+        Method (_E03) {
+            CNT3++
         }
     }
 
