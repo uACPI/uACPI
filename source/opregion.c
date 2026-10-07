@@ -487,13 +487,15 @@ static uacpi_iteration_decision do_run_reg(
 )
 {
     struct reg_run_ctx *ctx = opaque;
+    uacpi_object *obj;
     uacpi_operation_region *region;
     uacpi_status ret;
     uacpi_bool was_regged;
 
     UACPI_UNUSED(depth);
 
-    region = uacpi_namespace_node_get_object(node)->op_region;
+    obj = uacpi_namespace_node_get_object(node);
+    region = obj->op_region;
 
     if (region->space != ctx->space)
         return UACPI_ITERATION_DECISION_CONTINUE;
@@ -502,23 +504,30 @@ static uacpi_iteration_decision do_run_reg(
     if (was_regged == (ctx->connection_code == ACPI_REG_CONNECT))
         return UACPI_ITERATION_DECISION_CONTINUE;
 
+    /*
+     * The _REG method is free to do whatever it wants to the region, which
+     * includes getting rid of it, e.g. by overwriting it via CopyObject. Keep
+     * it alive until we're done with it.
+     */
+    uacpi_object_ref(obj);
+
     ret = region_run_reg(node, ctx->connection_code);
     if (ctx->connection_code == ACPI_REG_DISCONNECT)
         region->state_flags &= ~UACPI_OP_REGION_STATE_REG_EXECUTED;
 
     if (ret == UACPI_STATUS_NOT_FOUND)
-        return UACPI_ITERATION_DECISION_CONTINUE;
+        goto out;
 
     if (ctx->connection_code == ACPI_REG_CONNECT)
         region->state_flags |= UACPI_OP_REGION_STATE_REG_EXECUTED;
 
     ctx->reg_executed++;
 
-    if (uacpi_unlikely_error(ret)) {
+    if (uacpi_unlikely_error(ret))
         ctx->reg_errors++;
-        return UACPI_ITERATION_DECISION_CONTINUE;
-    }
 
+out:
+    uacpi_object_unref(obj);
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
