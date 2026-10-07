@@ -455,13 +455,26 @@ static void check_connected(
 #define OEM_ADDRESS_SPACE ((uacpi_address_space)0x80)
 
 /*
- * Lets AML know that a region was detached, which is not something that it's
- * able to tell by itself, by evaluating the DTCH method of the device that
- * the region belongs to.
+ * Lets AML know that a region was attached or detached, which is not something
+ * that it's able to tell by itself, by evaluating the ATCH and DTCH methods of
+ * the device that the region belongs to.
  */
 static uacpi_status oem_handler(uacpi_region_op op, uacpi_handle op_data)
 {
     switch (op) {
+    case UACPI_REGION_OP_ATTACH: {
+        uacpi_region_attach_data *attach_data = op_data;
+        uacpi_namespace_node *device;
+        uacpi_status st;
+
+        device = uacpi_namespace_node_parent(attach_data->region_node);
+
+        st = uacpi_eval(device, "ATCH", NULL, NULL);
+        if (st != UACPI_STATUS_NOT_FOUND)
+            ensure_ok_status(st);
+
+        return UACPI_STATUS_OK;
+    }
     case UACPI_REGION_OP_DETACH: {
         uacpi_region_detach_data *detach_data = op_data;
         uacpi_namespace_node *device;
@@ -481,7 +494,6 @@ static uacpi_status oem_handler(uacpi_region_op op, uacpi_handle op_data)
         rw_data->value = 0x5A;
         return UACPI_STATUS_OK;
     }
-    case UACPI_REGION_OP_ATTACH:
     case UACPI_REGION_OP_WRITE:
         return UACPI_STATUS_OK;
     default:
@@ -560,6 +572,23 @@ void test_address_spaces(void)
     ensure_ok_status(st);
     if (!out_value)
         error("OEM address space test failed");
+
+    /*
+     * This one is overwritten by the time it's attached, so there's nothing
+     * left to access. AML has no way of handling that, so do it for it.
+     */
+    st = uacpi_eval(NULL, "\\OEM2.READ", NULL, NULL);
+    if (st != UACPI_STATUS_NO_HANDLER) {
+        error(
+            "unexpected status for a region that is gone: %s",
+            uacpi_status_to_string(st)
+        );
+    }
+
+    st = uacpi_eval_simple_integer(NULL, "COE2", &out_value);
+    ensure_ok_status(st);
+    if (!out_value)
+        error("OEM address space attach test failed");
 
     // Give one of the IPMI regions a handler that is closer to it
     st = uacpi_namespace_node_find(NULL, "\\IPM2", &ipmi_device);

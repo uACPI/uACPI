@@ -432,6 +432,50 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
         Return (Ones)
     }
 
+    // Same thing, but this one gets rid of the region while it's being attached
+    Device (OEM2) {
+        Name (_HID, "TEST0004")
+
+        OperationRegion (REG2, 0x80, 0, 1)
+        Field (REG2, ByteAcc, NoLock, Preserve) {
+            FLD2, 8,
+        }
+
+        Name (ATTS, 0)
+        Name (DETS, 0)
+
+        Method (ATCH) {
+            ATTS++
+            CopyObject (Zero, REG2)
+        }
+
+        Method (DTCH) {
+            DETS++
+        }
+
+        // Never gets past the access, as there's nothing to access anymore
+        Method (READ) {
+            Return (FLD2)
+        }
+    }
+
+    /*
+     * To be evaluated after an attempt to access FLD2. A region that was
+     * attached is always detached, even if it was gone by the time that the
+     * handler was done attaching it.
+     *
+     * Return -> Ones on success, Zero on failure
+     */
+    Method (COE2) {
+        If (\OEM2.ATTS != 1 || \OEM2.DETS != 1) {
+            Printf("REG2 was attached %o time(s) and detached %o time(s)",
+                   \OEM2.ATTS, \OEM2.DETS)
+            Return (Zero)
+        }
+
+        Return (Ones)
+    }
+
     /*
      * To be evaluated after OEM1 was given a handler of its own, which is what
      * detaches REG1 from the one that it had before.
