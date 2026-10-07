@@ -18,13 +18,22 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
     Field (REG0, ByteAcc, Lock, Preserve) {
         FLD0, 8,
         FLD1, 8,
+
+        // These take more than one access to write
+        FLD2, 16,
+        FLD3, 64,
     }
 
     // Same memory, but accessible at any time
     Field (REG0, ByteAcc, NoLock, Preserve) {
         RAW0, 8,
         RAW1, 8,
+        RAW2, 16,
+        RAW3, 64,
     }
+
+    Name (INT0, 0x1234)
+    Name (BUF0, Buffer { 1, 2, 3, 4, 5, 6, 7, 8 })
 
     // How far the other thread has made it
     Name (STAT, 0)
@@ -43,8 +52,12 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
 
             If (Arg0 == 0) {
                 RVAL = FLD0
-            } Else {
+            } ElseIf (Arg0 == 1) {
                 FLD1 = 0xAB
+            } ElseIf (Arg0 == 2) {
+                FLD2 = INT0
+            } Else {
+                FLD3 = BUF0
             }
 
             STAT = 2
@@ -123,6 +136,40 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
 
         If (RAW1 != 0xAB) {
             Printf("Wrote %o to a field that was overwritten", RAW1)
+            Return (Zero)
+        }
+
+        /*
+         * Same thing for the object that a field is written from, as it's
+         * what the data comes from once the access gets to proceed.
+         */
+        If (!STRT (2)) {
+            Return (Zero)
+        }
+
+        CopyObject (Zero, INT0)
+
+        If (!FINI ()) {
+            Return (Zero)
+        }
+
+        If (RAW2 != 0x1234) {
+            Printf("Wrote %o from an integer that was overwritten", RAW2)
+            Return (Zero)
+        }
+
+        If (!STRT (3)) {
+            Return (Zero)
+        }
+
+        CopyObject (Zero, BUF0)
+
+        If (!FINI ()) {
+            Return (Zero)
+        }
+
+        If (RAW3 != 0x0807060504030201) {
+            Printf("Wrote %o from a buffer that was overwritten", RAW3)
             Return (Zero)
         }
 
