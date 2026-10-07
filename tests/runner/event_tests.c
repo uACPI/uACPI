@@ -1119,14 +1119,38 @@ void test_gpe_blocks(void)
     CHECK_GPE_INFO(gpeb, 9, GPE_INFO_ENABLED);
     CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
 
-    // This is not the case for a block that is installed later on
+    /*
+     * A block that is installed later on has to be finalized as well. This is
+     * not done right away so that we get a chance to mark its wake events.
+     */
     CHECK_OK(uacpi_install_gpe_block(
         gpec, GPEC_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
         GPEC_NUM_REGISTERS, GPE_BLOCK_IRQ
     ));
     CHECK_GPE_INFO(gpec, 1, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(gpec, 2, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(gpec, 3, UACPI_EVENT_INFO_HAS_HANDLER);
     CHECK_STATUS(uacpi_gpe_info(gpec, 8, &info), UACPI_STATUS_NOT_FOUND);
-    CHECK_OK(uacpi_enable_gpe(gpec, 1));
+
+    CHECK_OK(uacpi_setup_gpe_for_wake(gpec, 2, UACPI_NULL));
+
+    // An edge triggered event that is already pending is dispatched as well
+    fake_io_raise(GPEC_ADDRESS, 1 << 3);
+    CHECK_OK(uacpi_finalize_gpe_initialization());
+    CHECK(eval_integer("\\GPEC.CNT3") == 1);
+
+    CHECK_GPE_INFO(gpec, 1, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(gpec, 2, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(gpec, 3, GPE_INFO_ENABLED);
+
+    // The blocks that were finalized earlier must not get enabled twice
+    CHECK_OK(uacpi_disable_gpe(gpeb, 9));
+    CHECK_GPE_INFO(gpeb, 9, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_OK(uacpi_enable_gpe(gpeb, 9));
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0));
+    CHECK_GPE_INFO(UACPI_NULL, 0, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0));
 
     CHECK_OK(uacpi_install_notify_handler(dev0, notify_a, &log));
 
