@@ -2005,7 +2005,7 @@ static uacpi_status gpe_enable_disable_for_wake(
     if (enabled)
         reg->wake_mask |= mask;
     else
-        reg->wake_mask &= mask;
+        reg->wake_mask &= ~mask;
 
 out:
     uacpi_recursive_lock_release(&g_event_lock);
