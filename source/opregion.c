@@ -540,6 +540,16 @@ static uacpi_iteration_decision do_run_reg(
         return UACPI_ITERATION_DECISION_CONTINUE;
 
     /*
+     * Only the regions of the handler that was just uninstalled are to be
+     * disconnected, all of which have no handler by now. Any other region of
+     * this address space that we come across belongs to a different handler,
+     * which was installed for a device somewhere below.
+     */
+    if (ctx->connection_code == ACPI_REG_DISCONNECT &&
+        region->handler != UACPI_NULL)
+        return UACPI_ITERATION_DECISION_CONTINUE;
+
+    /*
      * The _REG method is free to do whatever it wants to the region, which
      * includes getting rid of it, e.g. by overwriting it via CopyObject. Keep
      * it alive until we're done with it.
