@@ -38,6 +38,7 @@ static const struct {
     { "check-notify-install-handles-oom", test_notify_install_oom },
     { "check-notify-handlers-dont-deadlock", test_notify_handlers_vs_work },
     { "check-event-api-doesnt-deadlock", test_event_api_vs_work },
+    { "check-gpe-handlers-work", test_gpe_handlers },
 };
 
 static uacpi_object_type string_to_object_type(const char *str)

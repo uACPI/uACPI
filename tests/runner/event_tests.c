@@ -494,3 +494,377 @@ void test_event_api_vs_work(void)
 
     work_threads_stop();
 }
+
+#define GPE_INFO_ENABLED (                                            \
+    UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |         \
+    UACPI_EVENT_INFO_HW_ENABLED                                       \
+)
+
+#define CHECK_GPE_INFO(gpe_device, idx, expected)                         \
+    do {                                                                  \
+        uacpi_event_info check_info = 0;                                  \
+                                                                          \
+        CHECK_OK(uacpi_gpe_info(gpe_device, idx, &check_info));           \
+        if ((unsigned)check_info != (unsigned)(expected)) {               \
+            fail(                                                         \
+                "GPE(%02X) info at line %d is 0x%02X, expected 0x%02X",   \
+                (unsigned)(idx), __LINE__, (unsigned)check_info,          \
+                (unsigned)(expected)                                      \
+            );                                                            \
+        }                                                                 \
+    } while (0)
+
+typedef struct {
+    size_t count;
+    uacpi_namespace_node *gpe_device;
+    uacpi_u16 idx;
+    uacpi_interrupt_ret ret;
+} gpe_log_t;
+
+static uacpi_interrupt_ret log_gpe(
+    uacpi_handle ctx, uacpi_namespace_node *gpe_device, uacpi_u16 idx
+)
+{
+    gpe_log_t *log = ctx;
+
+    log->count++;
+    log->gpe_device = gpe_device;
+    log->idx = idx;
+
+    return log->ret;
+}
+
+static uacpi_interrupt_ret log_gpe_other(
+    uacpi_handle ctx, uacpi_namespace_node *gpe_device, uacpi_u16 idx
+)
+{
+    return log_gpe(ctx, gpe_device, idx);
+}
+
+/*
+ * This is executed twice: with the deferred work executed right by whoever
+ * schedules it, and with it handed off to the work threads. All of the state
+ * is expected to be left the way it was found.
+ */
+static void do_test_gpe_handlers(void)
+{
+    uacpi_namespace_node *gpe;
+    uacpi_u64 cnt0, cnt1, cnt80, cntff;
+    gpe_log_t log = { 0 };
+
+    gpe = uacpi_namespace_get_predefined(UACPI_PREDEFINED_NAMESPACE_GPE);
+
+    cnt0 = eval_integer("\\_GPE.CNT0");
+    cnt1 = eval_integer("\\_GPE.CNT1");
+    cnt80 = eval_integer("\\_GPE.CN80");
+    cntff = eval_integer("\\_GPE.CNFF");
+
+    // An event is disabled while it's handled, and is re-enabled afterwards
+    gpe_fire(0);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNT0") == ++cnt0);
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+
+    gpe_fire(1);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    // More than one event may be pending at once, even in the same register
+    gpe_set_status(0);
+    gpe_set_status(1);
+    gpe_set_status(0x80);
+    gpe_set_status(0xFF);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    flush_work();
+
+    CHECK(eval_integer("\\_GPE.CNT0") == ++cnt0);
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
+    CHECK(eval_integer("\\_GPE.CN80") == ++cnt80);
+    CHECK(eval_integer("\\_GPE.CNFF") == ++cntff);
+    CHECK_GPE_INFO(UACPI_NULL, 0x80, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(UACPI_NULL, 0xFF, GPE_INFO_ENABLED);
+
+    // An event that is not enabled is left alone
+    gpe_set_status(2);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK_GPE_INFO(UACPI_NULL, 2, UACPI_EVENT_INFO_HW_STATUS);
+
+    CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 2));
+    CHECK_GPE_INFO(UACPI_NULL, 2, 0);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    // An event stays enabled for as long as it has at least one user
+    CHECK_STATUS(uacpi_enable_gpe(UACPI_NULL, 2), UACPI_STATUS_NO_HANDLER);
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0));
+    CHECK_OK(uacpi_enable_gpe(gpe, 0));
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0));
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0));
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0));
+    CHECK_GPE_INFO(UACPI_NULL, 0, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_STATUS(
+        uacpi_disable_gpe(UACPI_NULL, 0), UACPI_STATUS_INVALID_ARGUMENT
+    );
+
+    gpe_set_status(0);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    // Whatever was pending before the first user came along is discarded
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0));
+    flush_work();
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+    CHECK(eval_integer("\\_GPE.CNT0") == cnt0);
+
+    // A suspended event is only disabled as far as the hardware is concerned
+    CHECK_OK(uacpi_suspend_gpe(UACPI_NULL, 0));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+
+    gpe_set_status(0);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+
+    CHECK_OK(uacpi_resume_gpe(UACPI_NULL, 0));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0, GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNT0") == ++cnt0);
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+
+    // A masked event can't be enabled no matter what
+    CHECK_OK(uacpi_mask_gpe(UACPI_NULL, 0));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_MASKED
+    );
+    CHECK_STATUS(uacpi_mask_gpe(UACPI_NULL, 0), UACPI_STATUS_INVALID_ARGUMENT);
+
+    CHECK_OK(uacpi_resume_gpe(UACPI_NULL, 0));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0));
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0));
+    CHECK_OK(uacpi_finish_handling_gpe(UACPI_NULL, 0));
+
+    gpe_set_status(0);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_MASKED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    // Not even by replacing its handler, which masks the event temporarily
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 0, UACPI_GPE_TRIGGERING_LEVEL, log_gpe, &log
+    ));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_MASKED |
+        UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 0, log_gpe));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_MASKED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 0));
+    CHECK_STATUS(
+        uacpi_unmask_gpe(UACPI_NULL, 0), UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_GPE_INFO(
+        UACPI_NULL, 0, GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    flush_work();
+    CHECK(eval_integer("\\_GPE.CNT0") == ++cnt0);
+    CHECK(log.count == 0);
+
+    /*
+     * A native handler is invoked right away by the interrupt handler, and
+     * decides whether the event is to be re-enabled once it returns.
+     */
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 10, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_STATUS(
+        uacpi_install_gpe_handler(
+            UACPI_NULL, 10, UACPI_GPE_TRIGGERING_EDGE, log_gpe_other, &log
+        ), UACPI_STATUS_ALREADY_EXISTS
+    );
+    CHECK_STATUS(
+        uacpi_install_gpe_handler_raw(
+            UACPI_NULL, 10, UACPI_GPE_TRIGGERING_EDGE, log_gpe_other, &log
+        ), UACPI_STATUS_ALREADY_EXISTS
+    );
+
+    // It's up to whoever has installed the handler to enable the event
+    CHECK_GPE_INFO(UACPI_NULL, 10, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 10));
+    CHECK_GPE_INFO(UACPI_NULL, 10, GPE_INFO_ENABLED);
+
+    log.ret = UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
+    gpe_fire(10);
+    CHECK(log.count == 1);
+    CHECK(log.gpe_device == gpe);
+    CHECK(log.idx == 10);
+    CHECK_GPE_INFO(UACPI_NULL, 10, GPE_INFO_ENABLED);
+
+    log.ret = UACPI_INTERRUPT_HANDLED;
+    gpe_fire(10);
+    CHECK(log.count == 2);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 10,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+
+    gpe_set_status(10);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(log.count == 2);
+
+    CHECK_OK(uacpi_finish_handling_gpe(UACPI_NULL, 10));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 10, GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(log.count == 3);
+    CHECK_OK(uacpi_finish_handling_gpe(UACPI_NULL, 10));
+    CHECK_GPE_INFO(UACPI_NULL, 10, GPE_INFO_ENABLED);
+
+    CHECK_STATUS(
+        uacpi_uninstall_gpe_handler(UACPI_NULL, 10, log_gpe_other),
+        UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 10));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 10, log_gpe));
+    CHECK_STATUS(
+        uacpi_uninstall_gpe_handler(UACPI_NULL, 10, log_gpe),
+        UACPI_STATUS_NOT_FOUND
+    );
+    CHECK_GPE_INFO(UACPI_NULL, 10, 0);
+
+    /*
+     * A native handler takes precedence over an AML one, which is restored
+     * to the state it was in once the native handler is gone.
+     */
+    log.count = 0;
+    log.ret = UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 1, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_GPE_INFO(UACPI_NULL, 1, UACPI_EVENT_INFO_HAS_HANDLER);
+
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 1));
+    gpe_fire(1);
+    flush_work();
+    CHECK(log.count == 1);
+    CHECK(log.idx == 1);
+    CHECK(eval_integer("\\_GPE.CNT1") == cnt1);
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
+
+    /*
+     * An edge triggered event that became pending in the meantime is not
+     * going to raise an interrupt, and so has to be dispatched by hand.
+     */
+    gpe_set_status(1);
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 1, log_gpe));
+    flush_work();
+    CHECK(log.count == 1);
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    // A raw handler is on its own, we don't touch the event in any way
+    log.count = 0;
+    log.ret = UACPI_INTERRUPT_HANDLED;
+
+    CHECK_OK(uacpi_install_gpe_handler_raw(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_LEVEL, log_gpe, &log
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+
+    gpe_fire(11);
+    CHECK(log.count == 1);
+    CHECK(log.idx == 11);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 11, GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(log.count == 2);
+
+    CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 11));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(log.count == 2);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+}
+
+void test_gpe_handlers(void)
+{
+    uacpi_namespace_node *dev0 = find_node("\\DEV0");
+    uacpi_namespace_node *gpe;
+    uacpi_event_info info;
+
+    gpe = uacpi_namespace_get_predefined(UACPI_PREDEFINED_NAMESPACE_GPE);
+
+    // The events that have a method are matched, but are not enabled just yet
+    CHECK_GPE_INFO(UACPI_NULL, 0, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(gpe, 1, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(UACPI_NULL, 2, 0);
+    CHECK_GPE_INFO(UACPI_NULL, 0x7F, 0);
+    CHECK_GPE_INFO(UACPI_NULL, 0x80, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_GPE_INFO(UACPI_NULL, 0xFF, UACPI_EVENT_INFO_HAS_HANDLER);
+
+    // Right past the end of the last block
+    CHECK_STATUS(
+        uacpi_gpe_info(UACPI_NULL, 0x100, &info), UACPI_STATUS_NOT_FOUND
+    );
+    CHECK_STATUS(uacpi_enable_gpe(UACPI_NULL, 0x100), UACPI_STATUS_NOT_FOUND);
+    CHECK_STATUS(
+        uacpi_install_gpe_handler(
+            UACPI_NULL, 0x100, UACPI_GPE_TRIGGERING_EDGE, log_gpe, UACPI_NULL
+        ), UACPI_STATUS_NOT_FOUND
+    );
+
+    // Not a device that has any events
+    CHECK_STATUS(uacpi_gpe_info(dev0, 0, &info), UACPI_STATUS_NOT_FOUND);
+
+    /*
+     * This is what enables the events. An edge triggered one that is already
+     * pending wouldn't raise an interrupt, so it's dispatched right away.
+     */
+    gpe_set_status(1);
+    CHECK_OK(uacpi_finalize_gpe_initialization());
+    CHECK(eval_integer("\\_GPE.CNT1") == 1);
+
+    CHECK_GPE_INFO(UACPI_NULL, 0, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(UACPI_NULL, 2, 0);
+    CHECK_GPE_INFO(UACPI_NULL, 0x80, GPE_INFO_ENABLED);
+    CHECK_GPE_INFO(UACPI_NULL, 0xFF, GPE_INFO_ENABLED);
+
+    // Doing it more than once has no effect
+    CHECK_OK(uacpi_finalize_gpe_initialization());
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0xFF));
+    CHECK_GPE_INFO(UACPI_NULL, 0xFF, UACPI_EVENT_INFO_HAS_HANDLER);
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0xFF));
+
+    do_test_gpe_handlers();
+
+    work_threads_start();
+    do_test_gpe_handlers();
+    work_threads_stop();
+}
