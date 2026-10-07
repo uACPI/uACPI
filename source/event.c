@@ -723,6 +723,8 @@ static uacpi_status find_or_create_gpe_interrupt_ctx(
 
     entry->irq = irq;
     entry->next = g_gpe_interrupt_head;
+    if (g_gpe_interrupt_head != UACPI_NULL)
+        g_gpe_interrupt_head->prev = entry;
     g_gpe_interrupt_head = entry;
 
     *out_ctx = entry;
@@ -883,8 +885,13 @@ static void uninstall_gpe_block(struct gpe_block *block)
 
         // This GPE block was the last user of this interrupt context, remove it
         if (ctx->gpe_head == UACPI_NULL) {
-            if (ctx->prev)
+            if (ctx->prev != UACPI_NULL)
                 ctx->prev->next = ctx->next;
+            else
+                g_gpe_interrupt_head = ctx->next;
+
+            if (ctx->next != UACPI_NULL)
+                ctx->next->prev = ctx->prev;
 
             if (ctx->irq != g_uacpi_rt_ctx.fadt.sci_int) {
                 uacpi_kernel_uninstall_interrupt_handler(
