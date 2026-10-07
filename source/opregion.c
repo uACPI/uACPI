@@ -299,12 +299,9 @@ uacpi_status uacpi_opregion_attach(uacpi_namespace_node *node)
 }
 
 static void region_install_handler(
-    uacpi_namespace_node *node, uacpi_address_space_handler *handler
+    uacpi_operation_region *region, uacpi_address_space_handler *handler
 )
 {
-    uacpi_operation_region *region;
-
-    region = uacpi_namespace_node_get_object(node)->op_region;
     region->handler = handler;
     uacpi_shareable_ref(handler);
 
@@ -465,10 +462,28 @@ static uacpi_iteration_decision do_install_or_uninstall_handler(
             return UACPI_ITERATION_DECISION_CONTINUE;
 
         if (ctx->action == OPREGION_ITER_ACTION_INSTALL) {
-            if (region->handler)
+            if (region->handler) {
                 region_uninstall_handler(node, UNREG_NO);
 
-            region_install_handler(node, ctx->handler);
+                /*
+                 * The previous handler was just told that the region is being
+                 * detached, and is free to have done whatever it wanted to it
+                 * in response, which includes getting rid of it. Make sure
+                 * that there's still something to install the handler for.
+                 */
+                object = uacpi_namespace_node_get_object_typed(
+                    node, UACPI_OBJECT_OPERATION_REGION_BIT
+                );
+                if (uacpi_unlikely(object == UACPI_NULL))
+                    return UACPI_ITERATION_DECISION_CONTINUE;
+
+                region = object->op_region;
+                if (uacpi_unlikely(region->space != ctx->handler->space ||
+                                   region->handler != UACPI_NULL))
+                    return UACPI_ITERATION_DECISION_CONTINUE;
+            }
+
+            region_install_handler(region, ctx->handler);
         } else {
             if (uacpi_unlikely(region->handler != ctx->handler)) {
                 uacpi_trace_region_error(
@@ -835,7 +850,7 @@ uacpi_status uacpi_initialize_opregion_node(uacpi_namespace_node *node)
             handler = find_handler(handlers, region->space);
 
             if (handler != UACPI_NULL) {
-                region_install_handler(node, handler);
+                region_install_handler(region, handler);
                 ret = UACPI_STATUS_OK;
                 break;
             }
