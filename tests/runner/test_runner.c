@@ -1,5 +1,6 @@
 #include "argparser.h"
 #include "helpers.h"
+#include "tests.h"
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -23,11 +24,6 @@
 #include <uacpi/uacpi.h>
 #include <uacpi/utilities.h>
 #include <uacpi/sleep.h>
-
-void run_resource_tests(void);
-void test_object_api(void);
-void test_address_spaces(void);
-void interface_cleanup(void);
 
 static uacpi_object_type string_to_object_type(const char *str)
 {
