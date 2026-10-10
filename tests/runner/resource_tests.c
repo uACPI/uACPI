@@ -1,4 +1,5 @@
 #include "helpers.h"
+#include "tests.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>

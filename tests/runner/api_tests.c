@@ -1,4 +1,5 @@
 #include "helpers.h"
+#include "tests.h"
 #include <inttypes.h>
 #include <string.h>
 #include <uacpi/opregion.h>

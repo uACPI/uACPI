@@ -305,6 +305,9 @@ void work_threads_stop(void);
 void work_hold(void);
 void work_release(void);
 
+// Free whatever the kernel interface uses to track mappings & allocations
+void interface_cleanup(void);
+
 #endif // !UACPI_BAREBONES_MODE
 
 UACPI_PACKED(struct full_xsdt {
