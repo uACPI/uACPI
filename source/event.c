@@ -1347,9 +1347,17 @@ static uacpi_status create_gpe_block(
     if (uacpi_unlikely_error(ret))
         goto error_out;
 
+    match_ctx.block = block;
+
+    uacpi_namespace_do_for_each_child(
+        device_node, do_match_gpe_methods, UACPI_NULL,
+        UACPI_OBJECT_METHOD_BIT, UACPI_MAX_DEPTH_ANY,
+        UACPI_SHOULD_LOCK_YES, UACPI_PERMANENT_ONLY_YES, &match_ctx
+    );
+
+    // The block is complete, make it visible to the interrupt handler
     block->next = block->irq_ctx->gpe_head;
     block->irq_ctx->gpe_head = block;
-    match_ctx.block = block;
 
     /*
      * The events of this block are only enabled once the initialization is
@@ -1357,12 +1365,6 @@ static uacpi_status create_gpe_block(
      * is the case for a block that is installed at runtime.
      */
     g_gpes_finalized = UACPI_FALSE;
-
-    uacpi_namespace_do_for_each_child(
-        device_node, do_match_gpe_methods, UACPI_NULL,
-        UACPI_OBJECT_METHOD_BIT, UACPI_MAX_DEPTH_ANY,
-        UACPI_SHOULD_LOCK_YES, UACPI_PERMANENT_ONLY_YES, &match_ctx
-    );
 
     uacpi_trace("initialized GPE block %.4s[%d->%d], %u AML handlers (IRQ %u)",
                 device_node->name.text, base_idx, base_idx + block->num_events,
