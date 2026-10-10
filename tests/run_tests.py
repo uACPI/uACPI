@@ -201,11 +201,6 @@ class TestHeaderFooter:
         return None
 
 
-def run_resource_tests(runner: str) -> int:
-    with TestHeaderFooter("Resource Conversion Tests"):
-        return subprocess.run([runner, "resource-tests"]).returncode
-
-
 def compile_test_cases(
     test_cases: List[str], compiler: str, bin_dir: str
 ) -> List[TestCase]:
@@ -448,10 +443,6 @@ def main() -> int:
             bare_test_runner = bare_runner_default
         if test_runner is None:
             test_runner = runner_default
-
-    ret = run_resource_tests(test_runner)
-    if ret != 0:
-        sys.exit(ret)
 
     bin_dir = args.binary_directory
     os.makedirs(bin_dir, exist_ok=True)

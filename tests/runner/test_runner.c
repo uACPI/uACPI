@@ -48,6 +48,7 @@ static const struct api_test {
  * and are run against an empty DSDT.
  */
 static const struct api_test builtin_api_tests[] = {
+    { "resource-tests", run_resource_tests },
     { "fixed-events", test_fixed_events },
 };
 
@@ -578,8 +579,7 @@ static uacpi_log_level log_level_from_string(const char *arg)
 }
 
 static arg_spec_t DSDT_PATH_ARG = ARG_POS(
-    "dsdt-path-or-keyword",
-    "path to the DSDT to run, or \"resource-tests\" to run the resource tests"
+    "dsdt-path", "path to the DSDT to run"
 );
 
 static arg_spec_t EXPECT_ARG = ARG_LIST(
@@ -639,7 +639,7 @@ static const arg_parser_t PARSER = {
 
 int main(int argc, char *argv[])
 {
-    const char *dsdt_path_or_keyword = NULL;
+    const char *dsdt_path = NULL;
     const struct api_test *api_test = NULL;
     const char *expected_value = NULL;
     uacpi_object_type expected_type = UACPI_OBJECT_UNINITIALIZED;
@@ -668,11 +668,7 @@ int main(int argc, char *argv[])
         if (api_test == NULL)
             error("unknown builtin test '%s'", get(&BUILTIN_ARG));
     } else {
-        dsdt_path_or_keyword = get(&DSDT_PATH_ARG);
-        if (strcmp(dsdt_path_or_keyword, "resource-tests") == 0) {
-            run_resource_tests();
-            return 0;
-        }
+        dsdt_path = get(&DSDT_PATH_ARG);
     }
 
     if (api_test == NULL && is_set(&EXPECT_ARG)) {
@@ -698,7 +694,7 @@ int main(int argc, char *argv[])
     uacpi_context_set_log_level(log_level);
 
     run_test(
-        dsdt_path_or_keyword, &EXTRA_TABLES_ARG.values, api_test,
+        dsdt_path, &EXTRA_TABLES_ARG.values, api_test,
         expected_type, expected_value, dump_namespace, run_pts3
     );
 
