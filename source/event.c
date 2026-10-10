@@ -1568,25 +1568,36 @@ static void gpe_mask_and_flush(struct gp_event *event)
      */
     wait_for_work_completion_unlocked();
 
-    /*
-     * 3. Now that this GPE's state is unmodifyable and we know that currently
-     *    in-flight IRQs will see the masked state, we can safely disable this
-     *    event knowing it won't be re-enabled by a racing IRQ.
-     */
-    set_gpe_state(event, GPE_STATE_DISABLED);
+    do {
+        /*
+         * 3. Now that this GPE's state is unmodifyable and we know that
+         *    currently in-flight IRQs will see the masked state, we can safely
+         *    disable this event knowing it won't be re-enabled by a racing
+         *    IRQ.
+         */
+        set_gpe_state(event, GPE_STATE_DISABLED);
 
-    /*
-     * Whatever is still using this event is taken care of by the wait
-     * below, so it only has to be flushed again if it gets enabled from
-     * here on.
-     */
-    gpe_disarm(event);
+        /*
+         * Whatever is still using this event is taken care of by the wait
+         * below, so it only has to be flushed again if it gets enabled from
+         * here on.
+         */
+        gpe_disarm(event);
 
-    /*
-     * 4. Wait for the last possible IRQ to finish, now that this event is
-     *    disabled.
-     */
-    wait_for_work_completion_unlocked();
+        /*
+         * 4. Wait for the last possible IRQ to finish, now that this event is
+         *    disabled.
+         */
+        wait_for_work_completion_unlocked();
+
+        /*
+         * The event lock is dropped while we wait, and there's one thing that
+         * is able to enable a masked event, which is enabling it for wake. If
+         * that happened in the meantime, none of the above is true anymore.
+         * It can't happen for as long as we hold the lock though, so do this
+         * until it doesn't.
+         */
+    } while (gpe_is_armed(event));
 }
 
 static uacpi_status gpe_mask_unmask(
