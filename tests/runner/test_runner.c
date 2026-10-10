@@ -67,6 +67,7 @@ static const struct api_test {
 static const struct api_test builtin_api_tests[] = {
     { "resource-tests", run_resource_tests, 0 },
     { "fixed-events", test_fixed_events, 0 },
+    { "global-lock", test_global_lock, 0 },
 };
 
 static const struct api_test *find_api_test(

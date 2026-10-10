@@ -834,3 +834,33 @@ void test_address_spaces(void)
 
     uacpi_object_unref(arg);
 }
+
+void test_global_lock(void)
+{
+    uacpi_status st;
+    uacpi_u32 seq, next_seq;
+
+    st = uacpi_acquire_global_lock(0xFFFF, &seq);
+    ensure_ok_status(st);
+
+    // Only the sequence number of this very acquire is good for a release
+    st = uacpi_release_global_lock(seq + 1);
+    if (st != UACPI_STATUS_INVALID_ARGUMENT)
+        error("released the global lock with a bogus sequence number");
+
+    st = uacpi_release_global_lock(seq);
+    ensure_ok_status(st);
+
+    // ...and only once
+    st = uacpi_release_global_lock(seq);
+    if (st != UACPI_STATUS_INVALID_ARGUMENT)
+        error("released the global lock twice");
+
+    st = uacpi_acquire_global_lock(0xFFFF, &next_seq);
+    ensure_ok_status(st);
+    if (next_seq == seq)
+        error("the sequence number of the global lock was reused");
+
+    st = uacpi_release_global_lock(next_seq);
+    ensure_ok_status(st);
+}
