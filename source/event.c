@@ -421,6 +421,14 @@ struct gpe_register {
     uacpi_u8 masked_mask;
     uacpi_u8 current_mask;
 
+    /*
+     * The events that were enabled at any point since they were last known to
+     * be quiescent, and might therefore still be in use by an interrupt
+     * handler or by the work that it has scheduled, even if they're disabled
+     * by now.
+     */
+    uacpi_u8 armed_mask;
+
     uacpi_u16 base_idx;
 };
 
@@ -495,6 +503,7 @@ static uacpi_status set_gpe_state_unlocked(
     switch (state) {
     case GPE_STATE_ENABLED:
         enable_mask |= event_bit;
+        reg->armed_mask |= event_bit;
         break;
     case GPE_STATE_DISABLED:
         enable_mask &= ~event_bit;
@@ -523,6 +532,27 @@ static uacpi_status clear_gpe(struct gp_event *event)
     struct gpe_register *reg = event->reg;
 
     return uacpi_gas_write_mapped(&reg->status, gpe_get_mask(event));
+}
+
+static uacpi_bool gpe_is_armed(struct gp_event *event)
+{
+    uacpi_bool ret;
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    ret = (event->reg->armed_mask & gpe_get_mask(event)) != 0;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+    return ret;
+}
+
+static void gpe_disarm(struct gp_event *event)
+{
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    event->reg->armed_mask &= ~gpe_get_mask(event);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 }
 
 // Must be called with the GPE state lock held
@@ -933,6 +963,7 @@ static uacpi_status gpe_block_apply_action(
         if (action == GPE_BLOCK_ACTION_ENABLE_ALL_FOR_RUNTIME)
             value &= ~reg->masked_mask;
 
+        reg->armed_mask |= value;
         ret = uacpi_gas_write_mapped(&reg->enable, value);
         uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
@@ -1571,6 +1602,13 @@ out:
     set_gpe_state(event, GPE_STATE_DISABLED);
 
     /*
+     * Whatever is still using this event is taken care of by the wait
+     * below, so it only has to be flushed again if it gets enabled from
+     * here on.
+     */
+    gpe_disarm(event);
+
+    /*
      * 4. Wait for the last possible IRQ to finish, now that this event is
      *    disabled.
      */
@@ -1592,19 +1630,23 @@ out:
 static uacpi_bool gpe_mask_safe(struct gp_event *event)
 {
     uacpi_u8 mask;
-    uacpi_bool is_enabled, is_masked;
+    uacpi_bool is_masked;
     uacpi_cpu_flags flags;
 
     mask = gpe_get_mask(event);
 
+    /*
+     * No need to flush or do anything if it was never enabled since the last
+     * time we did that. Note that it's not enough for the event to be disabled
+     * right now: the work that was scheduled for it earlier might still be
+     * pending.
+     */
+    if (!gpe_is_armed(event))
+        return UACPI_FALSE;
+
     flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-    is_enabled = (event->reg->current_mask & mask) != 0;
     is_masked = (event->reg->masked_mask & mask) != 0;
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
-
-    // No need to flush or do anything if it's not currently enabled
-    if (!is_enabled)
-        return UACPI_FALSE;
 
     /*
      * Same if it was already masked by the user: the event is known to be
