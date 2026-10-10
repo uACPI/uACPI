@@ -4,6 +4,7 @@
 #include <string.h>
 #include <uacpi/opregion.h>
 #include <uacpi/resources.h>
+#include <uacpi/tables.h>
 #include <uacpi/types.h>
 
 static void check_ok(uacpi_object **objects, uacpi_object_array *arr)
@@ -620,4 +621,35 @@ void test_address_spaces(void)
     check_connected(arg, "CRG2", false);
 
     uacpi_object_unref(arg);
+}
+
+#define FACS_GLOBAL_LOCK_PENDING (1 << 0)
+#define FACS_GLOBAL_LOCK_OWNED (1 << 1)
+
+void test_global_lock(void)
+{
+    uacpi_status st;
+    struct acpi_fadt *fadt;
+    struct acpi_facs *facs;
+    uacpi_u32 seq;
+
+    st = uacpi_table_fadt(&fadt);
+    ensure_ok_status(st);
+    facs = (struct acpi_facs*)((uintptr_t)fadt->x_firmware_ctrl);
+
+    if (facs->global_lock != 0)
+        error("the global lock is not free to begin with");
+
+    st = uacpi_acquire_global_lock(0xFFFF, &seq);
+    ensure_ok_status(st);
+    if (facs->global_lock != FACS_GLOBAL_LOCK_OWNED)
+        error("the global lock is not owned after being acquired");
+
+    // The firmware wants the lock, so it must be told about the release
+    facs->global_lock |= FACS_GLOBAL_LOCK_PENDING;
+
+    st = uacpi_release_global_lock(seq);
+    ensure_ok_status(st);
+    if (facs->global_lock != 0)
+        error("the global lock is not free after being released");
 }
