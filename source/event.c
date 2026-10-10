@@ -1032,56 +1032,51 @@ static void free_gpe_block(struct gpe_block *block)
 }
 
 /*
- * This must be called with the config & event locks held if any of the events
- * in the block might be enabled, as the latter is dropped while waiting.
+ * This must be called with the config & event locks held, the latter is
+ * dropped while we wait.
  */
 static void uninstall_gpe_block(struct gpe_block *block)
 {
     struct gpe_interrupt_ctx *ctx = block->irq_ctx;
     uacpi_cpu_flags flags;
     uacpi_size i;
-    struct gpe_register *reg;
 
     /*
      * 1. Mask the GPEs, this makes sure their state is no longer modifyable
      *
-     * This is done for every register up front, even if none of its events
-     * are enabled at the moment: we drop the event lock while waiting below,
-     * and nobody should be able to enable an event in the meantime.
+     * This is done for every register up front: we drop the event lock while
+     * waiting below, and nobody should be able to enable an event in the
+     * meantime. The one thing that still is, which is enabling an event for
+     * wake, is the reason why the events are only disabled after the wait.
      */
     flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     for (i = 0; i < block->num_registers; ++i)
         block->registers[i].masked_mask = 0xFF;
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
-    for (i = 0; i < block->num_registers; ++i) {
-        reg = &block->registers[i];
+    /*
+     * 2. Wait for in-flight work & IRQs to finish, these might already
+     *    be past the respective "if (masked)" check and therefore may
+     *    try to re-enable a masked GPE.
+     */
+    wait_for_work_completion_unlocked();
 
-        // No need to flush or do anything if it's not currently enabled
-        if (!reg->current_mask)
-            continue;
+    /*
+     * 3. Now that the state of these GPEs is unmodifyable and we know that
+     *    currently in-flight IRQs will see the masked state, we can safely
+     *    disable all events knowing they won't be re-enabled by a racing IRQ.
+     */
+    for (i = 0; i < block->num_registers; ++i)
+        uacpi_gas_write_mapped(&block->registers[i].enable, 0x00);
 
-        /*
-         * 2. Wait for in-flight work & IRQs to finish, these might already
-         *    be past the respective "if (masked)" check and therefore may
-         *    try to re-enable a masked GPE.
-         */
-        wait_for_work_completion_unlocked();
-
-        /*
-         * 3. Now that this GPE's state is unmodifyable and we know that
-         *    currently in-flight IRQs will see the masked state, we can
-         *    safely disable all events knowing they won't be re-enabled by
-         *    a racing IRQ.
-         */
-        uacpi_gas_write_mapped(&reg->enable, 0x00);
-
-        /*
-         * 4. Wait for the last possible IRQ to finish, now that this event is
-         *    disabled.
-         */
-        wait_for_work_completion_unlocked();
-    }
+    /*
+     * 4. Wait for the last possible IRQ to finish, as well as any work that
+     *    still refers to one of the events.
+     *
+     * This is done no matter what: an event that is disabled by now might
+     * still have work in flight from back when it wasn't.
+     */
+    wait_for_work_completion_unlocked();
 
     // Are we the first GPE block?
     if (block == ctx->gpe_head) {
