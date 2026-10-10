@@ -1548,6 +1548,47 @@ static uacpi_bool gpe_needs_polling(
     return is_first_user && event->triggering == UACPI_GPE_TRIGGERING_EDGE;
 }
 
+/*
+ * Mask the event, and get it to the point where it's no longer in use by
+ * anyone. The event lock is dropped while we wait.
+ */
+static void gpe_mask_and_flush(struct gp_event *event)
+{
+    uacpi_cpu_flags flags;
+
+    // 1. Mask the GPE, this makes sure its state is no longer modifyable
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    event->reg->masked_mask |= gpe_get_mask(event);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+    /*
+     * 2. Wait for in-flight work & IRQs to finish, these might already
+     *    be past the respective "if (masked)" check and therefore may
+     *    try to re-enable a masked GPE.
+     */
+    wait_for_work_completion_unlocked();
+
+    /*
+     * 3. Now that this GPE's state is unmodifyable and we know that currently
+     *    in-flight IRQs will see the masked state, we can safely disable this
+     *    event knowing it won't be re-enabled by a racing IRQ.
+     */
+    set_gpe_state(event, GPE_STATE_DISABLED);
+
+    /*
+     * Whatever is still using this event is taken care of by the wait
+     * below, so it only has to be flushed again if it gets enabled from
+     * here on.
+     */
+    gpe_disarm(event);
+
+    /*
+     * 4. Wait for the last possible IRQ to finish, now that this event is
+     *    disabled.
+     */
+    wait_for_work_completion_unlocked();
+}
+
 static uacpi_status gpe_mask_unmask(
     struct gp_event *event, uacpi_bool should_mask
 )
@@ -1578,43 +1619,11 @@ static uacpi_status gpe_mask_unmask(
 out:
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
-    // The rest has to wait for the event to quiesce, so can't be done above
-    if (!should_mask || uacpi_unlikely_error(ret))
-        return ret;
+    // This has to wait for the event to quiesce, so can't be done above
+    if (should_mask && uacpi_likely_success(ret))
+        gpe_mask_and_flush(event);
 
-    // 1. Mask the GPE, this makes sure its state is no longer modifyable
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-    reg->masked_mask |= mask;
-    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
-
-    /*
-     * 2. Wait for in-flight work & IRQs to finish, these might already
-     *    be past the respective "if (masked)" check and therefore may
-     *    try to re-enable a masked GPE.
-     */
-    wait_for_work_completion_unlocked();
-
-    /*
-     * 3. Now that this GPE's state is unmodifyable and we know that currently
-     *    in-flight IRQs will see the masked state, we can safely disable this
-     *    event knowing it won't be re-enabled by a racing IRQ.
-     */
-    set_gpe_state(event, GPE_STATE_DISABLED);
-
-    /*
-     * Whatever is still using this event is taken care of by the wait
-     * below, so it only has to be flushed again if it gets enabled from
-     * here on.
-     */
-    gpe_disarm(event);
-
-    /*
-     * 4. Wait for the last possible IRQ to finish, now that this event is
-     *    disabled.
-     */
-    wait_for_work_completion_unlocked();
-
-    return UACPI_STATUS_OK;
+    return ret;
 }
 
 /*
