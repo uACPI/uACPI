@@ -52,8 +52,8 @@ static void free_notification_ctx(struct notification_ctx *ctx)
 
 /*
  * The handler lists are only modified with the notify mutex held, but are
- * walked by do_notify without it: the kernel is allowed to run the work
- * right from uacpi_kernel_schedule_work, which we call with the mutex held.
+ * walked by do_notify without it: a handler is allowed to install another
+ * handler, which is not something that it would be able to do otherwise.
  *
  * This is safe because a handler is fully initialized before it's linked in,
  * and because an unlinked handler is only freed after all of the in-flight
@@ -137,9 +137,26 @@ uacpi_status uacpi_notify_all(uacpi_namespace_node *node, uacpi_u64 value)
     ctx->node_object = uacpi_namespace_node_get_object(node);
     uacpi_object_ref(ctx->node_object);
 
+    /*
+     * Nothing prevents the kernel from executing the work synchronously, e.g.
+     * because it sees no reason to defer it if it's not in an interrupt
+     * context. The handlers are free to call back into uACPI, be it to
+     * evaluate an object or to install another handler, so make sure that
+     * we're not holding onto anything that they might need. This includes the
+     * namespace, which is locked by whoever is sending the notification.
+     *
+     * Everything that the work needs is referenced by now, and there's nothing
+     * left for us to do after it's scheduled.
+     */
+    uacpi_release_native_mutex(notify_mutex);
+    uacpi_namespace_write_unlock();
+
     uacpi_kernel_schedule_work(
         UACPI_WORK_NOTIFICATION, ctx->work_item, do_notify, ctx
     );
+
+    uacpi_namespace_write_lock();
+    return UACPI_STATUS_OK;
 
 out:
     uacpi_release_native_mutex(notify_mutex);

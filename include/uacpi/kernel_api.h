@@ -411,6 +411,9 @@ void uacpi_kernel_schedule_work(
  *    was scheduled by the work that is being waited for
  *
  * Note that the waits must be done in this order specifically.
+ *
+ * NOTE: if any of the work is executed synchronously, this must wait for the
+ *       work that another thread is in the middle of executing that way too.
  */
 uacpi_status uacpi_kernel_wait_for_work_completion(void);
 
