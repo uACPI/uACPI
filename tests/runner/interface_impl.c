@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <uacpi/kernel_api.h>
+#include <uacpi/platform/atomic.h>
 #include <uacpi/status.h>
 #include <uacpi/types.h>
 
@@ -18,13 +19,149 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address)
     return UACPI_STATUS_OK;
 }
 
+/*
+ * Protects the state below that might be accessed by multiple threads at the
+ * same time. It's only taken, as well as initialized, if the work threads are
+ * running: this is the only way to end up with more than one thread.
+ */
+static mutex_t interface_mutex;
+static bool interface_is_threaded;
+
+static void interface_lock(void)
+{
+    if (interface_is_threaded)
+        mutex_lock(&interface_mutex);
+}
+
+static void interface_unlock(void)
+{
+    if (interface_is_threaded)
+        mutex_unlock(&interface_mutex);
+}
+
+#define IO_SPACE_SIZE ((size_t)UINT16_MAX + 1)
+
 static uint8_t *io_space;
+
+typedef struct {
+    uacpi_io_addr base;
+    uacpi_size len;
+} io_range_t;
+
+// The first half of every event block is taken by the status registers
+static io_range_t io_write_one_to_clear_ranges[8] = {
+    { FAKE_PM1A_EVT_BLK, FAKE_PM1_EVT_LEN / 2 },
+    { FAKE_GPE0_BLK, FAKE_GPE0_BLK_LEN / 2 },
+    { FAKE_GPE1_BLK, FAKE_GPE1_BLK_LEN / 2 },
+};
+static size_t io_num_write_one_to_clear_ranges = 3;
+
+void fake_io_set_write_one_to_clear(uacpi_io_addr base, uacpi_size len)
+{
+    io_range_t *range;
+
+    if (io_num_write_one_to_clear_ranges ==
+        UACPI_ARRAY_SIZE(io_write_one_to_clear_ranges))
+        error("too many write-one-to-clear IO ranges");
+
+    interface_lock();
+    range = &io_write_one_to_clear_ranges[io_num_write_one_to_clear_ranges++];
+    range->base = base;
+    range->len = len;
+    interface_unlock();
+}
+
+static bool io_is_write_one_to_clear(uacpi_io_addr addr)
+{
+    size_t i;
+
+    for (i = 0; i < io_num_write_one_to_clear_ranges; ++i) {
+        const io_range_t *range = &io_write_one_to_clear_ranges[i];
+
+        if (addr >= range->base && (addr - range->base) < range->len)
+            return true;
+    }
+
+    return false;
+}
+
+// Both are defined along with the rest of the thread support code
+static void irq_park_before_read(uacpi_io_addr addr);
+static void io_invoke_hook(fake_io_op op, uacpi_io_addr addr);
+
+static bool io_is_valid(uacpi_io_addr addr, size_t width)
+{
+    return io_space != NULL && addr < IO_SPACE_SIZE &&
+           width <= (IO_SPACE_SIZE - addr);
+}
+
+static void io_read(uacpi_io_addr addr, void *out_value, size_t width)
+{
+    memset(out_value, 0xFF, width);
+
+    if (!io_is_valid(addr, width))
+        return;
+
+    irq_park_before_read(addr);
+
+    interface_lock();
+    memcpy(out_value, &io_space[addr], width);
+    interface_unlock();
+}
+
+static void io_write(uacpi_io_addr addr, const void *value, size_t width)
+{
+    const uint8_t *bytes = value;
+    size_t i;
+
+    if (!io_is_valid(addr, width))
+        return;
+
+    io_invoke_hook(FAKE_IO_OP_WRITE, addr);
+
+    interface_lock();
+
+    for (i = 0; i < width; ++i) {
+        if (io_is_write_one_to_clear(addr + i))
+            io_space[addr + i] &= (uint8_t)~bytes[i];
+        else
+            io_space[addr + i] = bytes[i];
+    }
+
+    interface_unlock();
+}
+
+void fake_io_raise(uacpi_io_addr addr, uint8_t bits)
+{
+    if (!io_is_valid(addr, 1))
+        error("invalid IO address 0x%04X", (unsigned)addr);
+
+    interface_lock();
+    io_space[addr] |= bits;
+    interface_unlock();
+}
+
+void fake_io_lower(uacpi_io_addr addr, uint8_t bits)
+{
+    if (!io_is_valid(addr, 1))
+        error("invalid IO address 0x%04X", (unsigned)addr);
+
+    interface_lock();
+    io_space[addr] &= (uint8_t)~bits;
+    interface_unlock();
+}
 
 #ifdef UACPI_KERNEL_INITIALIZATION
 uacpi_status uacpi_kernel_initialize(uacpi_init_level lvl)
 {
-    if (lvl == UACPI_INIT_LEVEL_EARLY)
-        io_space = do_malloc(UINT16_MAX + 1);
+    if (lvl == UACPI_INIT_LEVEL_EARLY) {
+        io_space = do_malloc(IO_SPACE_SIZE);
+
+        // Make sure there are no events pending or enabled from the get-go
+        memset(&io_space[FAKE_PM1A_EVT_BLK], 0, FAKE_PM1_EVT_LEN);
+        memset(&io_space[FAKE_GPE0_BLK], 0, FAKE_GPE0_BLK_LEN);
+        memset(&io_space[FAKE_GPE1_BLK], 0, FAKE_GPE1_BLK_LEN);
+    }
     return UACPI_STATUS_OK;
 }
 
@@ -69,7 +206,7 @@ uacpi_status uacpi_kernel_io_map(
 
 void uacpi_kernel_io_unmap(uacpi_handle handle)
 {
-    UACPI_UNUSED(handle);
+    io_invoke_hook(FAKE_IO_OP_UNMAP, (uacpi_io_addr)((uintptr_t)handle));
 }
 
 #define UACPI_IO_READ(bits)                                                \
@@ -79,11 +216,7 @@ void uacpi_kernel_io_unmap(uacpi_handle handle)
     {                                                                      \
         uacpi_io_addr addr = (uacpi_io_addr)((uintptr_t)handle) + offset;  \
                                                                            \
-        if (io_space && addr <= UINT16_MAX)                                \
-            memcpy(out_value, &io_space[addr], bits / 8);                  \
-        else                                                               \
-            *out_value = (uacpi_u##bits)0xFFFFFFFFFFFFFFFF;                \
-                                                                           \
+        io_read(addr, out_value, bits / 8);                                \
         return UACPI_STATUS_OK;                                            \
     }
 
@@ -94,9 +227,7 @@ void uacpi_kernel_io_unmap(uacpi_handle handle)
     {                                                                     \
         uacpi_io_addr addr = (uacpi_io_addr)((uintptr_t)handle) + offset; \
                                                                           \
-        if (io_space && addr <= UINT16_MAX)                               \
-            memcpy(&io_space[addr], &in_value, bits / 8);                 \
-                                                                          \
+        io_write(addr, &in_value, bits / 8);                              \
         return UACPI_STATUS_OK;                                           \
     }
 
@@ -335,7 +466,7 @@ typedef struct {
 static hash_table_t virt_locations;
 static hash_table_t phys_locations;
 
-void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
+static void *do_map(uacpi_phys_addr addr, uacpi_size len)
 {
     if (!g_expect_virtual_addresses) {
         phys_location_t *phys_location = HASH_TABLE_FIND(
@@ -388,7 +519,7 @@ void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
     return (void*)((uintptr_t)addr);
 }
 
-void uacpi_kernel_unmap(void *addr, uacpi_size len)
+static void do_unmap(void *addr, uacpi_size len)
 {
     virt_location_t *virt_location = HASH_TABLE_FIND(
         &virt_locations, (uintptr_t)addr, virt_location_t, node
@@ -425,6 +556,24 @@ void uacpi_kernel_unmap(void *addr, uacpi_size len)
     HASH_TABLE_REMOVE(&virt_locations, virt_location, virt_location_t, node);
 }
 
+void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
+{
+    void *virt;
+
+    interface_lock();
+    virt = do_map(addr, len);
+    interface_unlock();
+
+    return virt;
+}
+
+void uacpi_kernel_unmap(void *addr, uacpi_size len)
+{
+    interface_lock();
+    do_unmap(addr, len);
+    interface_unlock();
+}
+
 #ifdef UACPI_SIZED_FREES
 static hash_table_t allocations;
 #endif
@@ -453,6 +602,21 @@ void interface_cleanup(void)
 #endif
 }
 
+static uacpi_u32 alloc_fail_next;
+
+void fail_next_alloc(void)
+{
+    uacpi_atomic_store32(&alloc_fail_next, 1);
+}
+
+static bool alloc_should_fail(void)
+{
+    uacpi_u32 expected = 1;
+
+    // Only one of the allocations gets to fail, no matter how many there are
+    return uacpi_atomic_cmpxchg32(&alloc_fail_next, &expected, 0);
+}
+
 #ifdef UACPI_SIZED_FREES
 
 typedef struct {
@@ -467,38 +631,52 @@ void *uacpi_kernel_alloc(uacpi_size size)
 
     if (size == 0)
         abort();
+    if (alloc_should_fail())
+        return NULL;
 
     ret = malloc(size);
     if (ret == NULL)
         return ret;
 
+    interface_lock();
     allocation = HASH_TABLE_GET_OR_ADD(
         &allocations, (uintptr_t)ret, allocation_t, node
     );
     allocation->size = size;
+    interface_unlock();
+
     return ret;
 }
 
 void uacpi_kernel_free(void *mem, uacpi_size size_hint)
 {
     allocation_t *allocation;
+    bool is_known = false;
+    size_t size = 0;
 
     if (mem == NULL)
         return;
 
+    interface_lock();
     allocation = HASH_TABLE_FIND(
         &allocations, (uintptr_t)mem, allocation_t, node
     );
-    if (!allocation)
+    if (allocation != NULL) {
+        is_known = true;
+        size = allocation->size;
+        HASH_TABLE_REMOVE(&allocations, allocation, allocation_t, node);
+    }
+    interface_unlock();
+
+    if (!is_known)
         error("unable to find heap allocation %p\n", mem);
 
-    if (allocation->size != size_hint)
+    if (size != size_hint)
         error(
             "invalid free size: originally allocated %zu bytes, freeing as %zu",
-            allocation->size, size_hint
+            size, size_hint
         );
 
-    HASH_TABLE_REMOVE(&allocations, allocation, allocation_t, node);
     free(mem);
 }
 
@@ -508,6 +686,8 @@ void *uacpi_kernel_alloc(uacpi_size size)
 {
     if (size == 0)
         error("attempted to allocate zero bytes");
+    if (alloc_should_fail())
+        return NULL;
 
     return malloc(size);
 }
@@ -575,134 +755,107 @@ void uacpi_kernel_sleep(uacpi_u64 msec)
     millisecond_sleep(msec);
 }
 
-uacpi_handle uacpi_kernel_create_mutex(void)
-{
-    mutex_t *mutex = do_malloc(sizeof(*mutex));
-
-    mutex_init(mutex);
-    return mutex;
-}
-
-void uacpi_kernel_free_mutex(uacpi_handle handle)
-{
-    mutex_free(handle);
-    free(handle);
-}
-
 uacpi_thread_id uacpi_kernel_get_thread_id(void)
 {
     return get_thread_id();
 }
 
-uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout)
-{
-    if (timeout == 0)
-        return mutex_try_lock(handle) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
-
-    if (timeout == 0xFFFF) {
-        mutex_lock(handle);
-        return UACPI_STATUS_OK;
-    }
-
-    if (mutex_lock_timeout(handle, timeout * 1000000ull))
-        return UACPI_STATUS_OK;
-
-    return UACPI_STATUS_TIMEOUT;
-}
-
-void uacpi_kernel_release_mutex(uacpi_handle handle)
-{
-    mutex_unlock(handle);
-}
-
 typedef struct {
     mutex_t mutex;
     condvar_t condvar;
-    size_t counter;
-} event_t;
+    size_t units;
+    size_t num_waiters;
+} semaphore_t;
 
-uacpi_handle uacpi_kernel_create_event(void)
+// Safe to use no matter how many threads there are, unlike error()
+NORETURN static void work_fatal(const char *reason);
+
+uacpi_handle uacpi_kernel_create_semaphore(uacpi_u32 initial_units)
 {
-    event_t *event = do_calloc(1, sizeof(*event));
+    semaphore_t *semaphore = do_calloc(1, sizeof(*semaphore));
 
-    mutex_init(&event->mutex);
-    condvar_init(&event->condvar);
-    return event;
+    mutex_init(&semaphore->mutex);
+    condvar_init(&semaphore->condvar);
+    semaphore->units = initial_units;
+
+    return semaphore;
 }
 
-void uacpi_kernel_free_event(uacpi_handle handle)
+void uacpi_kernel_free_semaphore(uacpi_handle handle)
 {
-    event_t *event = handle;
+    semaphore_t *semaphore = handle;
+    bool has_waiters;
 
-    condvar_free(&event->condvar);
-    mutex_free(&event->mutex);
+    mutex_lock(&semaphore->mutex);
+    has_waiters = semaphore->num_waiters != 0;
+    mutex_unlock(&semaphore->mutex);
+
+    if (has_waiters) {
+        work_fatal(
+            "a semaphore was freed while a thread was still waiting on it"
+        );
+    }
+
+    condvar_free(&semaphore->condvar);
+    mutex_free(&semaphore->mutex);
     free(handle);
 }
 
-static bool event_pred(void *ptr)
+static bool semaphore_has_units(void *ptr)
 {
-    event_t *event = ptr;
+    semaphore_t *semaphore = ptr;
 
-    return event->counter != 0;
+    return semaphore->units != 0;
 }
 
-uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
+uacpi_status uacpi_kernel_wait_for_semaphore(
+    uacpi_handle handle, uacpi_u16 timeout
+)
 {
-    event_t *event = handle;
-    bool ok;
+    semaphore_t *semaphore = handle;
+    bool has_units;
 
-    mutex_lock(&event->mutex);
+    mutex_lock(&semaphore->mutex);
 
-    if (event->counter > 0) {
-        event->counter -= 1;
-        mutex_unlock(&event->mutex);
-        return UACPI_TRUE;
+    has_units = semaphore->units != 0;
+    semaphore->num_waiters += 1;
+
+    // There's nobody to give us a unit if we're all there is
+    if (!has_units && timeout == 0xFFFF && !interface_is_threaded)
+        work_fatal("the only thread is about to wait for a semaphore forever");
+
+    if (!has_units && timeout == 0xFFFF) {
+        condvar_wait(
+            &semaphore->condvar, &semaphore->mutex, semaphore_has_units,
+            semaphore
+        );
+        has_units = true;
+    } else if (!has_units && timeout != 0) {
+        has_units = condvar_wait_timeout(
+            &semaphore->condvar, &semaphore->mutex, semaphore_has_units,
+            semaphore, timeout * 1000000ull
+        );
     }
 
-    if (timeout == 0) {
-        mutex_unlock(&event->mutex);
-        return UACPI_FALSE;
-    }
+    semaphore->num_waiters -= 1;
 
-    if (timeout == 0xFFFF) {
-        condvar_wait(&event->condvar, &event->mutex, event_pred, event);
+    if (has_units)
+        semaphore->units -= 1;
 
-        event->counter -= 1;
-        mutex_unlock(&event->mutex);
-        return UACPI_TRUE;
-    }
-
-    ok = condvar_wait_timeout(
-        &event->condvar, &event->mutex, event_pred, event, timeout * 1000000ull
-    );
-    if (ok)
-        event->counter -= 1;
-
-    mutex_unlock(&event->mutex);
-    return ok ? UACPI_TRUE : UACPI_FALSE;
+    mutex_unlock(&semaphore->mutex);
+    return has_units ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
 }
 
-void uacpi_kernel_signal_event(uacpi_handle handle)
+void uacpi_kernel_signal_semaphore(uacpi_handle handle)
 {
-    event_t *event = handle;
+    semaphore_t *semaphore = handle;
 
-    mutex_lock(&event->mutex);
+    mutex_lock(&semaphore->mutex);
 
-    event->counter += 1;
-    condvar_signal(&event->condvar);
+    semaphore->units += 1;
+    condvar_signal(&semaphore->condvar);
 
-    mutex_unlock(&event->mutex);
-}
-
-void uacpi_kernel_reset_event(uacpi_handle handle)
-{
-    event_t *event = handle;
-
-    mutex_lock(&event->mutex);
-
-    event->counter = 0;
-
-    mutex_unlock(&event->mutex);
+    mutex_unlock(&semaphore->mutex);
 }
 
 uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req)
@@ -724,16 +877,41 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req)
     return UACPI_STATUS_OK;
 }
 
+typedef struct {
+    uacpi_u32 irq;
+    uacpi_interrupt_handler handler;
+    uacpi_handle ctx;
+} irq_handler_t;
+
+static irq_handler_t irq_handlers[8];
+
 uacpi_status uacpi_kernel_install_interrupt_handler(
     uacpi_u32 irq, uacpi_interrupt_handler handler, uacpi_handle ctx,
     uacpi_handle *out_irq_handle
 )
 {
-    UACPI_UNUSED(irq);
-    UACPI_UNUSED(handler);
-    UACPI_UNUSED(ctx);
-    UACPI_UNUSED(out_irq_handle);
+    irq_handler_t *slot = NULL;
+    size_t i;
 
+    interface_lock();
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(irq_handlers); ++i) {
+        if (irq_handlers[i].handler != NULL)
+            continue;
+
+        slot = &irq_handlers[i];
+        slot->irq = irq;
+        slot->handler = handler;
+        slot->ctx = ctx;
+        break;
+    }
+
+    interface_unlock();
+
+    if (slot == NULL)
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    *out_irq_handle = slot;
     return UACPI_STATUS_OK;
 }
 
@@ -741,25 +919,67 @@ uacpi_status uacpi_kernel_uninstall_interrupt_handler(
     uacpi_interrupt_handler handler, uacpi_handle irq_handle
 )
 {
-    UACPI_UNUSED(handler);
-    UACPI_UNUSED(irq_handle);
+    irq_handler_t *slot = irq_handle;
+    bool is_valid;
+
+    interface_lock();
+
+    is_valid = slot >= &irq_handlers[0] &&
+               slot < &irq_handlers[UACPI_ARRAY_SIZE(irq_handlers)] &&
+               slot->handler == handler;
+    if (is_valid)
+        memset(slot, 0, sizeof(*slot));
+
+    interface_unlock();
+
+    if (!is_valid)
+        error("attempted to uninstall a bogus interrupt handler");
 
     return UACPI_STATUS_OK;
 }
 
+uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq)
+{
+    uacpi_interrupt_ret ret = UACPI_INTERRUPT_NOT_HANDLED;
+    irq_handler_t handlers[UACPI_ARRAY_SIZE(irq_handlers)];
+    size_t i;
+
+    /*
+     * The handlers are invoked by the calling thread, which is as close as we
+     * can get to an interrupt context. Do that without holding the lock, as
+     * pretty much everything a handler might do needs it.
+     */
+    interface_lock();
+    memcpy(handlers, irq_handlers, sizeof(handlers));
+    interface_unlock();
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(handlers); ++i) {
+        if (handlers[i].handler == NULL || handlers[i].irq != irq)
+            continue;
+
+        ret |= handlers[i].handler(handlers[i].ctx);
+    }
+
+    return ret;
+}
+
 uacpi_handle uacpi_kernel_create_spinlock(void)
 {
-    return uacpi_kernel_create_mutex();
+    mutex_t *mutex = do_malloc(sizeof(*mutex));
+
+    mutex_init(mutex);
+    return mutex;
 }
 
 void uacpi_kernel_free_spinlock(uacpi_handle handle)
 {
-    uacpi_kernel_free_mutex(handle);
+    mutex_free(handle);
+    free(handle);
 }
 
 uacpi_cpu_flags uacpi_kernel_lock_spinlock(uacpi_handle handle)
 {
-    uacpi_kernel_acquire_mutex(handle, 0xFFFF);
+    mutex_lock(handle);
     return 0;
 }
 
@@ -767,20 +987,534 @@ void uacpi_kernel_unlock_spinlock(uacpi_handle handle, uacpi_cpu_flags flags)
 {
     UACPI_UNUSED(flags);
 
-    uacpi_kernel_release_mutex(handle);
+    mutex_unlock(handle);
 }
 
-uacpi_status uacpi_kernel_schedule_work(
-    uacpi_work_type type, uacpi_work_handler handler, uacpi_handle ctx
+#define WORK_TIMEOUT_SECONDS 30
+
+/*
+ * This is what a work item is as far as we're concerned. It's only ever
+ * touched up until the point where the handler is invoked, as it's not ours
+ * to look at anymore after that.
+ */
+typedef struct work {
+    struct work *next;
+    uacpi_work_handler handler;
+    uacpi_handle ctx;
+    bool is_pending;
+} work_t;
+
+typedef struct {
+    thread_t thread;
+    void *thread_id;
+    condvar_t has_work;
+    work_t *head;
+    work_t *tail;
+} work_queue_t;
+
+/*
+ * One thread per work type, indexed by uacpi_work_type. This is what most
+ * kernels do, and what makes it possible for a GPE handler to execute at the
+ * same time as a notify handler.
+ *
+ * The last one is not really a work queue: it's where the interrupts that are
+ * supposed to look like they were taken by a different CPU are handled, see
+ * fake_irq_raise_parked.
+ */
+#define WORK_QUEUE_INTERRUPT (UACPI_WORK_NOTIFICATION + 1)
+static work_queue_t work_queues[WORK_QUEUE_INTERRUPT + 1];
+
+static mutex_t work_mutex;
+static condvar_t work_done;
+static condvar_t work_watchdog_stop;
+static thread_t work_watchdog;
+
+// The interrupt thread only ever handles one interrupt at a time
+static work_t irq_work;
+
+static condvar_t irq_park_changed;
+static uacpi_io_addr irq_park_addr;
+static bool irq_park_is_armed;
+static bool irq_is_parked;
+static bool irq_is_done;
+
+// The amount of work that is either queued or is being executed right now
+static size_t work_num_pending;
+static bool work_is_held;
+
+// The number of threads that are waiting for all of the work to complete
+static size_t work_num_waiters;
+static bool work_is_stopping;
+
+/*
+ * We can't use error() once the work threads are running: it resets the state
+ * of uACPI, which is not possible to do while another thread is inside of it.
+ */
+NORETURN static void work_fatal(const char *reason)
+{
+    fflush(stdout);
+    fprintf(stderr, "unexpected error: %s\n", reason);
+    exit(1);
+}
+
+static bool work_queue_should_wake(void *opaque)
+{
+    work_queue_t *queue = opaque;
+
+    if (work_is_stopping)
+        return true;
+    if (queue->head == NULL)
+        return false;
+
+    // An interrupt is not something that can be held back
+    return !work_is_held || queue == &work_queues[WORK_QUEUE_INTERRUPT];
+}
+
+static void work_thread(void *opaque)
+{
+    work_queue_t *queue = opaque;
+    work_t *work;
+    uacpi_work_handler handler;
+    uacpi_handle ctx;
+
+    mutex_lock(&work_mutex);
+    queue->thread_id = get_thread_id();
+
+    for (;;) {
+        condvar_wait(
+            &queue->has_work, &work_mutex, work_queue_should_wake, queue
+        );
+
+        // We're only asked to stop after all of the work is done
+        if (work_is_stopping)
+            break;
+
+        work = queue->head;
+        queue->head = work->next;
+
+        handler = work->handler;
+        ctx = work->ctx;
+        work->is_pending = false;
+
+        mutex_unlock(&work_mutex);
+
+        handler(ctx);
+
+        mutex_lock(&work_mutex);
+        if (--work_num_pending == 0)
+            condvar_broadcast(&work_done);
+    }
+
+    mutex_unlock(&work_mutex);
+}
+
+static bool work_watchdog_should_stop(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return work_is_stopping;
+}
+
+static void work_watchdog_thread(void *opaque)
+{
+    bool stopped;
+
+    UACPI_UNUSED(opaque);
+
+    mutex_lock(&work_mutex);
+    stopped = condvar_wait_timeout(
+        &work_watchdog_stop, &work_mutex, work_watchdog_should_stop, NULL,
+        WORK_TIMEOUT_SECONDS * NANOSECONDS_PER_SECOND
+    );
+    mutex_unlock(&work_mutex);
+
+    if (!stopped) {
+        work_fatal(
+            "the work threads were not stopped in time, the test has most "
+            "likely deadlocked"
+        );
+    }
+}
+
+/*
+ * The C library of OpenWatcom is of no use to a program with more than one
+ * thread, at least not on Linux: a call to malloc() that is made by a few
+ * threads at once is enough to corrupt the heap, and pthread_join() is prone
+ * to never coming back.
+ */
+static bool work_threads_supported(void)
+{
+#ifdef __WATCOMC__
+    return false;
+#else
+    return true;
+#endif
+}
+
+void work_threads_start(void)
+{
+    size_t i;
+
+    if (interface_is_threaded)
+        error("the work threads are already running");
+
+    if (!work_threads_supported()) {
+        printf("no usable threads here, skipping the rest of the test\n");
+        exit(0);
+    }
+
+    mutex_init(&interface_mutex);
+    mutex_init(&work_mutex);
+    condvar_init(&work_done);
+    condvar_init(&work_watchdog_stop);
+    condvar_init(&irq_park_changed);
+
+    work_is_held = false;
+    work_is_stopping = false;
+    interface_is_threaded = true;
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i) {
+        work_queue_t *queue = &work_queues[i];
+
+        condvar_init(&queue->has_work);
+        thread_create(&queue->thread, work_thread, queue);
+    }
+
+    thread_create(&work_watchdog, work_watchdog_thread, NULL);
+}
+
+static void work_release_locked(void)
+{
+    size_t i;
+
+    work_is_held = false;
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i)
+        condvar_signal(&work_queues[i].has_work);
+}
+
+void work_threads_stop(void)
+{
+    size_t i;
+
+    if (!interface_is_threaded)
+        error("the work threads are not running");
+
+    uacpi_kernel_wait_for_work_completion();
+
+    mutex_lock(&work_mutex);
+    work_is_stopping = true;
+    work_release_locked();
+    condvar_signal(&work_watchdog_stop);
+    mutex_unlock(&work_mutex);
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i) {
+        work_queue_t *queue = &work_queues[i];
+
+        thread_join(&queue->thread);
+        condvar_free(&queue->has_work);
+        queue->thread_id = NULL;
+    }
+    thread_join(&work_watchdog);
+
+    interface_is_threaded = false;
+
+    condvar_free(&irq_park_changed);
+    condvar_free(&work_watchdog_stop);
+    condvar_free(&work_done);
+    mutex_free(&work_mutex);
+    mutex_free(&interface_mutex);
+}
+
+void work_hold(void)
+{
+    if (!interface_is_threaded)
+        error("work can only be held if the work threads are running");
+
+    mutex_lock(&work_mutex);
+    work_is_held = true;
+    mutex_unlock(&work_mutex);
+}
+
+void work_release(void)
+{
+    if (!interface_is_threaded)
+        error("work can only be released if the work threads are running");
+
+    mutex_lock(&work_mutex);
+    work_release_locked();
+    mutex_unlock(&work_mutex);
+}
+
+static void work_enqueue(
+    size_t queue_idx, work_t *work, uacpi_work_handler handler,
+    uacpi_handle ctx
 )
 {
-    UACPI_UNUSED(type);
+    work_queue_t *queue = &work_queues[queue_idx];
 
-    handler(ctx);
-    return UACPI_STATUS_OK;
+    mutex_lock(&work_mutex);
+
+    if (work->is_pending)
+        work_fatal("a work item was scheduled while it was still pending");
+
+    work->next = NULL;
+    work->handler = handler;
+    work->ctx = ctx;
+    work->is_pending = true;
+
+    if (queue->head == NULL)
+        queue->head = work;
+    else
+        queue->tail->next = work;
+    queue->tail = work;
+
+    work_num_pending++;
+    condvar_signal(&queue->has_work);
+
+    mutex_unlock(&work_mutex);
+}
+
+static uacpi_u32 work_item_fail_next;
+
+void fail_next_work_item(void)
+{
+    uacpi_atomic_store32(&work_item_fail_next, 1);
+}
+
+uacpi_handle uacpi_kernel_create_work_item(void)
+{
+    uacpi_u32 expected = 1;
+
+    if (uacpi_atomic_cmpxchg32(&work_item_fail_next, &expected, 0))
+        return NULL;
+
+    return do_calloc(1, sizeof(work_t));
+}
+
+void uacpi_kernel_free_work_item(uacpi_handle handle)
+{
+    work_t *work = handle;
+    bool is_pending;
+
+    if (interface_is_threaded)
+        mutex_lock(&work_mutex);
+
+    is_pending = work->is_pending;
+
+    if (interface_is_threaded)
+        mutex_unlock(&work_mutex);
+
+    if (is_pending)
+        work_fatal("a work item was freed while it was still pending");
+
+    free(work);
+}
+
+void uacpi_kernel_schedule_work(
+    uacpi_work_type type, uacpi_handle work_item, uacpi_work_handler handler,
+    uacpi_handle ctx
+)
+{
+    if (work_item == NULL)
+        work_fatal("attempted to schedule work without a work item");
+    if (type != UACPI_WORK_GPE_EXECUTION && type != UACPI_WORK_NOTIFICATION)
+        work_fatal("attempted to schedule work of an invalid type");
+
+    if (!interface_is_threaded) {
+        /*
+         * The work item has nothing to keep track of in this case. Not
+         * touching it is also the only safe thing to do: the handler is
+         * allowed to free it, or to schedule it again.
+         */
+        handler(ctx);
+        return;
+    }
+
+    work_enqueue(type, work_item, handler, ctx);
+}
+
+static bool irq_is_running(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return !irq_is_parked;
+}
+
+// Invoked for every IO read, parks the interrupt thread if it was asked to
+static void irq_park_before_read(uacpi_io_addr addr)
+{
+    if (!interface_is_threaded)
+        return;
+
+    mutex_lock(&work_mutex);
+
+    if (irq_park_is_armed && addr == irq_park_addr &&
+        get_thread_id() == work_queues[WORK_QUEUE_INTERRUPT].thread_id) {
+        irq_park_is_armed = false;
+        irq_is_parked = true;
+        condvar_broadcast(&irq_park_changed);
+
+        condvar_wait(&irq_park_changed, &work_mutex, irq_is_running, NULL);
+    }
+
+    mutex_unlock(&work_mutex);
+}
+
+static void irq_unpark_locked(void)
+{
+    irq_park_is_armed = false;
+
+    if (irq_is_parked) {
+        irq_is_parked = false;
+        condvar_broadcast(&irq_park_changed);
+    }
+}
+
+void fake_irq_unpark(void)
+{
+    if (!interface_is_threaded)
+        error("an interrupt can only be parked by the work threads");
+
+    mutex_lock(&work_mutex);
+    irq_unpark_locked();
+    mutex_unlock(&work_mutex);
+}
+
+bool fake_irq_is_parked(void)
+{
+    bool ret;
+
+    if (!interface_is_threaded)
+        return false;
+
+    mutex_lock(&work_mutex);
+    ret = irq_is_parked;
+    mutex_unlock(&work_mutex);
+
+    return ret;
+}
+
+static void irq_raise_on_this_thread(uacpi_handle opaque)
+{
+    fake_irq_raise((uacpi_u32)((uintptr_t)opaque));
+
+    mutex_lock(&work_mutex);
+    irq_park_is_armed = false;
+    irq_is_done = true;
+    condvar_broadcast(&irq_park_changed);
+    mutex_unlock(&work_mutex);
+}
+
+static bool irq_is_parked_or_done(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return irq_is_parked || irq_is_done;
+}
+
+bool fake_irq_raise_parked(uacpi_u32 irq, uacpi_io_addr park_addr)
+{
+    bool is_parked;
+
+    if (!interface_is_threaded)
+        error("an interrupt can only be parked by the work threads");
+
+    mutex_lock(&work_mutex);
+    irq_park_addr = park_addr;
+    irq_park_is_armed = true;
+    irq_is_parked = false;
+    irq_is_done = false;
+    mutex_unlock(&work_mutex);
+
+    work_enqueue(
+        WORK_QUEUE_INTERRUPT, &irq_work, irq_raise_on_this_thread,
+        (uacpi_handle)((uintptr_t)irq)
+    );
+
+    mutex_lock(&work_mutex);
+    condvar_wait(&irq_park_changed, &work_mutex, irq_is_parked_or_done, NULL);
+    is_parked = irq_is_parked;
+    mutex_unlock(&work_mutex);
+
+    return is_parked;
+}
+
+static fake_io_hook io_hook;
+static void *io_hook_ctx;
+
+void fake_io_set_hook(fake_io_hook hook, void *ctx)
+{
+    interface_lock();
+    io_hook = hook;
+    io_hook_ctx = ctx;
+    interface_unlock();
+}
+
+static void io_invoke_hook(fake_io_op op, uacpi_io_addr addr)
+{
+    fake_io_hook hook;
+    void *ctx;
+
+    interface_lock();
+    hook = io_hook;
+    ctx = io_hook_ctx;
+    interface_unlock();
+
+    if (hook != NULL)
+        hook(ctx, op, addr);
+}
+
+static bool work_is_done(void *opaque)
+{
+    UACPI_UNUSED(opaque);
+    return work_num_pending == 0;
 }
 
 uacpi_status uacpi_kernel_wait_for_work_completion(void)
 {
+    void *this_id;
+    size_t i;
+
+    if (!interface_is_threaded)
+        return UACPI_STATUS_OK;
+
+    this_id = get_thread_id();
+    mutex_lock(&work_mutex);
+
+    for (i = 0; i < UACPI_ARRAY_SIZE(work_queues); ++i) {
+        if (work_queues[i].thread_id != this_id)
+            continue;
+
+        work_fatal(
+            "a work or an interrupt handler has attempted to wait for work "
+            "completion, which would never return"
+        );
+    }
+
+    /*
+     * Someone is waiting for the work, so there's no point in holding it any
+     * longer: this is exactly what the hold is there to wait for. Same goes
+     * for an interrupt handler that was parked, which is accounted for the
+     * same way the work is.
+     */
+    work_release_locked();
+    irq_unpark_locked();
+
+    work_num_waiters++;
+    condvar_wait(&work_done, &work_mutex, work_is_done, NULL);
+    work_num_waiters--;
+
+    mutex_unlock(&work_mutex);
     return UACPI_STATUS_OK;
+}
+
+void work_wait_for_waiter(void)
+{
+    bool has_waiter;
+
+    do {
+        millisecond_sleep(1);
+
+        mutex_lock(&work_mutex);
+        has_waiter = work_num_waiters != 0;
+        mutex_unlock(&work_mutex);
+    } while (!has_waiter);
 }

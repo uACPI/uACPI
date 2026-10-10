@@ -1,5 +1,6 @@
 #include "argparser.h"
 #include "helpers.h"
+#include "tests.h"
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -24,10 +25,63 @@
 #include <uacpi/utilities.h>
 #include <uacpi/sleep.h>
 
-void run_resource_tests(void);
-void test_object_api(void);
-void test_address_spaces(void);
-void interface_cleanup(void);
+// The test wants a FADT that doesn't describe any GPE blocks
+#define API_TEST_NO_FADT_GPE_BLOCKS (1 << 0)
+
+/*
+ * Tests that exercise the API directly instead of evaluating \MAIN, selected
+ * by the value that the test case is expected to return.
+ */
+static const struct api_test {
+    const char *name;
+    void (*run)(void);
+    unsigned flags;
+} api_tests[] = {
+    { "check-object-api-works", test_object_api, 0 },
+    { "check-address-spaces-work", test_address_spaces, 0 },
+    { "check-notify-install-handles-oom", test_notify_install_oom, 0 },
+    { "check-notify-handlers-dont-deadlock", test_notify_handlers_vs_work, 0 },
+    { "check-event-api-doesnt-deadlock", test_event_api_vs_work, 0 },
+    { "check-gpe-handlers-work", test_gpe_handlers, 0 },
+    { "check-wake-gpes-work", test_wake_gpes, 0 },
+    { "check-gpe-blocks-work", test_gpe_blocks, 0 },
+    {
+        "check-gpe-block-works-without-fadt-gpes",
+        test_gpe_block_without_fadt_gpes, API_TEST_NO_FADT_GPE_BLOCKS
+    },
+    {
+        "check-state-reset-waits-for-gpe-work",
+        test_state_reset_vs_gpe_work, 0
+    },
+    {
+        "check-state-reset-waits-for-notifications",
+        test_state_reset_vs_notifications, API_TEST_NO_FADT_GPE_BLOCKS
+    },
+    { "check-aml-with-threads", test_aml_with_threads, 0 },
+};
+
+/*
+ * API tests that don't need any AML to work with. These are selected by name,
+ * and are run against an empty DSDT.
+ */
+static const struct api_test builtin_api_tests[] = {
+    { "fixed-events", test_fixed_events, 0 },
+    { "global-lock", test_global_lock, 0 },
+};
+
+static const struct api_test *find_api_test(
+    const struct api_test *tests, size_t num_tests, const char *name
+)
+{
+    size_t i;
+
+    for (i = 0; i < num_tests; ++i) {
+        if (strcmp(name, tests[i].name) == 0)
+            return &tests[i];
+    }
+
+    return NULL;
+}
 
 static uacpi_object_type string_to_object_type(const char *str)
 {
@@ -312,13 +366,13 @@ static uacpi_table_installation_disposition handle_table_install(
 )
 {
     if (!strncmp(hdr->oem_table_id, "DENYTABL", sizeof(hdr->oem_table_id)))
-        return UACPI_TABLE_INSTALLATION_DISPOSITON_DENY;
+        return UACPI_TABLE_INSTALLATION_DISPOSITION_DENY;
 
     if (strncmp(hdr->oem_table_id, "OVERTABL", sizeof(hdr->oem_table_id)))
-        return UACPI_TABLE_INSTALLATION_DISPOSITON_ALLOW;
+        return UACPI_TABLE_INSTALLATION_DISPOSITION_ALLOW;
 
     *out_override = (uacpi_virt_addr)table_override;
-    return UACPI_TABLE_INSTALLATION_DISPOSITON_VIRTUAL_OVERRIDE;
+    return UACPI_TABLE_INSTALLATION_DISPOSITION_VIRTUAL_OVERRIDE;
 }
 
 static uacpi_status handle_notify(
@@ -364,20 +418,25 @@ static uacpi_interrupt_ret handle_gpe(
     return UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
 }
 
+// A null 'dsdt_path' stands for an empty DSDT
 static void run_test(
     const char *dsdt_path, const vector_t *ssdt_paths,
-    uacpi_object_type expected_type, const char *expected_value,
-    bool dump_namespace, bool run_pts3
+    const struct api_test *api_test, uacpi_object_type expected_type,
+    const char *expected_value, bool dump_namespace, bool run_pts3
 )
 {
     static uint8_t early_table_buf[4096];
     struct acpi_rsdp rsdp = { 0 };
-    struct full_xsdt *xsdt = make_xsdt(&rsdp, dsdt_path, ssdt_paths);
+    struct full_xsdt *xsdt;
     uacpi_status st;
     uacpi_table tbl;
     bool is_test_mode;
     uacpi_object *ret = NULL;
 
+    g_no_fadt_gpe_blocks = api_test != NULL &&
+                           (api_test->flags & API_TEST_NO_FADT_GPE_BLOCKS);
+
+    xsdt = make_xsdt(&rsdp, dsdt_path, ssdt_paths);
     g_rsdp = (uacpi_phys_addr)((uintptr_t)&rsdp);
 
     st = uacpi_setup_early_table_access(
@@ -439,7 +498,8 @@ static void run_test(
     st = uacpi_enable_host_interface(UACPI_HOST_INTERFACE_MODULE_DEVICE);
     ensure_ok_status(st);
 
-    is_test_mode = expected_type != UACPI_OBJECT_UNINITIALIZED;
+    is_test_mode = api_test != NULL ||
+                   expected_type != UACPI_OBJECT_UNINITIALIZED;
     if (is_test_mode) {
         st = uacpi_table_install(runner_id_table, NULL);
         ensure_ok_status(st);
@@ -472,19 +532,21 @@ static void run_test(
     );
     ensure_ok_status(st);
 
-    st = uacpi_install_gpe_handler(
-        UACPI_NULL, 123, UACPI_GPE_TRIGGERING_EDGE, handle_gpe, NULL
-    );
-    ensure_ok_status(st);
+    if (!g_no_fadt_gpe_blocks) {
+        st = uacpi_install_gpe_handler(
+            UACPI_NULL, 123, UACPI_GPE_TRIGGERING_EDGE, handle_gpe, NULL
+        );
+        ensure_ok_status(st);
 
-    st = uacpi_enable_gpe(UACPI_NULL, 123);
-    ensure_ok_status(st);
+        st = uacpi_enable_gpe(UACPI_NULL, 123);
+        ensure_ok_status(st);
 
-    st = uacpi_disable_gpe(UACPI_NULL, 123);
-    ensure_ok_status(st);
+        st = uacpi_disable_gpe(UACPI_NULL, 123);
+        ensure_ok_status(st);
 
-    st = uacpi_uninstall_gpe_handler(UACPI_NULL, 123, handle_gpe);
-    ensure_ok_status(st);
+        st = uacpi_uninstall_gpe_handler(UACPI_NULL, 123, handle_gpe);
+        ensure_ok_status(st);
+    }
 
     st = uacpi_namespace_initialize();
     ensure_ok_status(st);
@@ -498,13 +560,8 @@ static void run_test(
     if (!is_test_mode)
         goto done;
 
-    if (strcmp(expected_value, "check-object-api-works") == 0) {
-        test_object_api();
-        goto done;
-    }
-
-    if (strcmp(expected_value, "check-address-spaces-work") == 0) {
-        test_address_spaces();
+    if (api_test != NULL) {
+        api_test->run();
         goto done;
     }
 
@@ -546,7 +603,8 @@ static uacpi_log_level log_level_from_string(const char *arg)
 
 static arg_spec_t DSDT_PATH_ARG = ARG_POS(
     "dsdt-path-or-keyword",
-    "path to the DSDT to run or \"resource-tests\" to run the resource tests"
+    "path to the DSDT to run, \"resource-tests\" to run the resource tests, "
+    "or the name of a builtin API test to run"
 );
 
 static arg_spec_t EXPECT_ARG = ARG_LIST(
@@ -570,6 +628,9 @@ static arg_spec_t LOG_LEVEL_ARG = ARG_PARAM(
     "log-level", 'l',
     "log level to set, one of: debug, trace, info, warning, error"
 );
+static arg_spec_t LIST_BUILTIN_ARG = ARG_FLAG(
+    "list-builtin", 'b', "list the builtin API tests, one per line, and exit"
+);
 static arg_spec_t HELP_ARG = ARG_HELP(
     "help", 'h', "Display this menu and exit"
 );
@@ -585,6 +646,7 @@ static arg_spec_t *const OPTION_ARGS[] = {
     &RUN_PTS3_ARG,
     &WHILE_LOOP_TIMEOUT_ARG,
     &LOG_LEVEL_ARG,
+    &LIST_BUILTIN_ARG,
     &HELP_ARG,
 };
 
@@ -598,12 +660,20 @@ static const arg_parser_t PARSER = {
 int main(int argc, char *argv[])
 {
     const char *dsdt_path_or_keyword;
+    const struct api_test *api_test;
     const char *expected_value = NULL;
     uacpi_object_type expected_type = UACPI_OBJECT_UNINITIALIZED;
     bool dump_namespace, run_pts3;
     uacpi_log_level log_level;
+    size_t i;
 
     parse_args(&PARSER, argc, argv);
+
+    if (is_set(&LIST_BUILTIN_ARG)) {
+        for (i = 0; i < UACPI_ARRAY_SIZE(builtin_api_tests); ++i)
+            puts(builtin_api_tests[i].name);
+        return 0;
+    }
 
     uacpi_context_set_loop_timeout(get_uint_or(&WHILE_LOOP_TIMEOUT_ARG, 3));
 
@@ -613,12 +683,22 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    if (is_set(&EXPECT_ARG)) {
+    api_test = find_api_test(
+        builtin_api_tests, UACPI_ARRAY_SIZE(builtin_api_tests),
+        dsdt_path_or_keyword
+    );
+    if (api_test != NULL) {
+        dsdt_path_or_keyword = NULL;
+    } else if (is_set(&EXPECT_ARG)) {
         if (EXPECT_ARG.values.count != 2)
             error("bad --expect format");
 
         expected_type = string_to_object_type(EXPECT_ARG.values.blobs[0].data);
         expected_value = EXPECT_ARG.values.blobs[1].data;
+
+        api_test = find_api_test(
+            api_tests, UACPI_ARRAY_SIZE(api_tests), expected_value
+        );
     }
 
     dump_namespace = is_set(&ENUMERATE_NAMESPACE_ARG);
@@ -632,8 +712,8 @@ int main(int argc, char *argv[])
     uacpi_context_set_log_level(log_level);
 
     run_test(
-        dsdt_path_or_keyword, &EXTRA_TABLES_ARG.values, expected_type,
-        expected_value, dump_namespace, run_pts3
+        dsdt_path_or_keyword, &EXTRA_TABLES_ARG.values, api_test,
+        expected_type, expected_value, dump_namespace, run_pts3
     );
 
     return 0;

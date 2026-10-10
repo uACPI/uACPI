@@ -19,6 +19,15 @@ uacpi_status uacpi_install_notify_handler(
     uacpi_handle handler_context
 );
 
+/**
+ * Uninstall a Notify() handler previously installed to a device node.
+ * The handler is guaranteed to not be running, and to never be invoked again
+ * once this function returns.
+ *
+ * NOTE: this waits for all of the in-flight notifications to complete, and
+ *       therefore must not be called from a notify handler, or any other work
+ *       scheduled via uacpi_kernel_schedule_work.
+ */
 uacpi_status uacpi_uninstall_notify_handler(
     uacpi_namespace_node *node, uacpi_notify_handler handler
 );

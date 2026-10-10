@@ -1,4 +1,5 @@
 #include "helpers.h"
+#include "tests.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2392,7 +2393,7 @@ void run_resource_tests(void)
 
     for (i = 0; i < UACPI_ARRAY_SIZE(test_cases); i++) {
         const struct test_case *test = &test_cases[i];
-        uacpi_resources *resources;
+        uacpi_resources *resources = NULL;
         uacpi_data_view aml_buffer;
         uint8_t *bytes;
         uacpi_status ret;

@@ -9,6 +9,13 @@ extern "C" {
 
 #ifndef UACPI_BAREBONES_MODE
 
+/**
+ * NOTE:
+ * None of the API below may be called from an interrupt context, which
+ * includes the native handlers of both fixed events & GPEs. Some of it is off
+ * limits to the deferred work as well, see the notes of individual functions.
+ */
+
 typedef enum uacpi_fixed_event {
     UACPI_FIXED_EVENT_TIMER_STATUS = 1,
     UACPI_FIXED_EVENT_POWER_BUTTON,
@@ -17,6 +24,14 @@ typedef enum uacpi_fixed_event {
     UACPI_FIXED_EVENT_MAX = UACPI_FIXED_EVENT_RTC,
 } uacpi_fixed_event;
 
+/**
+ * Install/uninstall a handler for a fixed event. The handler is invoked in an
+ * interrupt context every time that the event fires.
+ *
+ * NOTE: neither of these may be called from an interrupt handler, nor from
+ *       deferred work (see uacpi_kernel_schedule_work), which includes notify
+ *       handlers, as they might have to wait for both of those to complete.
+ */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_fixed_event_handler(
     uacpi_fixed_event event, uacpi_interrupt_handler handler, uacpi_handle user
@@ -30,6 +45,11 @@ uacpi_status uacpi_uninstall_fixed_event_handler(
 /**
  * Enable/disable a fixed event. Note that the event is automatically enabled
  * upon installing a handler to it.
+ *
+ * NOTE: uacpi_enable_fixed_event must not be called from an interrupt handler,
+ *       nor from deferred work (see uacpi_kernel_schedule_work), which includes
+ *       notify handlers, as it might have to wait for both of those to
+ *       complete.
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
     uacpi_status uacpi_enable_fixed_event(uacpi_fixed_event event)
@@ -96,7 +116,11 @@ const uacpi_char *uacpi_gpe_triggering_to_string(
  * configured triggering upon invoking the handler. The event is optionally
  * re-enabled (by returning UACPI_GPE_REENABLE from the handler)
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This must not be called from an interrupt handler, nor from deferred work
+ *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
+ *   might have to wait for both of those to complete
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_gpe_handler(
@@ -109,7 +133,11 @@ uacpi_status uacpi_install_gpe_handler(
  * 'gpe_device'. The handler is dispatched immediately after the event is
  * received, status & enable bits are untouched.
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This must not be called from an interrupt handler, nor from deferred work
+ *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
+ *   might have to wait for both of those to complete
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_gpe_handler_raw(
@@ -117,6 +145,16 @@ uacpi_status uacpi_install_gpe_handler_raw(
     uacpi_gpe_triggering triggering, uacpi_gpe_handler handler, uacpi_handle ctx
 ))
 
+/**
+ * Uninstalls a handler, raw or not, that was previously installed to the GPE
+ * at 'idx' controlled by device 'gpe_device'.
+ *
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This must not be called from an interrupt handler, nor from deferred work
+ *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
+ *   might have to wait for both of those to complete
+ */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_uninstall_gpe_handler(
     uacpi_namespace_node *gpe_device, uacpi_u16 idx, uacpi_gpe_handler handler
@@ -127,7 +165,11 @@ uacpi_status uacpi_uninstall_gpe_handler(
  * optional and configures the GPE to generate an implicit notification whenever
  * an event occurs.
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This must not be called from an interrupt handler, nor from deferred work
+ *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
+ *   might have to wait for both of those to complete
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_setup_gpe_for_wake(
@@ -160,6 +202,10 @@ uacpi_status uacpi_disable_gpe_for_wake(
  * enumerated all of the devices, executing their _PRW methods etc., and
  * marking those it wishes to use for wake by calling uacpi_setup_gpe_for_wake
  * or uacpi_mark_gpe_for_wake.
+ *
+ * This only affects the GPE blocks that haven't been finalized yet, so it's
+ * safe, and in fact required, to call this again after installing a new GPE
+ * block via uacpi_install_gpe_block.
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
     uacpi_status uacpi_finalize_gpe_initialization(void)
@@ -227,9 +273,18 @@ uacpi_status uacpi_finish_handling_gpe(
  * This is used to permanently silence an event so that further calls to
  * enable/disable as well as suspend/resume get ignored. This might be necessary
  * for GPEs that cause an event storm due to the kernel's inability to properly
- * handle them. The only way to enable a masked event is by a call to unmask.
+ * handle them. The only way to enable a masked event at runtime is by a call
+ * to unmask.
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * Note that the mask only applies while the system is running: an event that
+ * is enabled for wake is still going to be enabled by
+ * uacpi_enable_all_wake_gpes even if it's masked.
+ *
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - Neither of these may be called from an interrupt handler, nor from
+ *   deferred work (see uacpi_kernel_schedule_work), which includes notify
+ *   handlers, as they might have to wait for both of those to complete
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_mask_gpe(
@@ -266,6 +321,13 @@ uacpi_status uacpi_enable_all_wake_gpes(void)
 /**
  * Install/uninstall a new GPE block, usually defined by a device in the
  * namespace with a _HID of ACPI0006.
+ *
+ * NOTE:
+ * - The events of a newly installed block that have a matching AML handler
+ *   are not enabled until uacpi_finalize_gpe_initialization is called
+ * - Neither of these may be called from an interrupt handler, nor from
+ *   deferred work (see uacpi_kernel_schedule_work), which includes notify
+ *   handlers, as they might have to wait for both of those to complete
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_gpe_block(

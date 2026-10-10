@@ -1,8 +1,10 @@
 #include "helpers.h"
+#include "tests.h"
 #include <inttypes.h>
 #include <string.h>
 #include <uacpi/opregion.h>
 #include <uacpi/resources.h>
+#include <uacpi/tables.h>
 #include <uacpi/types.h>
 
 static void check_ok(uacpi_object **objects, uacpi_object_array *arr)
@@ -431,10 +433,81 @@ static uacpi_status generic_serial_bus_handler(
     return UACPI_STATUS_OK;
 }
 
+static void check_connected(
+    uacpi_object *arg, const char *method, bool connected
+)
+{
+    uacpi_object_array arr = { 0 };
+    uacpi_u64 out_value;
+    uacpi_status st;
+
+    arr.objects = &arg;
+    arr.count = 1;
+
+    st = uacpi_object_assign_integer(arg, connected);
+    ensure_ok_status(st);
+    st = uacpi_eval_integer(NULL, method, &arr, &out_value);
+    ensure_ok_status(st);
+
+    if (!out_value)
+        error("%s test failed", method);
+}
+
+#define OEM_ADDRESS_SPACE ((uacpi_address_space)0x80)
+
+/*
+ * Lets AML know that a region was attached or detached, which is not something
+ * that it's able to tell by itself, by evaluating the ATCH and DTCH methods of
+ * the device that the region belongs to.
+ */
+static uacpi_status oem_handler(uacpi_region_op op, uacpi_handle op_data)
+{
+    switch (op) {
+    case UACPI_REGION_OP_ATTACH: {
+        uacpi_region_attach_data *attach_data = op_data;
+        uacpi_namespace_node *device;
+        uacpi_status st;
+
+        device = uacpi_namespace_node_parent(attach_data->region_node);
+
+        st = uacpi_eval(device, "ATCH", NULL, NULL);
+        if (st != UACPI_STATUS_NOT_FOUND)
+            ensure_ok_status(st);
+
+        return UACPI_STATUS_OK;
+    }
+    case UACPI_REGION_OP_DETACH: {
+        uacpi_region_detach_data *detach_data = op_data;
+        uacpi_namespace_node *device;
+        uacpi_status st;
+
+        device = uacpi_namespace_node_parent(detach_data->region_node);
+
+        st = uacpi_eval(device, "DTCH", NULL, NULL);
+        if (st != UACPI_STATUS_NOT_FOUND)
+            ensure_ok_status(st);
+
+        return UACPI_STATUS_OK;
+    }
+    case UACPI_REGION_OP_READ: {
+        uacpi_region_rw_data *rw_data = op_data;
+
+        rw_data->value = 0x5A;
+        return UACPI_STATUS_OK;
+    }
+    case UACPI_REGION_OP_WRITE:
+        return UACPI_STATUS_OK;
+    default:
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+}
+
 void test_address_spaces(void)
 {
     uacpi_status st;
     uacpi_object *arg;
+    uacpi_namespace_node *oem_device, *ipmi_device;
+    uacpi_u64 out_value;
 
     arg = uacpi_object_create_integer(0);
 
@@ -443,6 +516,7 @@ void test_address_spaces(void)
     );
     ensure_ok_status(st);
     eval_one(arg, UACPI_ADDRESS_SPACE_IPMI);
+    check_connected(arg, "CREG", true);
 
     st = uacpi_install_address_space_handler(
         uacpi_namespace_root(), UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO,
@@ -477,5 +551,105 @@ void test_address_spaces(void)
     ensure_ok_status(st);
     eval_one(arg, UACPI_ADDRESS_SPACE_GENERIC_SERIAL_BUS);
 
+    st = uacpi_install_address_space_handler(
+        uacpi_namespace_root(), OEM_ADDRESS_SPACE, oem_handler, NULL
+    );
+    ensure_ok_status(st);
+    eval_one(arg, OEM_ADDRESS_SPACE);
+
+    /*
+     * A region is also detached when a handler that is closer to it comes
+     * along, which is the case for the only region that this device has.
+     */
+    st = uacpi_namespace_node_find(NULL, "\\OEM1", &oem_device);
+    ensure_ok_status(st);
+
+    st = uacpi_install_address_space_handler(
+        oem_device, OEM_ADDRESS_SPACE, oem_handler, NULL
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_eval_simple_integer(NULL, "COEM", &out_value);
+    ensure_ok_status(st);
+    if (!out_value)
+        error("OEM address space test failed");
+
+    /*
+     * This one is overwritten by the time it's attached, so there's nothing
+     * left to access. AML has no way of handling that, so do it for it.
+     */
+    st = uacpi_eval(NULL, "\\OEM2.READ", NULL, NULL);
+    if (st != UACPI_STATUS_NO_HANDLER) {
+        error(
+            "unexpected status for a region that is gone: %s",
+            uacpi_status_to_string(st)
+        );
+    }
+
+    st = uacpi_eval_simple_integer(NULL, "COE2", &out_value);
+    ensure_ok_status(st);
+    if (!out_value)
+        error("OEM address space attach test failed");
+
+    // Give one of the IPMI regions a handler that is closer to it
+    st = uacpi_namespace_node_find(NULL, "\\IPM2", &ipmi_device);
+    ensure_ok_status(st);
+
+    st = uacpi_install_address_space_handler(
+        ipmi_device, UACPI_ADDRESS_SPACE_IPMI, ipmi_handler, NULL
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CRG2", true);
+
+    /*
+     * The regions of an address space are disconnected once its handler is
+     * gone, no matter how many other handlers were installed after it.
+     */
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_IPMI
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CREG", false);
+
+    // This only applies to the regions that the handler was actually serving
+    check_connected(arg, "CRG2", true);
+
+    st = uacpi_uninstall_address_space_handler(
+        ipmi_device, UACPI_ADDRESS_SPACE_IPMI
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CRG2", false);
+
     uacpi_object_unref(arg);
+}
+
+#define FACS_GLOBAL_LOCK_PENDING (1 << 0)
+#define FACS_GLOBAL_LOCK_OWNED (1 << 1)
+
+void test_global_lock(void)
+{
+    uacpi_status st;
+    struct acpi_fadt *fadt;
+    struct acpi_facs *facs;
+    uacpi_u32 seq;
+
+    st = uacpi_table_fadt(&fadt);
+    ensure_ok_status(st);
+    facs = (struct acpi_facs*)((uintptr_t)fadt->x_firmware_ctrl);
+
+    if (facs->global_lock != 0)
+        error("the global lock is not free to begin with");
+
+    st = uacpi_acquire_global_lock(0xFFFF, &seq);
+    ensure_ok_status(st);
+    if (facs->global_lock != FACS_GLOBAL_LOCK_OWNED)
+        error("the global lock is not owned after being acquired");
+
+    // The firmware wants the lock, so it must be told about the release
+    facs->global_lock |= FACS_GLOBAL_LOCK_PENDING;
+
+    st = uacpi_release_global_lock(seq);
+    ensure_ok_status(st);
+    if (facs->global_lock != 0)
+        error("the global lock is not free after being released");
 }

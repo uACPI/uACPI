@@ -38,7 +38,7 @@ class TestCase(ABC):
         pass
 
 
-class BarebonesTestCase(TestCase):
+class BuiltinTestCase(TestCase):
     def __init__(
         self, name: str
     ) -> None:
@@ -46,6 +46,13 @@ class BarebonesTestCase(TestCase):
 
     def extra_runner_args(self) -> List[str]:
         return []
+
+
+def get_builtin_test_cases(runner: str) -> List[TestCase]:
+    names = subprocess.check_output(
+        [runner, "--list-builtin"], universal_newlines=True
+    )
+    return [BuiltinTestCase(name) for name in names.split()]
 
 
 class TestCaseWithMain(TestCase):
@@ -452,6 +459,12 @@ def main() -> int:
     with TestHeaderFooter("AML Tests"):
         ret = run_tests(base_test_cases, test_runner, args.parallelism)
 
+    if ret:
+        api_cases = get_builtin_test_cases(test_runner)
+
+        with TestHeaderFooter("API Tests"):
+            ret = run_tests(api_cases, test_runner, args.parallelism)
+
     if ret and args.large:
         large_test_cases = generate_large_test_cases(
             args.acpi_extractor, bin_dir
@@ -461,14 +474,7 @@ def main() -> int:
             ret = run_tests(large_test_cases, test_runner, args.parallelism)
 
     if ret and args.barebones:
-        bare_cases: List[TestCase] = [
-            BarebonesTestCase("basic-operation"),
-            BarebonesTestCase("table-installation"),
-            BarebonesTestCase("table-advanced"),
-            BarebonesTestCase("foreach-subtable"),
-            BarebonesTestCase("reduced-hardware"),
-            BarebonesTestCase("misaligned-early-tables-buffer"),
-        ]
+        bare_cases = get_builtin_test_cases(bare_test_runner)
 
         with TestHeaderFooter("Barebones Mode Tests"):
             ret = run_tests(bare_cases, bare_test_runner, args.parallelism)

@@ -249,6 +249,118 @@ static inline void hash_table_cleanup(hash_table_t *table)
 extern bool g_expect_virtual_addresses;
 extern uacpi_phys_addr g_rsdp;
 
+// Don't describe any GPE blocks in the FADT, must be set prior to make_xsdt
+extern bool g_no_fadt_gpe_blocks;
+
+/*
+ * The fake hardware that we describe via the FADT. The event registers are
+ * emulated closely enough to make it possible to trigger a fixed or a general
+ * purpose event and have it delivered, see fake_io_raise & fake_irq_raise.
+ */
+#define FAKE_SCI_IRQ 9
+
+#define FAKE_PM1A_EVT_BLK 0xDEAD
+#define FAKE_PM1_EVT_LEN 4
+
+#define FAKE_GPE0_BLK 0xD0E0
+#define FAKE_GPE0_BLK_LEN 0x20
+
+#define FAKE_GPE1_BLK 0xBEEF
+#define FAKE_GPE1_BLK_LEN 0x20
+#define FAKE_GPE1_BASE 128
+
+#ifndef UACPI_BAREBONES_MODE
+
+/*
+ * Mark the IO range as write-one-to-clear, which is how the status registers
+ * of every event behave. This is already done for the registers above, so it's
+ * only needed for the GPE blocks that are not described by the FADT.
+ */
+void fake_io_set_write_one_to_clear(uacpi_io_addr base, uacpi_size len);
+
+// Set or clear bits of an IO register directly, bypassing the emulation
+void fake_io_raise(uacpi_io_addr addr, uint8_t bits);
+void fake_io_lower(uacpi_io_addr addr, uint8_t bits);
+
+// Invoke the handlers that are currently installed for this IRQ
+uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq);
+
+/*
+ * Same as above, but the handlers are invoked by a dedicated thread, the way
+ * an interrupt that was taken by a different CPU would be. That thread is
+ * stopped right before it reads the IO register at 'park_addr', at which point
+ * this returns true with the handler still in flight. If the handlers never
+ * read it and simply return, this returns false.
+ *
+ * A parked interrupt is resumed via fake_irq_unpark, or by someone waiting for
+ * it to complete via uacpi_kernel_wait_for_work_completion. Only valid while
+ * the work threads are running.
+ */
+bool fake_irq_raise_parked(uacpi_u32 irq, uacpi_io_addr park_addr);
+void fake_irq_unpark(void);
+bool fake_irq_is_parked(void);
+
+typedef enum {
+    FAKE_IO_OP_WRITE,
+    FAKE_IO_OP_UNMAP,
+} fake_io_op;
+
+typedef void (*fake_io_hook)(void *ctx, fake_io_op op, uacpi_io_addr addr);
+
+/*
+ * Have 'hook' invoked right before every IO write or unmap, with the address
+ * that is about to be written or unmapped. This makes it possible to have
+ * something happen at a very specific point in time. NULL removes the hook.
+ *
+ * The hook is invoked by whoever is doing the access, with whatever it has
+ * locked at the time. Make sure that it doesn't end up waiting for something
+ * that needs one of those locks: taking an interrupt from a write that is done
+ * with a spinlock held, which is the case for most writes to a GPE enable
+ * register, is a deadlock, as a spinlock is just a mutex here.
+ */
+void fake_io_set_hook(fake_io_hook hook, void *ctx);
+
+/*
+ * By default, all deferred work is executed right away by the thread that
+ * has scheduled it. This switches to executing it on dedicated threads
+ * instead, same as a real kernel would do, until the threads are stopped.
+ *
+ * A test that doesn't finish in a reasonable time after starting the threads is
+ * considered to have deadlocked, which terminates the runner.
+ *
+ * Not every toolchain that we're built with is able to produce a working
+ * program that has more than one thread. This is where a test ends if that's
+ * the case, with everything up to this point considered to be all there is.
+ */
+void work_threads_start(void);
+void work_threads_stop(void);
+
+/*
+ * Don't execute any work until work_release is called, or until someone waits
+ * for it to complete via uacpi_kernel_wait_for_work_completion. The latter
+ * makes it possible to reliably have work in flight while uACPI is waiting for
+ * it. Only valid while the work threads are running.
+ */
+void work_hold(void);
+void work_release(void);
+
+/*
+ * To be called by the work itself: don't return until someone is waiting for
+ * it to complete via uacpi_kernel_wait_for_work_completion.
+ */
+void work_wait_for_waiter(void);
+
+// Make the next call to uacpi_kernel_alloc(_zeroed) fail
+void fail_next_alloc(void);
+
+// Make the next call to uacpi_kernel_create_work_item fail
+void fail_next_work_item(void);
+
+// Free whatever the kernel interface uses to track mappings & allocations
+void interface_cleanup(void);
+
+#endif // !UACPI_BAREBONES_MODE
+
 UACPI_PACKED(struct full_xsdt {
     struct acpi_sdt_hdr hdr;
     struct acpi_fadt *fadt;

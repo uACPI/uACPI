@@ -4,6 +4,7 @@
 #include <uacpi/internal/shareable.h>
 #include <uacpi/internal/dynamic_array.h>
 #include <uacpi/internal/log.h>
+#include <uacpi/internal/mutex.h>
 #include <uacpi/internal/namespace.h>
 #include <uacpi/internal/tables.h>
 #include <uacpi/kernel_api.h>
@@ -188,7 +189,7 @@ uacpi_mutex *uacpi_create_mutex(void)
 
     mutex->owner = UACPI_THREAD_ID_NONE;
 
-    mutex->handle = uacpi_kernel_create_mutex();
+    mutex->handle = uacpi_create_native_mutex();
     if (mutex->handle == UACPI_NULL) {
         uacpi_free(mutex, sizeof(*mutex));
         return UACPI_NULL;
@@ -212,7 +213,8 @@ static uacpi_bool event_alloc(uacpi_object *obj)
     if (uacpi_unlikely(event == UACPI_NULL))
         return UACPI_FALSE;
 
-    event->handle = uacpi_kernel_create_event();
+    // An event starts out with nothing to wait for
+    event->handle = uacpi_kernel_create_semaphore(0);
     if (event->handle == UACPI_NULL) {
         uacpi_free(event, sizeof(*event));
         return UACPI_FALSE;
@@ -488,7 +490,7 @@ static void free_mutex(uacpi_handle handle)
 {
     uacpi_mutex *mutex = handle;
 
-    uacpi_kernel_free_mutex(mutex->handle);
+    uacpi_free_native_mutex(mutex->handle);
     uacpi_free(mutex, sizeof(*mutex));
 }
 
@@ -504,7 +506,7 @@ static void free_event(uacpi_handle handle)
 {
     uacpi_event *event = handle;
 
-    uacpi_kernel_free_event(event->handle);
+    uacpi_kernel_free_semaphore(event->handle);
     uacpi_free(event, sizeof(*event));
 }
 
@@ -655,6 +657,11 @@ static void free_method(uacpi_handle handle)
 void uacpi_method_unref(uacpi_control_method *method)
 {
     uacpi_shareable_unref_and_delete_if_last(method, free_method);
+}
+
+void uacpi_field_unit_unref(uacpi_field_unit *field_unit)
+{
+    uacpi_shareable_unref_and_delete_if_last(field_unit, free_field_unit);
 }
 
 static void free_object_storage(uacpi_object *obj)

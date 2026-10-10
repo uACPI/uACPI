@@ -1006,10 +1006,20 @@ static uacpi_status object_assign_with_implicit_cast(
         break;
 
     case UACPI_OBJECT_FIELD_UNIT:
-        return uacpi_write_field_unit(
+        /*
+         * The namespace is unlocked for as long as the address space handler
+         * is running, which makes it possible for someone else to get rid of
+         * the object that we're writing from, e.g. by overwriting it via
+         * CopyObject. All of the references that we have to it are gone if
+         * that happens, so take one that is ours alone.
+         */
+        uacpi_object_ref(src);
+        ret = uacpi_write_field_unit(
             dst->field_unit, src_buf.bytes, src_buf.length,
             wtr_response
         );
+        uacpi_object_unref(src);
+        return ret;
 
     case UACPI_OBJECT_BUFFER_INDEX:
         write_buffer_index(&dst->buffer_index, &src_buf);
@@ -2317,6 +2327,92 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
     uacpi_object_attach_child(parent, new_child);
 }
 
+DYNAMIC_ARRAY_WITH_INLINE_STORAGE(object_stack, uacpi_object*, 8)
+DYNAMIC_ARRAY_WITH_INLINE_STORAGE_IMPL(object_stack, uacpi_object*, static)
+
+/*
+ * Storing a reference, or a package containing one, can make the target
+ * reachable from itself, which reference counting is unable to free. Walk
+ * everything reachable through the new object and reject the store if it
+ * leads back to the reference it's about to be stored through.
+ */
+static uacpi_status check_no_reference_cycle(
+    uacpi_object *dst, uacpi_object *new_obj
+)
+{
+    struct object_stack stack = { 0 }, visited = { 0 };
+    uacpi_status ret = UACPI_STATUS_OK;
+    uacpi_object *obj, **entry;
+    uacpi_size i;
+
+    if (new_obj->type != UACPI_OBJECT_REFERENCE &&
+        new_obj->type != UACPI_OBJECT_PACKAGE)
+        return ret;
+
+    obj = new_obj;
+    for (;;) {
+        if (obj == dst) {
+            uacpi_error("store would create a reference cycle");
+            ret = UACPI_STATUS_AML_REFERENCE_CYCLE;
+            break;
+        }
+
+        /*
+         * An object might be reachable in more than one way, e.g. if it's
+         * referenced by more than one element of a package. Going through it
+         * every single time makes the amount of work that we have to do grow
+         * exponentially with the depth of such a graph, so keep track of the
+         * objects that we've already seen.
+         */
+        if ((obj->type == UACPI_OBJECT_REFERENCE ||
+             obj->type == UACPI_OBJECT_PACKAGE) && !obj->visited) {
+            entry = object_stack_alloc(&visited);
+            if (uacpi_unlikely(entry == UACPI_NULL)) {
+                ret = UACPI_STATUS_OUT_OF_MEMORY;
+                break;
+            }
+            *entry = obj;
+            obj->visited = UACPI_TRUE;
+
+            if (obj->type == UACPI_OBJECT_REFERENCE) {
+                entry = object_stack_alloc(&stack);
+                if (uacpi_unlikely(entry == UACPI_NULL)) {
+                    ret = UACPI_STATUS_OUT_OF_MEMORY;
+                    break;
+                }
+                *entry = obj->inner_object;
+            } else {
+                for (i = 0; i < obj->package->count; ++i) {
+                    entry = object_stack_alloc(&stack);
+                    if (uacpi_unlikely(entry == UACPI_NULL)) {
+                        ret = UACPI_STATUS_OUT_OF_MEMORY;
+                        break;
+                    }
+                    *entry = obj->package->objects[i];
+                }
+                if (uacpi_unlikely_error(ret))
+                    break;
+            }
+        }
+
+        do {
+            if (object_stack_size(&stack) == 0)
+                goto out;
+
+            obj = *object_stack_last(&stack);
+            object_stack_pop(&stack);
+        } while (obj == UACPI_NULL);
+    }
+
+out:
+    for (i = 0; i < object_stack_size(&visited); ++i)
+        (*object_stack_at(&visited, i))->visited = UACPI_FALSE;
+
+    object_stack_clear(&visited);
+    object_stack_clear(&stack);
+    return ret;
+}
+
 /*
  * Breakdown of what happens here:
  *
@@ -2362,6 +2458,8 @@ static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
 
     ret = uacpi_object_assign(new_obj, src_obj,
                               UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+    if (uacpi_likely_success(ret))
+        ret = check_no_reference_cycle(dst, new_obj);
     if (uacpi_unlikely_error(ret)) {
         uacpi_object_unref(new_obj);
         return ret;
@@ -2430,6 +2528,8 @@ static uacpi_status store_to_reference(
 
         ret = uacpi_object_assign(new_obj, src_obj,
                                   UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+        if (uacpi_likely_success(ret))
+            ret = check_no_reference_cycle(dst, new_obj);
         if (uacpi_unlikely_error(ret)) {
             uacpi_object_unref(new_obj);
             return ret;
@@ -3625,6 +3725,7 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
 {
     struct op_context *op_ctx = ctx->cur_op_ctx;
     uacpi_object *obj;
+    uacpi_handle event;
 
     obj = uacpi_unwrap_internal_reference(
         item_array_at(&op_ctx->items, 0)->obj
@@ -3637,31 +3738,51 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
         return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
     }
 
+    event = obj->event->handle;
+
     switch (op_ctx->op->code)
     {
     case UACPI_AML_OP_SignalOp:
-        uacpi_kernel_signal_event(obj->event->handle);
+        uacpi_kernel_signal_semaphore(event);
         break;
     case UACPI_AML_OP_ResetOp:
-        uacpi_kernel_reset_event(obj->event->handle);
+        /*
+         * An event is a semaphore that is signaled once per every Signal, so
+         * resetting it comes down to taking all of the units that it has.
+         * There's no way for it to gain any more in the meantime, since that
+         * takes executing AML, which we don't allow by holding the namespace
+         * lock.
+         */
+        while (uacpi_kernel_wait_for_semaphore(event, 0) == UACPI_STATUS_OK)
+            continue;
         break;
     case UACPI_AML_OP_WaitOp: {
         uacpi_u64 timeout;
-        uacpi_bool ret;
+        uacpi_status ret;
 
         timeout = item_array_at(&op_ctx->items, 1)->obj->integer;
         if (timeout > 0xFFFF)
             timeout = 0xFFFF;
 
+        /*
+         * The namespace is unlocked while we wait, which makes it possible
+         * for someone else to get rid of the object, e.g. by overwriting it
+         * via CopyObject. All of the references that we have to it are gone
+         * if that happens, so take one that is ours alone.
+         */
+        uacpi_object_ref(obj);
+
         uacpi_namespace_write_unlock();
-        ret = uacpi_kernel_wait_for_event(obj->event->handle, timeout);
+        ret = uacpi_kernel_wait_for_semaphore(event, timeout);
         uacpi_namespace_write_lock();
+
+        uacpi_object_unref(obj);
 
         /*
          * The return value here is inverted, we return 0 for success and Ones
          * for timeout and everything else.
          */
-        if (ret)
+        if (ret == UACPI_STATUS_OK)
             item_array_at(&op_ctx->items, 2)->obj->integer = 0;
         break;
     }
@@ -3717,18 +3838,28 @@ static uacpi_status handle_mutex_ctl(struct execution_context *ctx)
             break;
         }
 
-        ret = uacpi_acquire_aml_mutex(obj->mutex, timeout);
-        if (uacpi_unlikely_error(ret))
-            break;
+        /*
+         * The namespace is unlocked while we wait for the mutex, which makes
+         * it possible for someone else to get rid of the object, e.g. by
+         * overwriting it via CopyObject. All of the references that we have
+         * to it are gone if that happens, so take one that is ours alone.
+         */
+        uacpi_object_ref(obj);
 
-        ret = held_mutexes_array_push(&ctx->held_mutexes, obj->mutex);
-        if (uacpi_unlikely_error(ret)) {
-            uacpi_release_aml_mutex(obj->mutex);
-            return ret;
+        ret = uacpi_acquire_aml_mutex(obj->mutex, timeout);
+        if (uacpi_likely_success(ret)) {
+            ret = held_mutexes_array_push(&ctx->held_mutexes, obj->mutex);
+            if (uacpi_unlikely_error(ret)) {
+                uacpi_release_aml_mutex(obj->mutex);
+                uacpi_object_unref(obj);
+                return ret;
+            }
+
+            ctx->sync_level = obj->mutex->sync_level;
+            *return_value = 0;
         }
 
-        ctx->sync_level = obj->mutex->sync_level;
-        *return_value = 0;
+        uacpi_object_unref(obj);
         break;
     }
 

@@ -97,6 +97,25 @@ static inline void millisecond_sleep(uint64_t milliseconds)
 #endif
 }
 
+#if HAVE_TIMED_WAIT
+static inline void timespec_add_nanoseconds(
+    struct timespec *spec, uint64_t nanoseconds
+)
+{
+    /*
+     * The nanosecond field might be as small as 32 bits, so make sure it never
+     * has to hold more than two seconds worth of them.
+     */
+    spec->tv_sec += nanoseconds / NANOSECONDS_PER_SECOND;
+    spec->tv_nsec += nanoseconds % NANOSECONDS_PER_SECOND;
+
+    if ((uint64_t)spec->tv_nsec >= NANOSECONDS_PER_SECOND) {
+        spec->tv_sec += 1;
+        spec->tv_nsec -= NANOSECONDS_PER_SECOND;
+    }
+}
+#endif
+
 static inline void mutex_init(mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -117,21 +136,6 @@ static inline void mutex_free(mutex_t *mutex)
 #endif
 }
 
-static inline bool mutex_try_lock(mutex_t *mutex)
-{
-#ifdef _WIN32
-    return TryEnterCriticalSection(mutex);
-#else
-    int err = pthread_mutex_trylock(mutex);
-
-    if (err == 0)
-        return true;
-    if (err != EBUSY)
-        error("pthread_mutex_trylock failed");
-    return false;
-#endif
-}
-
 static inline void mutex_lock(mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -139,38 +143,6 @@ static inline void mutex_lock(mutex_t *mutex)
 #else
     if (pthread_mutex_lock(mutex))
         error("pthread_mutex_lock failed");
-#endif
-}
-
-static inline bool mutex_lock_timeout(mutex_t *mutex, uint64_t timeout_ns)
-{
-#if !HAVE_TIMED_WAIT
-    uint64_t end = get_nanosecond_timer() + timeout_ns;
-
-    do {
-        if (mutex_try_lock(mutex))
-            return true;
-        millisecond_sleep(1);
-    } while (get_nanosecond_timer() < end);
-
-    return false;
-#else
-    struct timespec spec;
-    int err;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &spec))
-        error("clock_gettime failed");
-
-    spec.tv_nsec += timeout_ns;
-    spec.tv_sec += spec.tv_nsec / NANOSECONDS_PER_SECOND;
-    spec.tv_nsec %= NANOSECONDS_PER_SECOND;
-
-    err = pthread_mutex_clocklock(mutex, CLOCK_MONOTONIC, &spec);
-    if (err == 0)
-        return true;
-    if (err != ETIMEDOUT)
-        error("pthread_mutex_clocklock failed");
-    return false;
 #endif
 }
 
@@ -238,7 +210,7 @@ static inline bool condvar_wait_timeout(
             return false;
 
 #ifdef _WIN32
-        milliseconds = (end - cur) / 1000;
+        milliseconds = (end - cur) / 1000000;
         if (milliseconds == 0)
             milliseconds = 1;
 
@@ -261,9 +233,7 @@ static inline bool condvar_wait_timeout(
     if (clock_gettime(CLOCK_MONOTONIC, &spec))
         error("clock_gettime failed");
 
-    spec.tv_nsec += timeout_ns;
-    spec.tv_sec += spec.tv_nsec / NANOSECONDS_PER_SECOND;
-    spec.tv_nsec %= NANOSECONDS_PER_SECOND;
+    timespec_add_nanoseconds(&spec, timeout_ns);
 
     while (!pred(ctx)) {
         int err = pthread_cond_clockwait(var, mutex, CLOCK_MONOTONIC, &spec);
@@ -286,5 +256,69 @@ static inline void condvar_signal(condvar_t *var)
 #else
     if (pthread_cond_signal(var))
         error("pthread_cond_signal failed");
+#endif
+}
+
+static inline void condvar_broadcast(condvar_t *var)
+{
+#ifdef _WIN32
+    WakeAllConditionVariable(var);
+#else
+    if (pthread_cond_broadcast(var))
+        error("pthread_cond_broadcast failed");
+#endif
+}
+
+typedef void (*thread_entry_t)(void *ctx);
+
+typedef struct {
+#ifdef _WIN32
+    HANDLE handle;
+#else
+    pthread_t handle;
+#endif
+    thread_entry_t entry;
+    void *ctx;
+} thread_t;
+
+#ifdef _WIN32
+static inline DWORD WINAPI thread_trampoline(LPVOID opaque)
+#else
+static inline void *thread_trampoline(void *opaque)
+#endif
+{
+    thread_t *thread = opaque;
+
+    thread->entry(thread->ctx);
+    return 0;
+}
+
+// The thread object must stay alive until the thread is joined
+static inline void thread_create(
+    thread_t *thread, thread_entry_t entry, void *ctx
+)
+{
+    thread->entry = entry;
+    thread->ctx = ctx;
+
+#ifdef _WIN32
+    thread->handle = CreateThread(NULL, 0, thread_trampoline, thread, 0, NULL);
+    if (thread->handle == NULL)
+        error("CreateThread failed");
+#else
+    if (pthread_create(&thread->handle, NULL, thread_trampoline, thread))
+        error("pthread_create failed");
+#endif
+}
+
+static inline void thread_join(thread_t *thread)
+{
+#ifdef _WIN32
+    if (WaitForSingleObject(thread->handle, INFINITE) != WAIT_OBJECT_0)
+        error("WaitForSingleObject failed");
+    CloseHandle(thread->handle);
+#else
+    if (pthread_join(thread->handle, NULL))
+        error("pthread_join failed");
 #endif
 }
