@@ -553,6 +553,9 @@ static struct {
 
 static arg_spec_t TEST_CASE_ARG = ARG_POS("test-case", "name of the test case");
 
+static arg_spec_t LIST_BUILTIN_ARG = ARG_FLAG(
+    "list-builtin", 'b', "list the test cases, one per line, and exit"
+);
 static arg_spec_t HELP_ARG = ARG_HELP(
     "help", 'h', "Display this menu and exit"
 );
@@ -562,6 +565,7 @@ static arg_spec_t *const POSITIONAL_ARGS[] = {
 };
 
 static arg_spec_t *const OPTION_ARGS[] = {
+    &LIST_BUILTIN_ARG,
     &HELP_ARG,
 };
 
@@ -581,6 +585,12 @@ int main(int argc, char *argv[])
     size_t i;
 
     parse_args(&PARSER, argc, argv);
+
+    if (is_set(&LIST_BUILTIN_ARG)) {
+        for (i = 0; i < UACPI_ARRAY_SIZE(test_cases); i++)
+            puts(test_cases[i].name);
+        return 0;
+    }
 
     xsdt = make_xsdt_blob(&rsdp, test_dsdt, sizeof(test_dsdt));
 

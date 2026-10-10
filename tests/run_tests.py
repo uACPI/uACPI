@@ -474,14 +474,7 @@ def main() -> int:
             ret = run_tests(large_test_cases, test_runner, args.parallelism)
 
     if ret and args.barebones:
-        bare_cases: List[TestCase] = [
-            BuiltinTestCase("basic-operation"),
-            BuiltinTestCase("table-installation"),
-            BuiltinTestCase("table-advanced"),
-            BuiltinTestCase("foreach-subtable"),
-            BuiltinTestCase("reduced-hardware"),
-            BuiltinTestCase("misaligned-early-tables-buffer"),
-        ]
+        bare_cases = get_builtin_test_cases(bare_test_runner)
 
         with TestHeaderFooter("Barebones Mode Tests"):
             ret = run_tests(bare_cases, bare_test_runner, args.parallelism)
