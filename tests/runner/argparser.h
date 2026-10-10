@@ -111,30 +111,29 @@ static inline void parse_args(
 {
     size_t num_args = argc;
     arg_spec_t *active_spec = NULL;
-    size_t arg_index;
+    size_t arg_index = 1;
 
     if (num_args < 2) {
         print_help(parser);
         exit(1);
     }
 
-    if (parser->num_positional_args) {
+    // The positional arguments may be left out by going straight to the options
+    if (parser->num_positional_args && !is_arg(argv[1])) {
         if ((num_args - 1) < parser->num_positional_args)
             error(
                 "expected at least %zu positional arguments",
                 parser->num_positional_args
             );
 
-        for (arg_index = 0; arg_index < parser->num_positional_args;
-             ++arg_index)
+        for (; arg_index <= parser->num_positional_args; ++arg_index)
             vector_add(
-                &parser->positional_args[arg_index]->values,
-                argv[1 + arg_index], 0
+                &parser->positional_args[arg_index - 1]->values,
+                argv[arg_index], 0
             );
     }
 
-    for (arg_index = 1 + parser->num_positional_args; arg_index < num_args;
-         ++arg_index) {
+    for (; arg_index < num_args; ++arg_index) {
         char *current_arg = argv[arg_index];
         bool is_new_arg = is_arg(current_arg);
         arg_spec_t *new_spec = NULL;
