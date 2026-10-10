@@ -1638,11 +1638,8 @@ out:
  */
 static uacpi_bool gpe_mask_safe(struct gp_event *event)
 {
-    uacpi_u8 mask;
-    uacpi_bool is_masked;
+    uacpi_bool was_masked;
     uacpi_cpu_flags flags;
-
-    mask = gpe_get_mask(event);
 
     /*
      * No need to flush or do anything if it was never enabled since the last
@@ -1653,19 +1650,18 @@ static uacpi_bool gpe_mask_safe(struct gp_event *event)
     if (!gpe_is_armed(event))
         return UACPI_FALSE;
 
+    /*
+     * If the event was already masked by the user it's not up to us to unmask
+     * it once we're done. It still has to be flushed though, as there's one
+     * way for a masked event to end up enabled, which is being enabled for
+     * wake.
+     */
     flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-    is_masked = (event->reg->masked_mask & mask) != 0;
+    was_masked = (event->reg->masked_mask & gpe_get_mask(event)) != 0;
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
-    /*
-     * Same if it was already masked by the user: the event is known to be
-     * quiescent, and it's not up to us to unmask it once we're done.
-     */
-    if (is_masked)
-        return UACPI_FALSE;
-
-    gpe_mask_unmask(event, UACPI_TRUE);
-    return UACPI_TRUE;
+    gpe_mask_and_flush(event);
+    return !was_masked;
 }
 
 static uacpi_iteration_decision do_initialize_gpe_block(
