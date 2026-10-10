@@ -1066,8 +1066,16 @@ static void uninstall_gpe_block(struct gpe_block *block)
      *    currently in-flight IRQs will see the masked state, we can safely
      *    disable all events knowing they won't be re-enabled by a racing IRQ.
      */
-    for (i = 0; i < block->num_registers; ++i)
+    for (i = 0; i < block->num_registers; ++i) {
+        /*
+         * An interrupt handler that is disabling one of the events right now
+         * does so by reading the register and writing it back with one bit
+         * cleared. Don't let it undo what we do here.
+         */
+        flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
         uacpi_gas_write_mapped(&block->registers[i].enable, 0x00);
+        uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+    }
 
     /*
      * 4. Wait for the last possible IRQ to finish, as well as any work that
