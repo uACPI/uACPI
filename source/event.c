@@ -433,7 +433,7 @@ struct gpe_register {
 };
 
 struct gpe_block {
-    struct gpe_block *prev, *next;
+    struct gpe_block *next;
 
     /*
      * Technically this can only refer to \_GPE, but there's also apparently a
@@ -1043,9 +1043,6 @@ static void uninstall_gpe_block(struct gpe_block *block)
                 uacpi_unmap_gas_nofree(&reg->status);
         }
     }
-
-    if (block->prev)
-        block->prev->next = block->next;
 
     if (block->irq_ctx) {
         struct gpe_interrupt_ctx *ctx = block->irq_ctx;
