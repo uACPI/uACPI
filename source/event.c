@@ -681,14 +681,26 @@ static uacpi_interrupt_ret dispatch_gpe(
 {
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
+    uacpi_u8 handler_type;
     uacpi_cpu_flags flags;
+
+    /*
+     * The handler of an event is set up with no regard for us, as the event
+     * is expected to be quiescent at the time. What tells us that it's ready
+     * is the event getting enabled, which is always done with this lock held,
+     * so taking it is what guarantees that we see the handler in its entirety
+     * even if it was set up by a different CPU just now.
+     */
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    handler_type = event->handler_type;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     /*
      * For raw handlers we don't do any management whatsoever, we just let the
      * handler know a GPE has triggered and let it handle disable/enable as
      * well as clearing.
      */
-    if (event->handler_type == GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW) {
+    if (handler_type == GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW) {
         return event->native_handler->cb(
             event->native_handler->ctx, device_node, event->idx
         );
@@ -716,7 +728,7 @@ static uacpi_interrupt_ret dispatch_gpe(
         }
     }
 
-    switch (event->handler_type) {
+    switch (handler_type) {
     case GPE_HANDLER_TYPE_NATIVE_HANDLER:
         int_ret = event->native_handler->cb(
             event->native_handler->ctx, device_node, event->idx
