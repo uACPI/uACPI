@@ -873,7 +873,11 @@ static uacpi_status find_or_create_gpe_interrupt_ctx(
     return UACPI_STATUS_OK;
 }
 
-static void remove_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
+/*
+ * Makes sure the context is no longer used by anyone, it's up to the caller to
+ * free it once that's safe to do.
+ */
+static void unlink_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
 {
     if (ctx->prev != UACPI_NULL)
         ctx->prev->next = ctx->next;
@@ -888,8 +892,6 @@ static void remove_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
             handle_gpes, ctx->irq_handle
         );
     }
-
-    uacpi_free(ctx, sizeof(*ctx));
 }
 
 static void gpe_release_implicit_notify_handlers(struct gp_event *event)
@@ -1038,6 +1040,7 @@ static void free_gpe_block(struct gpe_block *block)
 static void uninstall_gpe_block(struct gpe_block *block)
 {
     struct gpe_interrupt_ctx *ctx = block->irq_ctx;
+    uacpi_bool ctx_is_unused;
     uacpi_cpu_flags flags;
     uacpi_size i;
 
@@ -1077,22 +1080,12 @@ static void uninstall_gpe_block(struct gpe_block *block)
         uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     }
 
-    /*
-     * 4. Wait for the last possible IRQ to finish, as well as any work that
-     *    still refers to one of the events.
-     *
-     * This is done no matter what: an event that is disabled by now might
-     * still have work in flight from back when it wasn't.
-     */
-    wait_for_work_completion_unlocked();
-
-    // Are we the first GPE block?
+    // 4. Make sure the interrupt handler is no longer able to find the block
     if (block == ctx->gpe_head) {
         ctx->gpe_head = ctx->gpe_head->next;
     } else {
         struct gpe_block *prev_block = ctx->gpe_head;
 
-        // We're not, do a search
         while (prev_block) {
             if (prev_block->next == block) {
                 prev_block->next = block->next;
@@ -1110,9 +1103,24 @@ static void uninstall_gpe_block(struct gpe_block *block)
      * uses to find the blocks to dispatch, so it stays around for as long
      * as the handler does.
      */
-    if (ctx->gpe_head == UACPI_NULL &&
-        ctx->irq != g_uacpi_rt_ctx.fadt.sci_int)
-        remove_gpe_interrupt_ctx(ctx);
+    ctx_is_unused = ctx->gpe_head == UACPI_NULL &&
+                    ctx->irq != g_uacpi_rt_ctx.fadt.sci_int;
+    if (ctx_is_unused)
+        unlink_gpe_interrupt_ctx(ctx);
+
+    /*
+     * 5. Wait for the last possible IRQ to finish, as well as any work that
+     *    still refers to one of the events.
+     *
+     * This is done no matter what: an interrupt handler that was invoked for
+     * some other block might've been looking at this one right as we were
+     * unlinking it, and an event that is disabled by now might still have
+     * work in flight from back when it wasn't.
+     */
+    wait_for_work_completion_unlocked();
+
+    if (ctx_is_unused)
+        uacpi_free(ctx, sizeof(*ctx));
 
     free_gpe_block(block);
 }
@@ -2739,8 +2747,10 @@ void uacpi_deinitialize_events(void)
          * Any other context is gone at this point, as it's removed along with
          * the last block that was using it.
          */
-        if (is_sci_ctx)
-            remove_gpe_interrupt_ctx(ctx);
+        if (is_sci_ctx) {
+            unlink_gpe_interrupt_ctx(ctx);
+            uacpi_free(ctx, sizeof(*ctx));
+        }
     }
 
     if (locked)
