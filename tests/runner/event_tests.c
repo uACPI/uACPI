@@ -1347,10 +1347,36 @@ void test_gpe_handlers(void)
     work_threads_stop();
 }
 
+/*
+ * Loads a table that has a method for the event that we're being notified
+ * about, which is set up for implicit notify up until that point.
+ */
+typedef struct {
+    // The method to load the table with
+    const char *method;
+    size_t count;
+} gpe_method_loader_t;
+
+static uacpi_status notify_load_gpe_method(
+    uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value
+)
+{
+    gpe_method_loader_t *loader = ctx;
+
+    UACPI_UNUSED(node);
+    UACPI_UNUSED(value);
+
+    if (loader->count++ == 0)
+        CHECK(eval_integer(loader->method) != 0);
+
+    return UACPI_STATUS_OK;
+}
+
 void test_wake_gpes(void)
 {
     uacpi_namespace_node *dev0, *dev1, *dev2;
     notify_log_t log0 = { 0 }, log1 = { 0 }, log2 = { 0 };
+    gpe_method_loader_t loader = { 0 };
 
     dev0 = find_node("\\DEV0");
     dev1 = find_node("\\DEV1");
@@ -1419,6 +1445,42 @@ void test_wake_gpes(void)
     CHECK(log2.node == dev2);
     CHECK(log2.value == 2);
     CHECK_GPE_INFO(UACPI_NULL, 0x10, GPE_INFO_ENABLED);
+
+    /*
+     * An event that is set up for implicit notify gets an AML handler as soon
+     * as a table that has a method for it is loaded. Nothing prevents that
+     * from being done by one of those who are notified because of the event,
+     * while the rest of them are yet to be. The latter are no longer notified
+     * in that case, as that's now up to the method.
+     */
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x12, dev1));
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x12, dev2));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0x12));
+
+    loader.method = "\\_GPE.LD12";
+
+    CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_a));
+    CHECK_OK(uacpi_uninstall_notify_handler(dev2, notify_a));
+    CHECK_OK(uacpi_install_notify_handler(
+        dev1, notify_load_gpe_method, &loader
+    ));
+    CHECK_OK(uacpi_install_notify_handler(
+        dev2, notify_load_gpe_method, &loader
+    ));
+
+    gpe_fire(0x12);
+    CHECK(loader.count == 1);
+    CHECK_GPE_INFO(UACPI_NULL, 0x12, GPE_INFO_ENABLED);
+
+    gpe_fire(0x12);
+    CHECK(eval_integer("\\_GPE.CN12") == 1);
+    CHECK(loader.count == 1);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0x12));
+    CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_load_gpe_method));
+    CHECK_OK(uacpi_uninstall_notify_handler(dev2, notify_load_gpe_method));
+    CHECK_OK(uacpi_install_notify_handler(dev1, notify_a, &log1));
+    CHECK_OK(uacpi_install_notify_handler(dev2, notify_a, &log2));
 
     // Same thing, but with the notifications delivered by the work threads
     work_threads_start();
