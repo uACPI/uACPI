@@ -2340,9 +2340,10 @@ static uacpi_status check_no_reference_cycle(
     uacpi_object *dst, uacpi_object *new_obj
 )
 {
-    struct object_stack stack = { 0 };
+    struct object_stack stack = { 0 }, visited = { 0 };
     uacpi_status ret = UACPI_STATUS_OK;
     uacpi_object *obj, **entry;
+    uacpi_size i;
 
     if (new_obj->type != UACPI_OBJECT_REFERENCE &&
         new_obj->type != UACPI_OBJECT_PACKAGE)
@@ -2356,26 +2357,42 @@ static uacpi_status check_no_reference_cycle(
             break;
         }
 
-        if (obj->type == UACPI_OBJECT_REFERENCE) {
-            entry = object_stack_alloc(&stack);
+        /*
+         * An object might be reachable in more than one way, e.g. if it's
+         * referenced by more than one element of a package. Going through it
+         * every single time makes the amount of work that we have to do grow
+         * exponentially with the depth of such a graph, so keep track of the
+         * objects that we've already seen.
+         */
+        if ((obj->type == UACPI_OBJECT_REFERENCE ||
+             obj->type == UACPI_OBJECT_PACKAGE) && !obj->visited) {
+            entry = object_stack_alloc(&visited);
             if (uacpi_unlikely(entry == UACPI_NULL)) {
                 ret = UACPI_STATUS_OUT_OF_MEMORY;
                 break;
             }
-            *entry = obj->inner_object;
-        } else if (obj->type == UACPI_OBJECT_PACKAGE) {
-            uacpi_size i;
+            *entry = obj;
+            obj->visited = UACPI_TRUE;
 
-            for (i = 0; i < obj->package->count; ++i) {
+            if (obj->type == UACPI_OBJECT_REFERENCE) {
                 entry = object_stack_alloc(&stack);
                 if (uacpi_unlikely(entry == UACPI_NULL)) {
                     ret = UACPI_STATUS_OUT_OF_MEMORY;
                     break;
                 }
-                *entry = obj->package->objects[i];
+                *entry = obj->inner_object;
+            } else {
+                for (i = 0; i < obj->package->count; ++i) {
+                    entry = object_stack_alloc(&stack);
+                    if (uacpi_unlikely(entry == UACPI_NULL)) {
+                        ret = UACPI_STATUS_OUT_OF_MEMORY;
+                        break;
+                    }
+                    *entry = obj->package->objects[i];
+                }
+                if (uacpi_unlikely_error(ret))
+                    break;
             }
-            if (uacpi_unlikely_error(ret))
-                break;
         }
 
         do {
@@ -2388,6 +2405,10 @@ static uacpi_status check_no_reference_cycle(
     }
 
 out:
+    for (i = 0; i < object_stack_size(&visited); ++i)
+        (*object_stack_at(&visited, i))->visited = UACPI_FALSE;
+
+    object_stack_clear(&visited);
     object_stack_clear(&stack);
     return ret;
 }

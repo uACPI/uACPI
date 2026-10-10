@@ -249,6 +249,13 @@ typedef struct uacpi_object {
     uacpi_u8 type;
     uacpi_u8 flags;
 
+    /*
+     * Set for the duration of a walk over a graph of objects by whoever is
+     * doing it, so that an object that is reachable in more than one way is
+     * only looked at once. Protected by the namespace lock.
+     */
+    uacpi_bool visited;
+
     union {
         uacpi_u64 integer;
         uacpi_package *package;
