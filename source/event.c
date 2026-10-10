@@ -1026,13 +1026,15 @@ static void gpe_block_mask_safe(struct gpe_block *block)
     }
 }
 
-static void uninstall_gpe_block(struct gpe_block *block)
+/*
+ * Releases a block that is not reachable by anyone: it's either not installed
+ * yet, or was unlinked with everything that might've been using it long gone.
+ */
+static void free_gpe_block(struct gpe_block *block)
 {
     if (block->registers != UACPI_NULL) {
         struct gpe_register *reg;
         uacpi_size i;
-
-        gpe_block_mask_safe(block);
 
         for (i = 0; i < block->num_registers; ++i) {
             reg = &block->registers[i];
@@ -1042,38 +1044,6 @@ static void uninstall_gpe_block(struct gpe_block *block)
             if (reg->status.total_bit_width)
                 uacpi_unmap_gas_nofree(&reg->status);
         }
-    }
-
-    if (block->irq_ctx) {
-        struct gpe_interrupt_ctx *ctx = block->irq_ctx;
-
-        // Are we the first GPE block?
-        if (block == ctx->gpe_head) {
-            ctx->gpe_head = ctx->gpe_head->next;
-        } else {
-            struct gpe_block *prev_block = ctx->gpe_head;
-
-            // We're not, do a search
-            while (prev_block) {
-                if (prev_block->next == block) {
-                    prev_block->next = block->next;
-                    break;
-                }
-
-                prev_block = prev_block->next;
-            }
-        }
-
-        /*
-         * This GPE block was the last user of this interrupt context, remove it
-         *
-         * The context of the SCI is an exception: it's what the SCI handler
-         * uses to find the blocks to dispatch, so it stays around for as long
-         * as the handler does.
-         */
-        if (ctx->gpe_head == UACPI_NULL &&
-            ctx->irq != g_uacpi_rt_ctx.fadt.sci_int)
-            remove_gpe_interrupt_ctx(ctx);
     }
 
     if (block->events != UACPI_NULL) {
@@ -1111,6 +1081,43 @@ static void uninstall_gpe_block(struct gpe_block *block)
     uacpi_free(block->events,
                sizeof(*block->events) * block->num_events);
     uacpi_free(block, sizeof(*block));
+}
+
+static void uninstall_gpe_block(struct gpe_block *block)
+{
+    struct gpe_interrupt_ctx *ctx = block->irq_ctx;
+
+    gpe_block_mask_safe(block);
+
+    // Are we the first GPE block?
+    if (block == ctx->gpe_head) {
+        ctx->gpe_head = ctx->gpe_head->next;
+    } else {
+        struct gpe_block *prev_block = ctx->gpe_head;
+
+        // We're not, do a search
+        while (prev_block) {
+            if (prev_block->next == block) {
+                prev_block->next = block->next;
+                break;
+            }
+
+            prev_block = prev_block->next;
+        }
+    }
+
+    /*
+     * This GPE block was the last user of this interrupt context, remove it
+     *
+     * The context of the SCI is an exception: it's what the SCI handler
+     * uses to find the blocks to dispatch, so it stays around for as long
+     * as the handler does.
+     */
+    if (ctx->gpe_head == UACPI_NULL &&
+        ctx->irq != g_uacpi_rt_ctx.fadt.sci_int)
+        remove_gpe_interrupt_ctx(ctx);
+
+    free_gpe_block(block);
 }
 
 static struct gp_event *gpe_from_block(struct gpe_block *block, uacpi_u16 idx)
@@ -1358,7 +1365,8 @@ static uacpi_status create_gpe_block(
     return UACPI_STATUS_OK;
 
 error_out:
-    uninstall_gpe_block(block);
+    // The block is not visible to anyone at this point, so just get rid of it
+    free_gpe_block(block);
     return ret;
 }
 
