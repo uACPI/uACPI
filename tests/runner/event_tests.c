@@ -207,6 +207,37 @@ static uacpi_status notify_chain(
 }
 
 typedef struct {
+    uacpi_namespace_node *node;
+    notify_log_t *log;
+    bool done;
+} notify_reentrant_t;
+
+DEFINE_NOTIFY_HANDLER(notify_e)
+
+/*
+ * Does what a handler is likely to do in response to a notification, all of
+ * which involves calling back into uACPI: installs a handler for a different
+ * node, and executes a method, which notifies that very node.
+ */
+static uacpi_status notify_reentrant(
+    uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value
+)
+{
+    notify_reentrant_t *reentrant = ctx;
+
+    UACPI_UNUSED(node);
+    UACPI_UNUSED(value);
+
+    CHECK_OK(uacpi_install_notify_handler(
+        reentrant->node, notify_e, reentrant->log
+    ));
+    CHECK_OK(uacpi_execute_simple(UACPI_NULL, "\\NTF1"));
+    reentrant->done = true;
+
+    return UACPI_STATUS_OK;
+}
+
+typedef struct {
     uacpi_handle entered;
     bool finished;
 } slow_notify_t;
@@ -237,9 +268,29 @@ void test_notify_handlers_vs_work(void)
 {
     uacpi_namespace_node *dev0 = find_node("\\DEV0");
     uacpi_namespace_node *dev1 = find_node("\\DEV1");
-    notify_log_t a = { 0 }, b = { 0 }, c = { 0 }, d = { 0 };
+    notify_log_t a = { 0 }, b = { 0 }, c = { 0 }, d = { 0 }, e = { 0 };
+    notify_reentrant_t reentrant = { 0 };
     slow_notify_t slow = { 0 };
     size_t chain_count = 0;
+
+    /*
+     * Without the work threads a notification is delivered right by the call
+     * that was supposed to schedule it, which is what a kernel might do if it
+     * sees no reason to defer it. This must not get in the way of whatever the
+     * handler is up to.
+     */
+    reentrant.node = dev1;
+    reentrant.log = &e;
+    CHECK_OK(uacpi_install_notify_handler(dev0, notify_reentrant, &reentrant));
+
+    CHECK_OK(uacpi_execute_simple(UACPI_NULL, "\\NTF0"));
+    CHECK(reentrant.done);
+    CHECK(e.count == 1);
+    CHECK(e.node == dev1);
+    CHECK(e.value == 0x82);
+
+    CHECK_OK(uacpi_uninstall_notify_handler(dev0, notify_reentrant));
+    CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_e));
 
     // This enables GPE 00, since it has an AML handler
     CHECK_OK(uacpi_finalize_gpe_initialization());

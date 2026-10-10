@@ -820,6 +820,10 @@ uacpi_status uacpi_kernel_wait_for_semaphore(
     has_units = semaphore->units != 0;
     semaphore->num_waiters += 1;
 
+    // There's nobody to give us a unit if we're all there is
+    if (!has_units && timeout == 0xFFFF && !interface_is_threaded)
+        work_fatal("the only thread is about to wait for a semaphore forever");
+
     if (!has_units && timeout == 0xFFFF) {
         condvar_wait(
             &semaphore->condvar, &semaphore->mutex, semaphore_has_units,
