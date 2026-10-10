@@ -170,10 +170,7 @@ uacpi_status uacpi_acquire_global_lock(uacpi_u16 timeout, uacpi_u32 *out_seq)
         return ret;
     }
 
-    if (uacpi_unlikely(g_uacpi_rt_ctx.global_lock_seq_num == 0xFFFFFFFF))
-        g_uacpi_rt_ctx.global_lock_seq_num = 0;
-
-    *out_seq = g_uacpi_rt_ctx.global_lock_seq_num++;
+    *out_seq = ++g_uacpi_rt_ctx.global_lock_seq_num;
     g_uacpi_rt_ctx.global_lock_acquired = UACPI_TRUE;
     return UACPI_STATUS_OK;
 }
