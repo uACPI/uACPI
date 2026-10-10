@@ -687,6 +687,16 @@ static void async_run_gpe_handler(uacpi_handle opaque)
              * driver for the device.
              */
             uacpi_notify_all(handler->device, 2);
+
+            /*
+             * The namespace is unlocked for a moment while the notification
+             * is being scheduled, which is all it takes for a table that has
+             * a method for this event to get loaded. The list is gone in that
+             * case, and so is the need to notify anyone else.
+             */
+            if (event->handler_type != GPE_HANDLER_TYPE_IMPLICIT_NOTIFY)
+                break;
+
             handler = handler->next;
         }
         break;
@@ -1367,6 +1377,37 @@ static void gpe_set_handler(
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 }
 
+/*
+ * An event that is configured for implicit notify might be in use at the
+ * moment: its work looks at the handler with the namespace locked, and the
+ * interrupt handler does so with the GPE state lock held. We can't wait for
+ * either one to be done with it, as it might be that very work that got us
+ * here by loading a table, so take both locks instead.
+ */
+static uacpi_status gpe_set_aml_handler(
+    struct gp_event *event, uacpi_namespace_node *node, uacpi_u8 triggering
+)
+{
+    uacpi_status ret;
+
+    ret = uacpi_namespace_write_lock();
+    if (uacpi_unlikely_error(ret))
+        return ret;
+
+    /*
+     * This had implicit notify configured but this is no longer needed as we
+     * now have an actual AML handler. Free the implicit notify list and switch
+     * this handler to AML mode.
+     */
+    if (event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY)
+        gpe_release_implicit_notify_handlers(event);
+
+    gpe_set_handler(event, node, GPE_HANDLER_TYPE_AML_HANDLER, triggering);
+
+    uacpi_namespace_write_unlock();
+    return UACPI_STATUS_OK;
+}
+
 static uacpi_iteration_decision do_match_gpe_methods(
     uacpi_handle opaque, uacpi_namespace_node *node, uacpi_u32 depth
 )
@@ -1417,16 +1458,16 @@ static uacpi_iteration_decision do_match_gpe_methods(
     }
 
     switch (event->handler_type) {
-    /*
-     * This had implicit notify configured but this is no longer needed as we
-     * now have an actual AML handler. Free the implicit notify list and switch
-     * this handler to AML mode.
-     */
     case GPE_HANDLER_TYPE_IMPLICIT_NOTIFY:
-       gpe_release_implicit_notify_handlers(event);
-       UACPI_FALLTHROUGH;
     case GPE_HANDLER_TYPE_NONE:
-        gpe_set_handler(event, node, GPE_HANDLER_TYPE_AML_HANDLER, triggering);
+        ret = gpe_set_aml_handler(event, node, triggering);
+        if (uacpi_unlikely_error(ret)) {
+            uacpi_warn(
+                "unable to assign GPE(%02X) to %.4s: %s", (uacpi_u32)idx,
+                node->name.text, uacpi_status_to_string(ret)
+            );
+            return UACPI_ITERATION_DECISION_CONTINUE;
+        }
         break;
 
     case GPE_HANDLER_TYPE_AML_HANDLER:
