@@ -113,6 +113,9 @@ typedef struct uacpi_handlers {
 // This region was successfully attached to a handler
 #define UACPI_OP_REGION_STATE_ATTACHED (1 << 1)
 
+// This region is being disconnected by _REG, and is about to lose its handler
+#define UACPI_OP_REGION_STATE_DISCONNECTING (1 << 2)
+
 typedef struct uacpi_operation_region {
     struct uacpi_shareable shareable;
     uacpi_address_space_handler *handler;

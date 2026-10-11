@@ -119,8 +119,12 @@ static uacpi_bool space_needs_reg(enum uacpi_address_space space)
     return UACPI_TRUE;
 }
 
+/*
+ * The address space is passed in explicitly as the node might not even be an
+ * operation region anymore by the time we get here, see the callers.
+ */
 static uacpi_status region_run_reg(
-    uacpi_namespace_node *node, uacpi_u8 connection_code
+    uacpi_namespace_node *node, uacpi_u16 space, uacpi_u8 connection_code
 )
 {
     uacpi_status ret;
@@ -151,7 +155,7 @@ static uacpi_status region_run_reg(
         return UACPI_STATUS_OUT_OF_MEMORY;
     }
 
-    args[0]->integer = uacpi_namespace_node_get_object(node)->op_region->space;
+    args[0]->integer = space;
     args[1]->integer = connection_code;
     method_args.objects = args;
     method_args.count = 2;
@@ -321,6 +325,7 @@ static void region_uninstall_handler(
     uacpi_object *obj;
     uacpi_address_space_handler *handler;
     uacpi_operation_region *region, *link;
+    uacpi_bool was_attached;
 
     obj = uacpi_namespace_node_get_object_typed(
         node, UACPI_OBJECT_OPERATION_REGION_BIT
@@ -332,6 +337,10 @@ static void region_uninstall_handler(
 
     handler = region->handler;
     if (handler == UACPI_NULL)
+        return;
+
+    // We're in the middle of doing this already, see below
+    if (region->state_flags & UACPI_OP_REGION_STATE_DISCONNECTING)
         return;
 
     link = find_previous_region_link(region);
@@ -348,17 +357,41 @@ static void region_uninstall_handler(
 
 out:
     /*
+     * Both the _REG method and the handler are free to do whatever they want
+     * to the region once we invoke them, which includes getting rid of it,
+     * e.g. by overwriting it via CopyObject. That leads right back here, so
+     * make sure there's nothing left to do if it happens. It's also up to us
+     * to keep the region alive until we're done.
+     */
+    uacpi_object_ref(obj);
+
+    /*
      * This is done while the region still has its handler, as _REG is what
      * lets AML know that it's about to lose access to the region, and is
      * thus its last chance to make use of it.
      */
     if ((region->state_flags & UACPI_OP_REGION_STATE_REG_EXECUTED) &&
         unreg == UNREG_YES) {
-        region_run_reg(node, ACPI_REG_DISCONNECT);
         region->state_flags &= ~UACPI_OP_REGION_STATE_REG_EXECUTED;
+        region->state_flags |= UACPI_OP_REGION_STATE_DISCONNECTING;
+
+        region_run_reg(node, region->space, ACPI_REG_DISCONNECT);
+
+        region->state_flags &= ~UACPI_OP_REGION_STATE_DISCONNECTING;
     }
 
-    if (region->state_flags & UACPI_OP_REGION_STATE_ATTACHED) {
+    /*
+     * The region has no handler as far as anyone else is concerned from this
+     * point on, which includes whatever the handler decides to do while it's
+     * detaching it. Note that the region might've only been attached by the
+     * _REG method above, so this is not something to check any earlier.
+     */
+    was_attached = region->state_flags & UACPI_OP_REGION_STATE_ATTACHED;
+
+    region->handler = UACPI_NULL;
+    region->state_flags &= ~UACPI_OP_REGION_STATE_ATTACHED;
+
+    if (was_attached) {
         uacpi_region_detach_data detach_data = { 0 };
 
         detach_data.region_node = node;
@@ -380,9 +413,8 @@ out:
         }
     }
 
-    uacpi_address_space_handler_unref(region->handler);
-    region->handler = UACPI_NULL;
-    region->state_flags &= ~UACPI_OP_REGION_STATE_ATTACHED;
+    uacpi_address_space_handler_unref(handler);
+    uacpi_object_unref(obj);
 }
 
 uacpi_status uacpi_upgrade_to_opregion_lock(void)
@@ -513,7 +545,7 @@ static uacpi_iteration_decision do_run_reg(
      */
     uacpi_object_ref(obj);
 
-    ret = region_run_reg(node, ACPI_REG_CONNECT);
+    ret = region_run_reg(node, region->space, ACPI_REG_CONNECT);
     if (ret == UACPI_STATUS_NOT_FOUND)
         goto out;
 
@@ -812,7 +844,8 @@ uacpi_status uacpi_initialize_opregion_node(uacpi_namespace_node *node)
     if (uacpi_get_current_init_level() < UACPI_INIT_LEVEL_NAMESPACE_LOADED)
         goto out;
 
-    if (region_run_reg(node, ACPI_REG_CONNECT) != UACPI_STATUS_NOT_FOUND)
+    if (region_run_reg(node, region->space, ACPI_REG_CONNECT) !=
+        UACPI_STATUS_NOT_FOUND)
         region->state_flags |= UACPI_OP_REGION_STATE_REG_EXECUTED;
 
 out:
