@@ -834,6 +834,25 @@ static void do_test_gpe_handlers(void)
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
     CHECK(log.count == 2);
 
+    /*
+     * An event that we have failed to enable when unmasking it stays masked,
+     * which leaves a way to try that again.
+     */
+    CHECK_OK(uacpi_mask_gpe(UACPI_NULL, 11));
+
+    fake_io_fail_next_write(gpe_enable_addr(11));
+    CHECK_STATUS(
+        uacpi_unmask_gpe(UACPI_NULL, 11), UACPI_STATUS_HARDWARE_TIMEOUT
+    );
+    CHECK_GPE_INFO(
+        UACPI_NULL, 11,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED |
+        UACPI_EVENT_INFO_MASKED
+    );
+
+    CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 11));
+    CHECK_GPE_INFO(UACPI_NULL, 11, GPE_INFO_ENABLED);
+
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
     CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
     CHECK_GPE_INFO(UACPI_NULL, 11, 0);
