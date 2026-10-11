@@ -755,13 +755,13 @@ uacpi_status uacpi_install_address_space_handler(
 }
 
 uacpi_status uacpi_uninstall_address_space_handler(
-    uacpi_namespace_node *device_node,
-    enum uacpi_address_space space
+    uacpi_namespace_node *device_node, enum uacpi_address_space space,
+    uacpi_region_handler handler
 )
 {
     uacpi_status ret;
     uacpi_address_space_handlers *handlers;
-    uacpi_address_space_handler *handler, *prev_handler;
+    uacpi_address_space_handler *this_handler, *prev_handler;
     struct opregion_iter_ctx iter_ctx;
 
     ret = uacpi_recursive_lock_acquire(&g_opregion_lock);
@@ -780,9 +780,15 @@ uacpi_status uacpi_uninstall_address_space_handler(
         goto out;
     }
 
-    handler = find_handler(handlers, space);
-    if (uacpi_unlikely(handler == UACPI_NULL)) {
+    this_handler = find_handler(handlers, space);
+    if (uacpi_unlikely(this_handler == UACPI_NULL)) {
         ret = UACPI_STATUS_NO_HANDLER;
+        goto out;
+    }
+
+    // This is somebody else's handler, and is thus not ours to uninstall
+    if (uacpi_unlikely(this_handler->callback != handler)) {
+        ret = UACPI_STATUS_INVALID_ARGUMENT;
         goto out;
     }
 
@@ -798,17 +804,17 @@ uacpi_status uacpi_uninstall_address_space_handler(
     prev_handler = handlers->head;
 
     // Are we the last linked handler?
-    if (prev_handler == handler) {
-        handlers->head = handler->next;
+    if (prev_handler == this_handler) {
+        handlers->head = this_handler->next;
     } else {
         // Nope, we're somewhere in the middle. Do a search.
-        while (prev_handler->next != handler)
+        while (prev_handler->next != this_handler)
             prev_handler = prev_handler->next;
 
-        prev_handler->next = handler->next;
+        prev_handler->next = this_handler->next;
     }
 
-    iter_ctx.handler = handler;
+    iter_ctx.handler = this_handler;
     iter_ctx.action = OPREGION_ITER_ACTION_UNINSTALL;
 
     uacpi_namespace_do_for_each_child(
@@ -817,7 +823,7 @@ uacpi_status uacpi_uninstall_address_space_handler(
         UACPI_PERMANENT_ONLY_NO, &iter_ctx
     );
 
-    uacpi_address_space_handler_unref(handler);
+    uacpi_address_space_handler_unref(this_handler);
 
 out:
     uacpi_namespace_write_unlock();
