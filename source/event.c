@@ -2617,17 +2617,53 @@ uacpi_status uacpi_setup_gpe_for_wake(
         goto out;
 
     if (wake_device != UACPI_NULL) {
-        switch (event->handler_type) {
-        case GPE_HANDLER_TYPE_NONE:
-            // The device is notified via deferred work
-            ret = gpe_ensure_work_item(event);
-            if (uacpi_unlikely_error(ret))
-                goto out_unmask;
+        struct gpe_implicit_notify_handler *implicit_handler;
 
-            gpe_set_handler(
-                event, UACPI_NULL, GPE_HANDLER_TYPE_IMPLICIT_NOTIFY,
-                UACPI_GPE_TRIGGERING_LEVEL
-            );
+        switch (event->handler_type) {
+        case GPE_HANDLER_TYPE_IMPLICIT_NOTIFY:
+            implicit_handler = event->implicit_handler;
+            while (implicit_handler) {
+                if (implicit_handler->device == wake_device) {
+                    ret = UACPI_STATUS_ALREADY_EXISTS;
+                    goto out_unmask;
+                }
+
+                implicit_handler = implicit_handler->next;
+            }
+            UACPI_FALLTHROUGH;
+        case GPE_HANDLER_TYPE_NONE:
+            /*
+             * This GPE has no known AML handler, so we configure it to receive
+             * implicit notifications for wake devices when we get a
+             * corresponding GPE triggered. Usually it's the job of a matching
+             * AML handler, but we didn't find any.
+             *
+             * The device is notified via deferred work, so get everything
+             * that it takes ready before the event is touched: there's nothing
+             * to undo this way if any of it fails.
+             */
+            implicit_handler = uacpi_kernel_alloc(sizeof(*implicit_handler));
+            if (uacpi_unlikely(implicit_handler == UACPI_NULL)) {
+                ret = UACPI_STATUS_OUT_OF_MEMORY;
+                goto out_unmask;
+            }
+
+            ret = gpe_ensure_work_item(event);
+            if (uacpi_unlikely_error(ret)) {
+                uacpi_free(implicit_handler, sizeof(*implicit_handler));
+                goto out_unmask;
+            }
+
+            if (event->handler_type == GPE_HANDLER_TYPE_NONE) {
+                gpe_set_handler(
+                    event, UACPI_NULL, GPE_HANDLER_TYPE_IMPLICIT_NOTIFY,
+                    UACPI_GPE_TRIGGERING_LEVEL
+                );
+            }
+
+            implicit_handler->device = wake_device;
+            implicit_handler->next = event->implicit_handler;
+            event->implicit_handler = implicit_handler;
             break;
 
         case GPE_HANDLER_TYPE_AML_HANDLER:
@@ -2648,47 +2684,11 @@ uacpi_status uacpi_setup_gpe_for_wake(
             );
             break;
 
-        // We will re-check this below
-        case GPE_HANDLER_TYPE_IMPLICIT_NOTIFY:
-            break;
-
         default:
             uacpi_warn("invalid GPE(%02X) handler type: %d",
                        event->idx, event->handler_type);
             ret = UACPI_STATUS_INTERNAL_ERROR;
             goto out_unmask;
-        }
-
-        /*
-         * This GPE has no known AML handler, so we configure it to receive
-         * implicit notifications for wake devices when we get a corresponding
-         * GPE triggered. Usually it's the job of a matching AML handler, but
-         * we didn't find any.
-         */
-        if (event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) {
-            struct gpe_implicit_notify_handler *implicit_handler;
-
-            implicit_handler = event->implicit_handler;
-            while (implicit_handler) {
-                if (implicit_handler->device == wake_device) {
-                    ret = UACPI_STATUS_ALREADY_EXISTS;
-                    goto out_unmask;
-                }
-
-                implicit_handler = implicit_handler->next;
-            }
-
-            implicit_handler = uacpi_kernel_alloc(sizeof(*implicit_handler));
-            if (uacpi_likely(implicit_handler != UACPI_NULL)) {
-                implicit_handler->device = wake_device;
-                implicit_handler->next = event->implicit_handler;
-                event->implicit_handler = implicit_handler;
-            } else {
-                uacpi_warn(
-                    "unable to configure implicit wake for GPE(%02X) -> %.4s: "
-                    "out of memory", event->idx, wake_device->name.text
-                );
-            }
         }
     }
 
