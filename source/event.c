@@ -430,6 +430,14 @@ struct gp_event {
      * is dispatched and until it's restored.
      */
     uacpi_bool work_item_in_use;
+
+    /*
+     * Set for an event that was dispatched without having its status cleared,
+     * which is left until it's restored. This is decided at the time that the
+     * event is dispatched: the way it's triggered might get replaced along
+     * with its handler while it's still being handled.
+     */
+    uacpi_bool clear_on_restore;
 };
 
 struct gpe_register {
@@ -584,7 +592,13 @@ static uacpi_status restore_gpe_unlocked(struct gp_event *event)
 {
     uacpi_status ret;
 
-    if (event->triggering == UACPI_GPE_TRIGGERING_LEVEL) {
+    /*
+     * A level triggered event is cleared once it's been handled. It might not
+     * be level triggered anymore if its handler was replaced in the meantime,
+     * so go by what it was when it was dispatched as well.
+     */
+    if (event->clear_on_restore ||
+        event->triggering == UACPI_GPE_TRIGGERING_LEVEL) {
         ret = clear_gpe(event);
         if (uacpi_unlikely_error(ret))
             return ret;
@@ -592,6 +606,7 @@ static uacpi_status restore_gpe_unlocked(struct gp_event *event)
 
     ret = set_gpe_state_unlocked(event, GPE_STATE_ENABLED_CONDITIONALLY);
     event->block_interrupts = UACPI_FALSE;
+    event->clear_on_restore = UACPI_FALSE;
 
     return ret;
 }
@@ -747,7 +762,8 @@ enum gpe_dispatcher {
  */
 static uacpi_status gpe_try_claim(
     struct gp_event *event, enum gpe_dispatcher dispatcher,
-    uacpi_u8 *out_handler_type, uacpi_bool *out_did_claim
+    uacpi_u8 *out_handler_type, uacpi_u8 *out_triggering,
+    uacpi_bool *out_did_claim
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
@@ -768,6 +784,7 @@ static uacpi_status gpe_try_claim(
      * possibly on a different CPU just now.
      */
     *out_handler_type = event->handler_type;
+    *out_triggering = event->triggering;
 
     ret = uacpi_gas_read_mapped(&reg->status, &status);
     if (uacpi_unlikely_error(ret))
@@ -788,6 +805,10 @@ static uacpi_status gpe_try_claim(
     ret = uacpi_gas_write_mapped(&reg->enable, enable & ~event_bit);
     if (uacpi_likely_success(ret)) {
         event->block_interrupts = UACPI_TRUE;
+
+        if (*out_triggering == UACPI_GPE_TRIGGERING_LEVEL)
+            event->clear_on_restore = UACPI_TRUE;
+
         *out_did_claim = UACPI_TRUE;
     }
 
@@ -803,11 +824,13 @@ static uacpi_interrupt_ret dispatch_gpe(
 {
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
-    uacpi_u8 handler_type;
+    uacpi_u8 handler_type, triggering;
     uacpi_bool did_claim, in_use;
     uacpi_cpu_flags flags;
 
-    ret = gpe_try_claim(event, dispatcher, &handler_type, &did_claim);
+    ret = gpe_try_claim(
+        event, dispatcher, &handler_type, &triggering, &did_claim
+    );
     if (uacpi_unlikely_error(ret)) {
         uacpi_error("failed to claim GPE(%02X): %s",
                     event->idx, uacpi_status_to_string(ret));
@@ -849,7 +872,7 @@ static uacpi_interrupt_ret dispatch_gpe(
             return UACPI_INTERRUPT_HANDLED;
     }
 
-    if (event->triggering == UACPI_GPE_TRIGGERING_EDGE) {
+    if (triggering == UACPI_GPE_TRIGGERING_EDGE) {
         ret = clear_gpe(event);
         if (uacpi_unlikely_error(ret)) {
             uacpi_error("unable to clear GPE(%02X): %s",
@@ -1392,6 +1415,7 @@ static void gpe_drop_claim(struct gp_event *event)
 
     flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     event->block_interrupts = UACPI_FALSE;
+    event->clear_on_restore = UACPI_FALSE;
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 }
 
