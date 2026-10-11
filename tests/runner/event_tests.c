@@ -183,6 +183,12 @@ static void gpe_set_status(uacpi_u16 idx)
     fake_io_raise(base + idx / 8, (uint8_t)(1 << (idx % 8)));
 }
 
+// The status register of an event that belongs to the first FADT block
+static uacpi_io_addr gpe_status_addr(uacpi_u16 idx)
+{
+    return FAKE_GPE0_BLK + idx / 8;
+}
+
 // The enable register of an event that belongs to the first FADT block
 static uacpi_io_addr gpe_enable_addr(uacpi_u16 idx)
 {
@@ -804,6 +810,29 @@ static void do_test_gpe_handlers(void)
         uacpi_mask_gpe(UACPI_NULL, 11), UACPI_STATUS_HARDWARE_TIMEOUT
     );
     CHECK_GPE_INFO(UACPI_NULL, 11, GPE_INFO_ENABLED);
+
+    /*
+     * An edge triggered event is cleared before its handler is invoked. If
+     * that fails the event is not handled at all, so it must not be left
+     * looking like one that is still being handled either: that would keep
+     * it from being enabled once it's unmasked.
+     */
+    fake_io_fail_next_write(gpe_status_addr(11));
+    gpe_set_status(11);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(log.count == 1);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 11, GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK_OK(uacpi_mask_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_unmask_gpe(UACPI_NULL, 11));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 11, GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(log.count == 2);
 
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
     CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
