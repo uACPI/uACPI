@@ -30,6 +30,9 @@ uacpi_status uacpi_uninstall_fixed_event_handler(
 /**
  * Enable/disable a fixed event. Note that the event is automatically enabled
  * upon installing a handler to it.
+ *
+ * NOTE: both may be called from an interrupt context, including the handler
+ *       of the event itself.
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
     uacpi_status uacpi_enable_fixed_event(uacpi_fixed_event event)
@@ -38,6 +41,12 @@ UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
     uacpi_status uacpi_disable_fixed_event(uacpi_fixed_event event)
 )
 
+/**
+ * Clear the status bit of a fixed event.
+ *
+ * NOTE: may be called from an interrupt context, including the handler of the
+ *       event itself.
+ */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
     uacpi_status uacpi_clear_fixed_event(uacpi_fixed_event event)
 )
@@ -62,6 +71,12 @@ typedef enum uacpi_event_info {
     UACPI_EVENT_INFO_HW_STATUS = (1 << 5),
 } uacpi_event_info;
 
+/**
+ * Returns the state of a fixed event.
+ *
+ * NOTE: may be called from an interrupt context, including the handler of the
+ *       event itself.
+ */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_fixed_event_info(
     uacpi_fixed_event event, uacpi_event_info *out_info

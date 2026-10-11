@@ -68,6 +68,15 @@ static const struct fixed_event fixed_events[UACPI_FIXED_EVENT_MAX + 1] = {
 static struct fixed_event_handler
 fixed_event_handlers[UACPI_FIXED_EVENT_MAX + 1];
 
+/*
+ * Protects the handlers above, as well as the enable bit of every fixed event.
+ *
+ * A handler is installed & removed with the event lock held, but that's not
+ * something the interrupt handler is able to take, and neither is the API
+ * that is allowed to be called from it. This is what they use instead.
+ */
+static uacpi_handle g_fixed_event_slock;
+
 static uacpi_status initialize_fixed_events(void)
 {
     uacpi_size i;
@@ -109,6 +118,7 @@ static uacpi_status set_event(uacpi_u8 event, uacpi_u8 value)
 uacpi_status uacpi_enable_fixed_event(uacpi_fixed_event event)
 {
     uacpi_status ret;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
@@ -117,13 +127,13 @@ uacpi_status uacpi_enable_fixed_event(uacpi_fixed_event event)
     if (uacpi_is_hardware_reduced())
         return UACPI_STATUS_OK;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_fixed_event_slock);
 
     /*
      * Attempting to enable an event that doesn't have a handler is most likely
-     * an error, don't allow it.
+     * an error, don't allow it. This includes an event that is in the process
+     * of having its handler removed, which is why the check is a part of the
+     * same critical section as the enable.
      */
     if (uacpi_unlikely(fixed_event_handlers[event].handler == UACPI_NULL)) {
         ret = UACPI_STATUS_NO_HANDLER;
@@ -133,13 +143,14 @@ uacpi_status uacpi_enable_fixed_event(uacpi_fixed_event event)
     ret = set_event(event, UACPI_EVENT_ENABLED);
 
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_fixed_event_slock, flags);
     return ret;
 }
 
 uacpi_status uacpi_disable_fixed_event(uacpi_fixed_event event)
 {
     uacpi_status ret;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
@@ -148,13 +159,10 @@ uacpi_status uacpi_disable_fixed_event(uacpi_fixed_event event)
     if (uacpi_is_hardware_reduced())
         return UACPI_STATUS_OK;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
-
+    flags = uacpi_kernel_lock_spinlock(g_fixed_event_slock);
     ret = set_event(event, UACPI_EVENT_DISABLED);
+    uacpi_kernel_unlock_spinlock(g_fixed_event_slock, flags);
 
-    uacpi_recursive_lock_release(&g_event_lock);
     return ret;
 }
 
@@ -177,13 +185,30 @@ static uacpi_interrupt_ret dispatch_fixed_event(
 )
 {
     uacpi_status ret;
-    struct fixed_event_handler *evh = &fixed_event_handlers[event];
+    struct fixed_event_handler evh;
+    uacpi_u64 is_enabled;
+    uacpi_cpu_flags flags;
+
+    /*
+     * The event was enabled at the time we were invoked, but that might not
+     * be the case anymore: it's disabled by whoever is uninstalling its
+     * handler, in which case the handler must not be called, or by someone
+     * who doesn't want to hear from it for now. Take another look with the
+     * lock held, which is also what makes the handler safe to look at.
+     */
+    flags = uacpi_kernel_lock_spinlock(g_fixed_event_slock);
+    ret = uacpi_read_register_field(ev->enable_field, &is_enabled);
+    evh = fixed_event_handlers[event];
+    uacpi_kernel_unlock_spinlock(g_fixed_event_slock, flags);
+
+    if (uacpi_unlikely_error(ret) || !is_enabled)
+        return UACPI_INTERRUPT_NOT_HANDLED;
 
     ret = uacpi_write_register_field(ev->status_field, ACPI_PM1_STS_CLEAR);
     if (uacpi_unlikely_error(ret))
         return UACPI_INTERRUPT_NOT_HANDLED;
 
-    if (uacpi_unlikely(evh->handler == UACPI_NULL)) {
+    if (uacpi_unlikely(evh.handler == UACPI_NULL)) {
         uacpi_warn(
             "fixed event %u fired but no handler installed, disabling...",
             event
@@ -192,7 +217,7 @@ static uacpi_interrupt_ret dispatch_fixed_event(
         return UACPI_INTERRUPT_NOT_HANDLED;
     }
 
-    return evh->handler(evh->ctx);
+    return evh.handler(evh.ctx);
 }
 
 static uacpi_interrupt_ret handle_fixed_events(void)
@@ -2181,6 +2206,10 @@ uacpi_status uacpi_initialize_events_early(void)
     if (uacpi_unlikely(g_gpe_state_slock == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
 
+    g_fixed_event_slock = uacpi_kernel_create_spinlock();
+    if (uacpi_unlikely(g_fixed_event_slock == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
     ret = uacpi_recursive_lock_init(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -2284,6 +2313,11 @@ void uacpi_deinitialize_events(void)
         g_gpe_state_slock = UACPI_NULL;
     }
 
+    if (g_fixed_event_slock != UACPI_NULL) {
+        uacpi_kernel_free_spinlock(g_fixed_event_slock);
+        g_fixed_event_slock = UACPI_NULL;
+    }
+
     uacpi_recursive_lock_deinit(&g_event_lock);
 
     g_gpe_interrupt_head = UACPI_NULL;
@@ -2296,6 +2330,7 @@ uacpi_status uacpi_install_fixed_event_handler(
 {
     uacpi_status ret;
     struct fixed_event_handler *ev;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
@@ -2309,6 +2344,8 @@ uacpi_status uacpi_install_fixed_event_handler(
         return ret;
 
     ev = &fixed_event_handlers[event];
+
+    flags = uacpi_kernel_lock_spinlock(g_fixed_event_slock);
 
     if (ev->handler != UACPI_NULL) {
         ret = UACPI_STATUS_ALREADY_EXISTS;
@@ -2325,6 +2362,7 @@ uacpi_status uacpi_install_fixed_event_handler(
     }
 
 out:
+    uacpi_kernel_unlock_spinlock(g_fixed_event_slock, flags);
     uacpi_recursive_lock_release(&g_event_lock);
     return ret;
 }
@@ -2335,6 +2373,7 @@ uacpi_status uacpi_uninstall_fixed_event_handler(
 {
     uacpi_status ret;
     struct fixed_event_handler *ev;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
@@ -2349,14 +2388,26 @@ uacpi_status uacpi_uninstall_fixed_event_handler(
 
     ev = &fixed_event_handlers[event];
 
+    /*
+     * The handler is gone as far as everyone else is concerned as soon as the
+     * lock is dropped: the event can't be enabled without one, and an
+     * interrupt handler that is yet to look at it finds the event disabled.
+     */
+    flags = uacpi_kernel_lock_spinlock(g_fixed_event_slock);
+
     ret = set_event(event, UACPI_EVENT_DISABLED);
+    if (uacpi_likely_success(ret)) {
+        ev->handler = UACPI_NULL;
+        ev->ctx = UACPI_NULL;
+    }
+
+    uacpi_kernel_unlock_spinlock(g_fixed_event_slock, flags);
+
     if (uacpi_unlikely_error(ret))
         goto out;
 
+    // The handler might still be in use by the interrupts that are in flight
     uacpi_kernel_wait_for_work_completion();
-
-    ev->handler = UACPI_NULL;
-    ev->ctx = UACPI_NULL;
 
 out:
     uacpi_recursive_lock_release(&g_event_lock);
@@ -2371,6 +2422,7 @@ uacpi_status uacpi_fixed_event_info(
     const struct fixed_event *ev;
     uacpi_u64 raw_value;
     uacpi_event_info info = 0;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_SUBSYSTEM_INITIALIZED);
 
@@ -2379,9 +2431,7 @@ uacpi_status uacpi_fixed_event_info(
     if (uacpi_is_hardware_reduced())
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_fixed_event_slock);
 
     if (fixed_event_handlers[event].handler != UACPI_NULL)
         info |= UACPI_EVENT_INFO_HAS_HANDLER;
@@ -2402,7 +2452,7 @@ uacpi_status uacpi_fixed_event_info(
 
     *out_info = info;
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_fixed_event_slock, flags);
     return ret;
 }
 
