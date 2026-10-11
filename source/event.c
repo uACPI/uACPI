@@ -2319,6 +2319,19 @@ uacpi_status uacpi_uninstall_gpe_handler(
     if (uacpi_unlikely_error(ret))
         goto out;
 
+    /*
+     * The handler that we're about to bring back gets the user that was taken
+     * away from it, which is only ever done for an AML or an implicit notify
+     * one. This is the one thing here that might not work out, as an event
+     * only has room for so many, so do it while there's still nothing to
+     * undo. The event is masked, so it's not enabled until we're done.
+     */
+    if (native_handler->previously_enabled) {
+        ret = gpe_add_user(event, EVENT_CLEAR_IF_FIRST_NO, &is_first_user);
+        if (uacpi_unlikely_error(ret))
+            goto out_unmask;
+    }
+
     gpe_set_handler(
         event, native_handler->previous_handler,
         native_handler->previous_handler_type,
@@ -2326,14 +2339,9 @@ uacpi_status uacpi_uninstall_gpe_handler(
     );
     gpe_drop_claim(event);
 
-    if ((event->handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
-         event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) &&
-         native_handler->previously_enabled) {
-        gpe_add_user(event, EVENT_CLEAR_IF_FIRST_NO, &is_first_user);
-    }
-
     uacpi_free(native_handler, sizeof(*native_handler));
 
+out_unmask:
     if (did_mask)
         gpe_mask_unmask(event, UACPI_FALSE);
 
