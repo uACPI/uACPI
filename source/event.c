@@ -1979,8 +1979,16 @@ static uacpi_status gpe_mask_unmask(
 
     if (!should_mask) {
         reg->masked_mask &= ~mask;
-        if (!event->block_interrupts && event->num_users)
-            set_gpe_state_unlocked(event, GPE_STATE_ENABLED_CONDITIONALLY);
+
+        if (!event->block_interrupts && event->num_users) {
+            ret = set_gpe_state_unlocked(
+                event, GPE_STATE_ENABLED_CONDITIONALLY
+            );
+        }
+
+        // Still masked as far as everyone is concerned, so this can be retried
+        if (uacpi_unlikely_error(ret))
+            reg->masked_mask |= mask;
     }
 
 out:
