@@ -482,7 +482,6 @@ static uacpi_iteration_decision do_install_or_uninstall_handler(
 
 struct reg_run_ctx {
     uacpi_u8 space;
-    uacpi_u8 connection_code;
     uacpi_size reg_executed;
     uacpi_size reg_errors;
 };
@@ -495,7 +494,6 @@ static uacpi_iteration_decision do_run_reg(
     uacpi_object *obj;
     uacpi_operation_region *region;
     uacpi_status ret;
-    uacpi_bool was_regged;
 
     UACPI_UNUSED(depth);
 
@@ -505,8 +503,7 @@ static uacpi_iteration_decision do_run_reg(
     if (region->space != ctx->space)
         return UACPI_ITERATION_DECISION_CONTINUE;
 
-    was_regged = region->state_flags & UACPI_OP_REGION_STATE_REG_EXECUTED;
-    if (was_regged == (ctx->connection_code == ACPI_REG_CONNECT))
+    if (region->state_flags & UACPI_OP_REGION_STATE_REG_EXECUTED)
         return UACPI_ITERATION_DECISION_CONTINUE;
 
     /*
@@ -516,16 +513,11 @@ static uacpi_iteration_decision do_run_reg(
      */
     uacpi_object_ref(obj);
 
-    ret = region_run_reg(node, ctx->connection_code);
-    if (ctx->connection_code == ACPI_REG_DISCONNECT)
-        region->state_flags &= ~UACPI_OP_REGION_STATE_REG_EXECUTED;
-
+    ret = region_run_reg(node, ACPI_REG_CONNECT);
     if (ret == UACPI_STATUS_NOT_FOUND)
         goto out;
 
-    if (ctx->connection_code == ACPI_REG_CONNECT)
-        region->state_flags |= UACPI_OP_REGION_STATE_REG_EXECUTED;
-
+    region->state_flags |= UACPI_OP_REGION_STATE_REG_EXECUTED;
     ctx->reg_executed++;
 
     if (uacpi_unlikely_error(ret))
@@ -536,45 +528,35 @@ out:
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
-static uacpi_status reg_or_unreg_all_opregions(
-    uacpi_namespace_node *device_node, enum uacpi_address_space space,
-    uacpi_u8 connection_code
+static uacpi_status reg_all_opregions(
+    uacpi_namespace_node *device_node, enum uacpi_address_space space
 )
 {
     uacpi_address_space_handlers *handlers;
-    uacpi_bool is_connect;
-    enum uacpi_permanent_only perm_only;
     struct reg_run_ctx ctx = { 0 };
 
     ctx.space = space;
-    ctx.connection_code = connection_code;
 
     handlers = uacpi_node_get_address_space_handlers(device_node);
     if (uacpi_unlikely(handlers == UACPI_NULL))
         return UACPI_STATUS_INVALID_ARGUMENT;
 
-    is_connect = connection_code == ACPI_REG_CONNECT;
-    if (uacpi_unlikely(is_connect &&
-                       find_handler(handlers, space) == UACPI_NULL))
+    if (uacpi_unlikely(find_handler(handlers, space) == UACPI_NULL))
         return UACPI_STATUS_NO_HANDLER;
 
     /*
-     * We want to unreg non-permanent opregions as well, however,
-     * registering them is handled separately and should not be
-     * done by us.
+     * Registering non-permanent opregions is handled separately and should
+     * not be done by us.
      */
-    perm_only = is_connect ? UACPI_PERMANENT_ONLY_YES : UACPI_PERMANENT_ONLY_NO;
-
     uacpi_namespace_do_for_each_child(
         device_node, do_run_reg, UACPI_NULL,
         UACPI_OBJECT_OPERATION_REGION_BIT, UACPI_MAX_DEPTH_ANY,
-        UACPI_SHOULD_LOCK_NO, perm_only, &ctx
+        UACPI_SHOULD_LOCK_NO, UACPI_PERMANENT_ONLY_YES, &ctx
     );
 
     uacpi_trace(
-        "%sactivated all '%s' opregions controlled by '%.4s', "
+        "activated all '%s' opregions controlled by '%.4s', "
         "%zu _REG() calls (%zu errors)",
-        connection_code == ACPI_REG_CONNECT ? "" : "de",
         uacpi_address_space_to_string(space),
         device_node->name.text, ctx.reg_executed, ctx.reg_errors
     );
@@ -628,7 +610,7 @@ uacpi_status uacpi_reg_all_opregions(
         goto out;
     }
 
-    ret = reg_or_unreg_all_opregions(device_node, space, ACPI_REG_CONNECT);
+    ret = reg_all_opregions(device_node, space);
 
 out:
     uacpi_namespace_write_unlock();
@@ -707,9 +689,7 @@ uacpi_status uacpi_install_address_space_handler_with_flags(
         goto out;
 
     // Init level is NAMESPACE_INITIALIZED, so we can safely run _REG now
-    ret = reg_or_unreg_all_opregions(
-        device_node, space, ACPI_REG_CONNECT
-    );
+    ret = reg_all_opregions(device_node, space);
 
 out:
     uacpi_namespace_write_unlock();
