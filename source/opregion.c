@@ -761,7 +761,7 @@ uacpi_status uacpi_uninstall_address_space_handler(
 {
     uacpi_status ret;
     uacpi_address_space_handlers *handlers;
-    uacpi_address_space_handler *handler = UACPI_NULL, *prev_handler;
+    uacpi_address_space_handler *handler, *prev_handler;
     struct opregion_iter_ctx iter_ctx;
 
     ret = uacpi_recursive_lock_acquire(&g_opregion_lock);
@@ -786,6 +786,28 @@ uacpi_status uacpi_uninstall_address_space_handler(
         goto out;
     }
 
+    /*
+     * Both the handler and the _REG methods are invoked as the regions are
+     * taken away below, and are free to do whatever they want in response.
+     * Make sure that the handler is no longer there to be found by then, be
+     * it by a region that is created in the meantime, or by the handler
+     * itself in case it decides to uninstall itself as it's told to detach
+     * a region. The reference that the device had is now ours, which is what
+     * keeps the handler alive until we're done.
+     */
+    prev_handler = handlers->head;
+
+    // Are we the last linked handler?
+    if (prev_handler == handler) {
+        handlers->head = handler->next;
+    } else {
+        // Nope, we're somewhere in the middle. Do a search.
+        while (prev_handler->next != handler)
+            prev_handler = prev_handler->next;
+
+        prev_handler->next = handler->next;
+    }
+
     iter_ctx.handler = handler;
     iter_ctx.action = OPREGION_ITER_ACTION_UNINSTALL;
 
@@ -795,28 +817,9 @@ uacpi_status uacpi_uninstall_address_space_handler(
         UACPI_PERMANENT_ONLY_NO, &iter_ctx
     );
 
-    prev_handler = handlers->head;
-
-    // Are we the last linked handler?
-    if (prev_handler == handler) {
-        handlers->head = handler->next;
-        goto out;
-    }
-
-    // Nope, we're somewhere in the middle. Do a search.
-    while (prev_handler) {
-        if (prev_handler->next == handler) {
-            prev_handler->next = handler->next;
-            goto out;
-        }
-
-        prev_handler = prev_handler->next;
-    }
+    uacpi_address_space_handler_unref(handler);
 
 out:
-    if (handler != UACPI_NULL)
-        uacpi_address_space_handler_unref(handler);
-
     uacpi_namespace_write_unlock();
     uacpi_recursive_lock_release(&g_opregion_lock);
     return ret;
