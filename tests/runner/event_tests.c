@@ -167,6 +167,12 @@ static void gpe_set_status(uacpi_u16 idx)
     fake_io_raise(base + idx / 8, (uint8_t)(1 << (idx % 8)));
 }
 
+// The enable register of an event that belongs to the first FADT block
+static uacpi_io_addr gpe_enable_addr(uacpi_u16 idx)
+{
+    return FAKE_GPE0_BLK + FAKE_GPE0_BLK_LEN / 2 + idx / 8;
+}
+
 // Trigger a GPE that is expected to be enabled, and thus handled
 static void gpe_fire(uacpi_u16 idx)
 {
@@ -578,6 +584,40 @@ static void do_test_gpe_handlers(void)
     flush_work();
     CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
     CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    /*
+     * An event has to be quiescent for its handler to be replaced, which is
+     * not something that we're able to guarantee for an event that we have
+     * failed to disable. All that's left to do is leave it the way it was.
+     */
+    log.ret = UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+
+    fake_io_fail_next_write(gpe_enable_addr(11));
+    CHECK_STATUS(
+        uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe),
+        UACPI_STATUS_HARDWARE_TIMEOUT
+    );
+    CHECK_GPE_INFO(UACPI_NULL, 11, GPE_INFO_ENABLED);
+
+    gpe_fire(11);
+    CHECK(log.count == 1);
+
+    // Same goes for masking it, which has to wait for it to quiesce as well
+    fake_io_fail_next_write(gpe_enable_addr(11));
+    CHECK_STATUS(
+        uacpi_mask_gpe(UACPI_NULL, 11), UACPI_STATUS_HARDWARE_TIMEOUT
+    );
+    CHECK_GPE_INFO(UACPI_NULL, 11, GPE_INFO_ENABLED);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+    log.count = 0;
 
     // More than one event may be pending at once, even in the same register
     gpe_set_status(0);
