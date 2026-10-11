@@ -1119,6 +1119,38 @@ static void do_test_gpe_handlers(void)
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
     CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
 
+    /*
+     * An event that was dispatched to a native handler stays disabled until
+     * it's told that the event was handled. A handler that is uninstalled
+     * before that happens must not take the event down with it: whoever gets
+     * it next has nothing to do with that.
+     */
+    log.count = 0;
+    log.ret = UACPI_INTERRUPT_HANDLED;
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 1, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 1));
+
+    gpe_fire(1);
+    CHECK(log.count == 1);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 1, UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 1, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    gpe_fire(1);
+    flush_work();
+    CHECK(log.count == 1);
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
+
+    // This was ours, the method has been given its own back
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
     // A raw handler is on its own, we don't touch the event in any way
     log.count = 0;
     log.ret = UACPI_INTERRUPT_HANDLED;
