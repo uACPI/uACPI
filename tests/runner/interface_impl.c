@@ -26,6 +26,19 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address)
 static mutex_t interface_mutex;
 static bool interface_is_threaded;
 
+/*
+ * The number of interrupts that this thread is in the middle of handling. An
+ * interrupt handler is not allowed to wait for anything, so we use this to
+ * catch it trying to.
+ */
+static THREAD_LOCAL unsigned irq_depth;
+
+// The number of work handlers that this thread is executing right away
+static THREAD_LOCAL unsigned inline_work_depth;
+
+// Safe to use no matter how many threads there are, unlike error()
+NORETURN static void work_fatal(const char *reason);
+
 static void interface_lock(void)
 {
     if (interface_is_threaded)
@@ -714,6 +727,9 @@ void uacpi_kernel_stall(uacpi_u8 usec)
 
 void uacpi_kernel_sleep(uacpi_u64 msec)
 {
+    if (irq_depth != 0)
+        work_fatal("an interrupt handler has attempted to sleep");
+
     millisecond_sleep(msec);
 }
 
@@ -733,11 +749,23 @@ void uacpi_kernel_free_mutex(uacpi_handle handle)
 
 uacpi_thread_id uacpi_kernel_get_thread_id(void)
 {
+    /*
+     * The only one who needs this is a mutex that wants to know who owns it.
+     * This has to be checked here as well, as we're running as the thread
+     * that we have interrupted: acquiring a mutex that it owns would go
+     * unnoticed otherwise.
+     */
+    if (irq_depth != 0)
+        work_fatal("an interrupt handler has attempted to acquire a mutex");
+
     return get_thread_id();
 }
 
 uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout)
 {
+    if (irq_depth != 0)
+        work_fatal("an interrupt handler has attempted to acquire a mutex");
+
     if (timeout == 0)
         return mutex_try_lock(handle) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
 
@@ -792,6 +820,9 @@ uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
 {
     event_t *event = handle;
     bool ok;
+
+    if (irq_depth != 0)
+        work_fatal("an interrupt handler has attempted to wait for an event");
 
     mutex_lock(&event->mutex);
 
@@ -942,6 +973,8 @@ uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq)
     memcpy(handlers, irq_handlers, sizeof(handlers));
     interface_unlock();
 
+    irq_depth++;
+
     for (i = 0; i < UACPI_ARRAY_SIZE(handlers); ++i) {
         if (handlers[i].handler == NULL || handlers[i].irq != irq)
             continue;
@@ -949,6 +982,7 @@ uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq)
         ret |= handlers[i].handler(handlers[i].ctx);
     }
 
+    irq_depth--;
     return ret;
 }
 
@@ -964,7 +998,7 @@ void uacpi_kernel_free_spinlock(uacpi_handle handle)
 
 uacpi_cpu_flags uacpi_kernel_lock_spinlock(uacpi_handle handle)
 {
-    uacpi_kernel_acquire_mutex(handle, 0xFFFF);
+    mutex_lock(handle);
     return 0;
 }
 
@@ -972,7 +1006,7 @@ void uacpi_kernel_unlock_spinlock(uacpi_handle handle, uacpi_cpu_flags flags)
 {
     UACPI_UNUSED(flags);
 
-    uacpi_kernel_release_mutex(handle);
+    mutex_unlock(handle);
 }
 
 #define WORK_TIMEOUT_SECONDS 30
@@ -1196,7 +1230,20 @@ uacpi_status uacpi_kernel_schedule_work(
     work_t *work;
 
     if (!interface_is_threaded) {
+        unsigned prev_irq_depth;
+
+        /*
+         * The work might've been scheduled by an interrupt handler, but that
+         * doesn't make it one, even though this is where it's executed.
+         */
+        prev_irq_depth = irq_depth;
+        irq_depth = 0;
+        inline_work_depth++;
+
         handler(ctx);
+
+        inline_work_depth--;
+        irq_depth = prev_irq_depth;
         return UACPI_STATUS_OK;
     }
 
@@ -1234,6 +1281,21 @@ uacpi_status uacpi_kernel_wait_for_work_completion(void)
 {
     void *this_id;
     size_t i;
+
+    if (irq_depth != 0) {
+        work_fatal(
+            "an interrupt handler has attempted to wait for work completion, "
+            "which would never return"
+        );
+    }
+
+    // Same goes for the work that is executed by whoever has scheduled it
+    if (inline_work_depth != 0) {
+        work_fatal(
+            "a work handler has attempted to wait for work completion, "
+            "which would never return"
+        );
+    }
 
     if (!interface_is_threaded)
         return UACPI_STATUS_OK;

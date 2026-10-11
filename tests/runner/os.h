@@ -34,6 +34,15 @@ typedef pthread_cond_t condvar_t;
 #endif
 #endif
 
+#ifdef _WIN32
+#define THREAD_LOCAL __declspec(thread)
+#elif defined(__WATCOMC__)
+// There are no threads that would need this there, see work_threads_start
+#define THREAD_LOCAL
+#else
+#define THREAD_LOCAL __thread
+#endif
+
 #define NANOSECONDS_PER_SECOND 1000000000ull
 
 static inline uint64_t get_nanosecond_timer(void)
