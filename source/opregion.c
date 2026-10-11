@@ -509,7 +509,15 @@ enum opregion_iter_action {
 struct opregion_iter_ctx {
     enum opregion_iter_action action;
     uacpi_address_space_handler *handler;
+
+    // The handlers of the device that the above is installed for
+    uacpi_address_space_handlers *handlers;
 };
+
+static uacpi_bool handler_is_installed(struct opregion_iter_ctx *ctx)
+{
+    return find_handler(ctx->handlers, ctx->handler->space) == ctx->handler;
+}
 
 static uacpi_iteration_decision do_install_or_uninstall_handler(
     uacpi_handle opaque, uacpi_namespace_node *node, uacpi_u32 depth
@@ -531,6 +539,14 @@ static uacpi_iteration_decision do_install_or_uninstall_handler(
         if (ctx->action == OPREGION_ITER_ACTION_INSTALL) {
             if (region->handler) {
                 region_uninstall_handler(node, UNREG_NO);
+
+                /*
+                 * The previous handler was invoked by the above, and might've
+                 * uninstalled the one that we're in the middle of installing.
+                 * There's nothing left for us to do in that case.
+                 */
+                if (uacpi_unlikely(!handler_is_installed(ctx)))
+                    return UACPI_ITERATION_DECISION_BREAK;
 
                 /*
                  * The previous handler was just told that the region is being
@@ -763,7 +779,16 @@ uacpi_status uacpi_install_address_space_handler_with_flags(
     new_handler->flags = flags;
     handlers->head = new_handler;
 
+    /*
+     * The handlers that some of the regions already have are invoked as the
+     * regions are taken away from them below, and are free to do whatever they
+     * want in response, which includes uninstalling the handler that we have
+     * just put on the list. Keep it alive until we're done.
+     */
+    uacpi_shareable_ref(new_handler);
+
     iter_ctx.handler = new_handler;
+    iter_ctx.handlers = handlers;
     iter_ctx.action = OPREGION_ITER_ACTION_INSTALL;
 
     uacpi_namespace_do_for_each_child(
@@ -772,8 +797,13 @@ uacpi_status uacpi_install_address_space_handler_with_flags(
         UACPI_PERMANENT_ONLY_YES, &iter_ctx
     );
 
+    if (uacpi_unlikely(!handler_is_installed(&iter_ctx))) {
+        ret = UACPI_STATUS_NO_HANDLER;
+        goto out_unref;
+    }
+
     if (!space_needs_reg(space))
-        goto out;
+        goto out_unref;
 
      /*
       * Installing an early address space handler, obviously not possible to
@@ -783,11 +813,13 @@ uacpi_status uacpi_install_address_space_handler_with_flags(
       * the namespace.
       */
     if (g_uacpi_rt_ctx.init_level < UACPI_INIT_LEVEL_NAMESPACE_LOADED)
-        goto out;
+        goto out_unref;
 
     // Init level is NAMESPACE_INITIALIZED, so we can safely run _REG now
     ret = reg_all_opregions(device_node, space);
 
+out_unref:
+    uacpi_address_space_handler_unref(new_handler);
 out:
     uacpi_namespace_write_unlock();
     uacpi_recursive_lock_release(&g_opregion_lock);
@@ -865,6 +897,7 @@ uacpi_status uacpi_uninstall_address_space_handler(
     }
 
     iter_ctx.handler = this_handler;
+    iter_ctx.handlers = handlers;
     iter_ctx.action = OPREGION_ITER_ACTION_UNINSTALL;
 
     uacpi_namespace_do_for_each_child(
