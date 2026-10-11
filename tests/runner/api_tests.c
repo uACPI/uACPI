@@ -551,7 +551,8 @@ void test_address_spaces(void)
     uacpi_status st;
     uacpi_object *arg;
     struct uninstaller_ctx self_ctx = { 0 };
-    uacpi_namespace_node *oem_device, *ipmi_device;
+    struct uninstaller_ctx old_ctx = { 0 }, new_ctx = { 0 };
+    uacpi_namespace_node *oem_device, *ipmi_device, *taken_device;
     uacpi_u64 out_value;
 
     arg = uacpi_object_create_integer(0);
@@ -661,6 +662,48 @@ void test_address_spaces(void)
             uacpi_status_to_string(self_ctx.st)
         );
     }
+
+    /*
+     * Same thing, but for a handler that is yet to be installed. The region
+     * that it's about to take over is detached from the handler that it had
+     * before, which uninstalls the new one in response.
+     */
+    st = uacpi_namespace_node_find(NULL, "\\OEM5", &taken_device);
+    ensure_ok_status(st);
+    old_ctx.device = taken_device;
+
+    st = uacpi_install_address_space_handler(
+        uacpi_namespace_root(), UNINSTALLER_ADDRESS_SPACE,
+        uninstaller_handler, &old_ctx
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_eval_simple_integer(NULL, "\\OEM5.READ", &out_value);
+    ensure_ok_status(st);
+
+    st = uacpi_install_address_space_handler(
+        taken_device, UNINSTALLER_ADDRESS_SPACE, uninstaller_handler, &new_ctx
+    );
+    if (st != UACPI_STATUS_NO_HANDLER) {
+        error(
+            "unexpected status for a handler that was uninstalled early: %s",
+            uacpi_status_to_string(st)
+        );
+    }
+    ensure_ok_status(old_ctx.st);
+
+    // It's gone for real
+    st = uacpi_uninstall_address_space_handler(
+        taken_device, UNINSTALLER_ADDRESS_SPACE, uninstaller_handler
+    );
+    if (st != UACPI_STATUS_NO_HANDLER)
+        error("a handler that was uninstalled early is still there");
+
+    old_ctx.device = NULL;
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UNINSTALLER_ADDRESS_SPACE, uninstaller_handler
+    );
+    ensure_ok_status(st);
 
     /*
      * A region is also detached when a handler that is closer to it comes
