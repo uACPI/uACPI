@@ -1583,6 +1583,15 @@ void test_wake_gpes(void)
     CHECK(log0.value == 2);
     CHECK_GPE_INFO(UACPI_NULL, 3, GPE_INFO_ENABLED);
 
+    /*
+     * An event that has a method loses the user that it was given during
+     * initialization once it's set up for wake. This one never had it, so
+     * the only user that it has is ours, which is not something to be taken
+     * away by having one more device use the event.
+     */
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 3, dev1));
+    CHECK_GPE_INFO(UACPI_NULL, 3, GPE_INFO_ENABLED);
+
     gpe_fire(0x10);
     CHECK(log1.count == 1);
     CHECK(log1.node == dev1);
