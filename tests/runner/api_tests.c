@@ -469,10 +469,56 @@ static uacpi_status oem_handler(uacpi_region_op op, uacpi_handle op_data)
     }
 }
 
+#define UNINSTALLER_ADDRESS_SPACE ((uacpi_address_space)0x81)
+
+struct uninstaller_ctx {
+    // The device to uninstall the handler of, if any
+    uacpi_namespace_node *device;
+
+    // How that went
+    uacpi_status st;
+};
+
+/*
+ * Uninstalls the handler of the device that it was given as soon as it's told
+ * to detach a region, and reports how that went via its context.
+ */
+static uacpi_status uninstaller_handler(
+    uacpi_region_op op, uacpi_handle op_data
+)
+{
+    switch (op) {
+    case UACPI_REGION_OP_DETACH: {
+        uacpi_region_detach_data *detach_data = op_data;
+        struct uninstaller_ctx *ctx = detach_data->handler_context;
+
+        if (ctx->device == NULL)
+            return UACPI_STATUS_OK;
+
+        ctx->st = uacpi_uninstall_address_space_handler(
+            ctx->device, UNINSTALLER_ADDRESS_SPACE, uninstaller_handler
+        );
+        return UACPI_STATUS_OK;
+    }
+    case UACPI_REGION_OP_READ: {
+        uacpi_region_rw_data *rw_data = op_data;
+
+        rw_data->value = 0;
+        return UACPI_STATUS_OK;
+    }
+    case UACPI_REGION_OP_ATTACH:
+    case UACPI_REGION_OP_WRITE:
+        return UACPI_STATUS_OK;
+    default:
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
+}
+
 void test_address_spaces(void)
 {
     uacpi_status st;
     uacpi_object *arg;
+    struct uninstaller_ctx self_ctx = { 0 };
     uacpi_namespace_node *oem_device;
     uacpi_u64 out_value;
 
@@ -554,6 +600,34 @@ void test_address_spaces(void)
     );
     ensure_ok_status(st);
     eval_one(arg, OEM_ADDRESS_SPACE);
+
+    /*
+     * A handler that is being uninstalled is told to detach its regions, and
+     * is free to do whatever it wants in response, which includes trying to
+     * uninstall itself. There's nothing left to uninstall by then.
+     */
+    self_ctx.device = uacpi_namespace_root();
+
+    st = uacpi_install_address_space_handler(
+        uacpi_namespace_root(), UNINSTALLER_ADDRESS_SPACE,
+        uninstaller_handler, &self_ctx
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_eval_simple_integer(NULL, "\\OEM4.READ", &out_value);
+    ensure_ok_status(st);
+
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UNINSTALLER_ADDRESS_SPACE, uninstaller_handler
+    );
+    ensure_ok_status(st);
+
+    if (self_ctx.st != UACPI_STATUS_NO_HANDLER) {
+        error(
+            "unexpected status for a handler that uninstalls itself: %s",
+            uacpi_status_to_string(self_ctx.st)
+        );
+    }
 
     /*
      * A region is also detached when a handler that is closer to it comes

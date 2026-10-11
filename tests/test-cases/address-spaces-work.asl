@@ -367,6 +367,26 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
     }
 
     /*
+     * The handler of this address space uninstalls whichever handler it was
+     * told to as soon as a region is detached from it. For this one that is
+     * the handler itself, which takes it being uninstalled to happen in the
+     * first place.
+     */
+    Device (OEM4) {
+        Name (_HID, "TEST0006")
+
+        OperationRegion (REG4, 0x81, 0, 1)
+        Field (REG4, ByteAcc, NoLock, Preserve) {
+            FLD4, 8,
+        }
+
+        // Accessing a region is what gets it attached in the first place
+        Method (READ) {
+            Return (FLD4)
+        }
+    }
+
+    /*
      * The handler of this address space evaluates the DTCH method of the
      * device that a region belongs to every time that the region is detached.
      * Both of these get rid of the region in response.
