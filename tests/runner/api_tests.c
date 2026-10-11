@@ -696,5 +696,19 @@ void test_address_spaces(void)
     ensure_ok_status(st);
     check_connected(arg, "CRG2", false);
 
+    /*
+     * A region is disconnected while it still has its handler, which is only
+     * told to detach it once _REG is done making use of it.
+     */
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), OEM_ADDRESS_SPACE, oem_handler
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_eval_simple_integer(NULL, "COE3", &out_value);
+    ensure_ok_status(st);
+    if (!out_value)
+        error("OEM address space disconnect test failed");
+
     uacpi_object_unref(arg);
 }

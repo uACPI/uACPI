@@ -453,6 +453,62 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
     }
 
     /*
+     * This one stays around until the handler is uninstalled, and makes use of
+     * its region one last time as it's told that it's being disconnected.
+     */
+    Device (OEM3) {
+        Name (_HID, "TEST0005")
+
+        OperationRegion (REG3, 0x80, 0, 1)
+        Field (REG3, ByteAcc, NoLock, Preserve) {
+            FLD3, 8,
+        }
+
+        // The number of times that the region was detached
+        Name (DETS, 0)
+
+        // Same thing, but as of the time that the region was disconnected
+        Name (DETB, 0xFF)
+
+        // The value of the field as of the time that it was disconnected
+        Name (LAST, 0)
+
+        Method (_REG, 2) {
+            If (Arg0 == 0x80 && Arg1 == 0) {
+                DETB = DETS
+                LAST = FLD3
+            }
+        }
+
+        Method (DTCH) {
+            DETS++
+        }
+    }
+
+    /*
+     * To be evaluated after the handler was uninstalled. A region is still
+     * accessible by the time that it's disconnected, as its handler is only
+     * told to detach it after that.
+     *
+     * Return -> Ones on success, Zero on failure
+     */
+    Method (COE3) {
+        If (\OEM3.LAST != 0x5A) {
+            Printf("REG3 was not accessible while disconnecting: %o",
+                   \OEM3.LAST)
+            Return (Zero)
+        }
+
+        If (\OEM3.DETB != 0 || \OEM3.DETS != 1) {
+            Printf("REG3 was detached %o time(s), %o before the disconnect",
+                   \OEM3.DETS, \OEM3.DETB)
+            Return (Zero)
+        }
+
+        Return (Ones)
+    }
+
+    /*
      * To be evaluated after OEM1 was given a handler of its own, which is what
      * detaches REG1 from the one that it had before.
      *
