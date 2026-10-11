@@ -1551,9 +1551,13 @@ static uacpi_bool gpe_needs_polling(
 /*
  * Mask the event, and get it to the point where it's no longer in use by
  * anyone. The event lock is dropped while we wait.
+ *
+ * This fails if the event couldn't be disabled, in which case it's still
+ * masked, and it's up to the caller to decide what to do about that.
  */
-static void gpe_mask_and_flush(struct gp_event *event)
+static uacpi_status gpe_mask_and_flush(struct gp_event *event)
 {
+    uacpi_status ret;
     uacpi_cpu_flags flags;
 
     // 1. Mask the GPE, this makes sure its state is no longer modifyable
@@ -1575,7 +1579,17 @@ static void gpe_mask_and_flush(struct gp_event *event)
          *    disable this event knowing it won't be re-enabled by a racing
          *    IRQ.
          */
-        set_gpe_state(event, GPE_STATE_DISABLED);
+        ret = set_gpe_state(event, GPE_STATE_DISABLED);
+
+        /*
+         * An event that we were not able to disable is free to fire for as
+         * long as it wants to, so there's no getting it to quiesce.
+         */
+        if (uacpi_unlikely_error(ret)) {
+            uacpi_error("failed to disable GPE(%02X): %s",
+                        event->idx, uacpi_status_to_string(ret));
+            return ret;
+        }
 
         /*
          * Whatever is still using this event is taken care of by the wait
@@ -1598,6 +1612,8 @@ static void gpe_mask_and_flush(struct gp_event *event)
          * until it doesn't.
          */
     } while (gpe_is_armed(event));
+
+    return UACPI_STATUS_OK;
 }
 
 static uacpi_status gpe_mask_unmask(
@@ -1630,9 +1646,15 @@ static uacpi_status gpe_mask_unmask(
 out:
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
+    if (!should_mask || uacpi_unlikely_error(ret))
+        return ret;
+
     // This has to wait for the event to quiesce, so can't be done above
-    if (should_mask && uacpi_likely_success(ret))
-        gpe_mask_and_flush(event);
+    ret = gpe_mask_and_flush(event);
+
+    // An event that is still able to fire is not masked in any way that counts
+    if (uacpi_unlikely_error(ret))
+        gpe_mask_unmask(event, UACPI_FALSE);
 
     return ret;
 }
@@ -1646,11 +1668,19 @@ out:
  * NOTE: the event lock is dropped while we wait for the event to quiesce, so
  *       anything other than the native handlers, which are protected by the
  *       config lock, may change by the time this returns.
+ *
+ * This fails if the event couldn't be made quiescent, in which case it's left
+ * the way it was found, and none of its structures are safe to modify.
  */
-static uacpi_bool gpe_mask_safe(struct gp_event *event)
+static uacpi_status gpe_mask_safe(
+    struct gp_event *event, uacpi_bool *out_did_mask
+)
 {
+    uacpi_status ret;
     uacpi_bool was_masked;
     uacpi_cpu_flags flags;
+
+    *out_did_mask = UACPI_FALSE;
 
     /*
      * No need to flush or do anything if it was never enabled since the last
@@ -1659,7 +1689,7 @@ static uacpi_bool gpe_mask_safe(struct gp_event *event)
      * pending.
      */
     if (!gpe_is_armed(event))
-        return UACPI_FALSE;
+        return UACPI_STATUS_OK;
 
     /*
      * If the event was already masked by the user it's not up to us to unmask
@@ -1671,8 +1701,17 @@ static uacpi_bool gpe_mask_safe(struct gp_event *event)
     was_masked = (event->reg->masked_mask & gpe_get_mask(event)) != 0;
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
-    gpe_mask_and_flush(event);
-    return !was_masked;
+    ret = gpe_mask_and_flush(event);
+    if (uacpi_unlikely_error(ret)) {
+        // Leave the event the way we have found it
+        if (!was_masked)
+            gpe_mask_unmask(event, UACPI_FALSE);
+
+        return ret;
+    }
+
+    *out_did_mask = !was_masked;
+    return UACPI_STATUS_OK;
 }
 
 static uacpi_iteration_decision do_initialize_gpe_block(
@@ -1818,7 +1857,11 @@ static uacpi_status do_install_gpe_handler(
     native_handler->cb = handler;
     native_handler->ctx = ctx;
 
-    did_mask = gpe_mask_safe(event);
+    ret = gpe_mask_safe(event, &did_mask);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_free(native_handler, sizeof(*native_handler));
+        goto out;
+    }
 
     /*
      * Only look at the current handler after the event is masked, as it might
@@ -1915,7 +1958,9 @@ uacpi_status uacpi_uninstall_gpe_handler(
         goto out;
     }
 
-    did_mask = gpe_mask_safe(event);
+    ret = gpe_mask_safe(event, &did_mask);
+    if (uacpi_unlikely_error(ret))
+        goto out;
 
     event->aml_handler = native_handler->previous_handler;
     event->triggering = native_handler->previous_triggering;
@@ -2188,7 +2233,9 @@ uacpi_status uacpi_setup_gpe_for_wake(
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    did_mask = gpe_mask_safe(event);
+    ret = gpe_mask_safe(event, &did_mask);
+    if (uacpi_unlikely_error(ret))
+        goto out;
 
     if (wake_device != UACPI_NULL) {
         switch (event->handler_type) {
