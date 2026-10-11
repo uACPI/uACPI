@@ -2290,43 +2290,6 @@ static uacpi_object *reference_unwind(uacpi_object *obj)
     return UACPI_NULL;
 }
 
-static uacpi_iteration_decision opregion_try_detach_from_parent(
-    void *user, uacpi_namespace_node *node, uacpi_u32 node_depth
-)
-{
-    uacpi_object *target_object = user;
-    UACPI_UNUSED(node_depth);
-
-    if (node->object == target_object) {
-        uacpi_opregion_uninstall_handler(node);
-        return UACPI_ITERATION_DECISION_BREAK;
-    }
-
-    return UACPI_ITERATION_DECISION_CONTINUE;
-}
-
-static void object_replace_child(uacpi_object *parent, uacpi_object *new_child)
-{
-    if (parent->flags == UACPI_REFERENCE_KIND_NAMED &&
-        uacpi_object_is(parent->inner_object, UACPI_OBJECT_OPERATION_REGION)) {
-
-        /*
-         * We're doing a CopyObject or similar to a namespace node that is an
-         * operation region. Try to find the parent node and manually detach
-         * the handler.
-         */
-        opregion_try_detach_from_parent(parent, uacpi_namespace_root(), 0);
-        uacpi_namespace_do_for_each_child(
-            uacpi_namespace_root(), opregion_try_detach_from_parent, UACPI_NULL,
-            UACPI_OBJECT_OPERATION_REGION_BIT, UACPI_MAX_DEPTH_ANY,
-            UACPI_SHOULD_LOCK_NO, UACPI_PERMANENT_ONLY_NO, parent
-        );
-    }
-
-    uacpi_object_detach_child(parent);
-    uacpi_object_attach_child(parent, new_child);
-}
-
 DYNAMIC_ARRAY_WITH_INLINE_STORAGE(object_queue, uacpi_object*, 8)
 DYNAMIC_ARRAY_WITH_INLINE_STORAGE_IMPL(object_queue, uacpi_object*, static)
 
@@ -2413,6 +2376,60 @@ static uacpi_status check_no_reference_cycle(
     return ret;
 }
 
+static uacpi_iteration_decision opregion_try_detach_from_parent(
+    void *user, uacpi_namespace_node *node, uacpi_u32 node_depth
+)
+{
+    uacpi_object *target_object = user;
+    UACPI_UNUSED(node_depth);
+
+    if (node->object == target_object) {
+        uacpi_opregion_uninstall_handler(node);
+        return UACPI_ITERATION_DECISION_BREAK;
+    }
+
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static uacpi_status object_replace_child(
+    uacpi_object *parent, uacpi_object *new_child
+)
+{
+    uacpi_status ret;
+
+    if (parent->flags == UACPI_REFERENCE_KIND_NAMED &&
+        uacpi_object_is(parent->inner_object, UACPI_OBJECT_OPERATION_REGION)) {
+
+        /*
+         * We're doing a CopyObject or similar to a namespace node that is an
+         * operation region. Try to find the parent node and manually detach
+         * the handler.
+         */
+        opregion_try_detach_from_parent(parent, uacpi_namespace_root(), 0);
+        uacpi_namespace_do_for_each_child(
+            uacpi_namespace_root(), opregion_try_detach_from_parent, UACPI_NULL,
+            UACPI_OBJECT_OPERATION_REGION_BIT, UACPI_MAX_DEPTH_ANY,
+            UACPI_SHOULD_LOCK_NO, UACPI_PERMANENT_ONLY_NO, parent
+        );
+
+        /*
+         * Both the handler of the region and its _REG method were invoked by
+         * the above, at times with the namespace unlocked, so any number of
+         * other stores might've been done in the meantime. The one that we're
+         * in the middle of was only checked against what was there before
+         * that, and is free to be a reference cycle by now. Nothing else is
+         * able to get in the way from this point on, so check it once more.
+         */
+        ret = check_no_reference_cycle(parent, new_child);
+        if (uacpi_unlikely_error(ret))
+            return ret;
+    }
+
+    uacpi_object_detach_child(parent);
+    uacpi_object_attach_child(parent, new_child);
+    return UACPI_STATUS_OK;
+}
+
 /*
  * Breakdown of what happens here:
  *
@@ -2465,10 +2482,10 @@ static uacpi_status check_no_reference_cycle(
         return ret;
     }
 
-    object_replace_child(dst, new_obj);
+    ret = object_replace_child(dst, new_obj);
     uacpi_object_unref(new_obj);
 
-    return UACPI_STATUS_OK;
+    return ret;
 }
 
 /*
@@ -2535,9 +2552,9 @@ static uacpi_status store_to_reference(
             return ret;
         }
 
-        object_replace_child(dst, new_obj);
+        ret = object_replace_child(dst, new_obj);
         uacpi_object_unref(new_obj);
-        return UACPI_STATUS_OK;
+        return ret;
     }
 
     return object_assign_with_implicit_cast(
