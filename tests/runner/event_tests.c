@@ -1387,6 +1387,10 @@ typedef struct {
     // The method to load the table with
     const char *method;
     size_t count;
+
+    // Whether to have the event claimed once again while it's being handled
+    bool refire;
+    uacpi_u16 idx;
 } gpe_method_loader_t;
 
 static uacpi_status notify_load_gpe_method(
@@ -1398,8 +1402,21 @@ static uacpi_status notify_load_gpe_method(
     UACPI_UNUSED(node);
     UACPI_UNUSED(value);
 
-    if (loader->count++ == 0)
-        CHECK(eval_integer(loader->method) != 0);
+    if (loader->count++ != 0)
+        return UACPI_STATUS_OK;
+
+    CHECK(eval_integer(loader->method) != 0);
+
+    /*
+     * The event is still pending at this point, as it's being handled as a
+     * level triggered one, so all it takes for it to fire again is getting
+     * enabled. It's not dispatched for the second time, as the work that
+     * we're called by is not done with it yet.
+     */
+    if (loader->refire) {
+        CHECK_OK(uacpi_resume_gpe(UACPI_NULL, loader->idx));
+        CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    }
 
     return UACPI_STATUS_OK;
 }
@@ -1509,6 +1526,41 @@ void test_wake_gpes(void)
     CHECK(loader.count == 1);
 
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0x12));
+
+    /*
+     * The method might be triggered differently from the implicit notify that
+     * it replaces, which is always level triggered. An event that was
+     * dispatched as one is cleared once it's been handled, which still has to
+     * be done even though the event is edge triggered by then: it would stay
+     * pending forever otherwise, as that's not something that is expected of
+     * the method.
+     *
+     * This is the case even if the event gets claimed once again in between,
+     * this time around as an edge triggered one.
+     */
+    loader.method = "\\_GPE.LD13";
+    loader.count = 0;
+    loader.refire = true;
+    loader.idx = 0x13;
+
+    CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x13, dev1));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 0x13));
+
+    gpe_fire(0x13);
+    CHECK(loader.count == 1);
+    CHECK(eval_integer("\\_GPE.CN13") == 0);
+    CHECK_GPE_INFO(UACPI_NULL, 0x13, GPE_INFO_ENABLED);
+
+    // There's nothing left of it, so this is not ours to handle
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(eval_integer("\\_GPE.CN13") == 0);
+
+    gpe_fire(0x13);
+    CHECK(eval_integer("\\_GPE.CN13") == 1);
+    CHECK(loader.count == 1);
+    CHECK_GPE_INFO(UACPI_NULL, 0x13, GPE_INFO_ENABLED);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 0x13));
     CHECK_OK(uacpi_uninstall_notify_handler(dev1, notify_load_gpe_method));
     CHECK_OK(uacpi_uninstall_notify_handler(dev2, notify_load_gpe_method));
     CHECK_OK(uacpi_install_notify_handler(dev1, notify_a, &log1));
