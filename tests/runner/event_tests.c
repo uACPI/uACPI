@@ -1549,6 +1549,14 @@ void test_wake_gpes(void)
     );
     CHECK_GPE_INFO(UACPI_NULL, 0x10, 0);
 
+    // Same goes for keeping track of the device that is to be notified
+    fail_next_alloc();
+    CHECK_STATUS(
+        uacpi_setup_gpe_for_wake(UACPI_NULL, 0x10, dev1),
+        UACPI_STATUS_OUT_OF_MEMORY
+    );
+    CHECK_GPE_INFO(UACPI_NULL, 0x10, 0);
+
     CHECK_OK(uacpi_setup_gpe_for_wake(UACPI_NULL, 0x10, dev1));
     CHECK_GPE_INFO(UACPI_NULL, 0x10, UACPI_EVENT_INFO_HAS_HANDLER);
     CHECK_STATUS(
