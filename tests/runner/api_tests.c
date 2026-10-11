@@ -503,6 +503,38 @@ void test_address_spaces(void)
     ensure_ok_status(st);
     eval_one(arg, UACPI_ADDRESS_SPACE_PRM);
 
+    /*
+     * A handler is only uninstalled by whoever is able to tell which one it
+     * is, as it might not be the handler that they think it is.
+     */
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_PRM, pcc_handler
+    );
+    if (st != UACPI_STATUS_INVALID_ARGUMENT) {
+        error(
+            "unexpected status for a handler that is not the one installed: %s",
+            uacpi_status_to_string(st)
+        );
+    }
+
+    // It's still there as a result
+    st = uacpi_install_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_PRM, prm_handler, NULL
+    );
+    if (st != UACPI_STATUS_ALREADY_EXISTS)
+        error("a handler was uninstalled by someone that it doesn't belong to");
+
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_PRM, prm_handler
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_PRM, prm_handler
+    );
+    if (st != UACPI_STATUS_NO_HANDLER)
+        error("a handler was uninstalled more than once");
+
     st = uacpi_install_address_space_handler(
         uacpi_namespace_root(), UACPI_ADDRESS_SPACE_FFIXEDHW, ffixedhw_handler,
         NULL
