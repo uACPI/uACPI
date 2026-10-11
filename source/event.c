@@ -17,6 +17,15 @@
 
 #if !defined(UACPI_REDUCED_HARDWARE) && !defined(UACPI_BAREBONES_MODE)
 
+/*
+ * Protects the state of every GPE, as well as the lists that a GPE is found
+ * via. This is the only lock that is taken by the interrupt handler, by the
+ * deferred work that re-enables an event, and by the part of the API that is
+ * allowed to be called from an interrupt context.
+ *
+ * An event that was looked up with nothing but this lock held is only
+ * guaranteed to be there for as long as the lock is held.
+ */
 static uacpi_handle g_gpe_state_slock;
 static struct uacpi_recursive_lock g_event_lock;
 
@@ -1822,29 +1831,40 @@ static uacpi_status gpe_mask_safe(
 )
 {
     uacpi_status ret;
-    uacpi_bool was_masked;
+    struct gpe_register *reg = event->reg;
+    uacpi_u8 mask;
+    uacpi_bool was_masked, is_armed;
     uacpi_cpu_flags flags;
 
-    *out_did_mask = UACPI_FALSE;
+    mask = gpe_get_mask(event);
 
     /*
-     * No need to flush or do anything if it was never enabled since the last
-     * time we did that. Note that it's not enough for the event to be disabled
-     * right now: the work that was scheduled for it earlier might still be
-     * pending.
-     */
-    if (!gpe_is_armed(event))
-        return UACPI_STATUS_OK;
-
-    /*
+     * Mask the event before looking at anything else: an event that is not
+     * masked can be enabled by anyone at any moment, with nothing but the
+     * state lock held.
+     *
      * If the event was already masked by the user it's not up to us to unmask
-     * it once we're done. It still has to be flushed though, as there's one
+     * it once we're done.
+     */
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    was_masked = (reg->masked_mask & mask) != 0;
+    reg->masked_mask |= mask;
+    is_armed = (reg->armed_mask & mask) != 0;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+    *out_did_mask = !was_masked;
+
+    /*
+     * No need to flush if it was never enabled since the last time we did
+     * that. Note that it's not enough for the event to be disabled right now:
+     * the work that was scheduled for it earlier might still be pending.
+     *
+     * This is done even if the event was masked by the user, as there's one
      * way for a masked event to end up enabled, which is being enabled for
      * wake.
      */
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-    was_masked = (event->reg->masked_mask & gpe_get_mask(event)) != 0;
-    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+    if (!is_armed)
+        return UACPI_STATUS_OK;
 
     ret = gpe_mask_and_flush(event);
     if (uacpi_unlikely_error(ret)) {
@@ -1852,11 +1872,10 @@ static uacpi_status gpe_mask_safe(
         if (!was_masked)
             gpe_mask_unmask(event, UACPI_FALSE);
 
-        return ret;
+        *out_did_mask = UACPI_FALSE;
     }
 
-    *out_did_mask = !was_masked;
-    return UACPI_STATUS_OK;
+    return ret;
 }
 
 static uacpi_iteration_decision do_initialize_gpe_block(
@@ -2148,6 +2167,12 @@ uacpi_status uacpi_enable_gpe(
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
+    /*
+     * Unlike the rest of the API that manages a single event, this takes the
+     * event lock: an event that is already pending is dispatched by us right
+     * here, and the lock is what keeps it from being reconfigured or freed
+     * while that is being done.
+     */
     ret = uacpi_recursive_lock_acquire(&g_event_lock);
     if (uacpi_unlikely_error(ret))
         return ret;
@@ -2179,23 +2204,22 @@ uacpi_status uacpi_disable_gpe(
 {
     uacpi_status ret;
     struct gp_event *event;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
     ret = sanitize_device_and_find_gpe(&gpe_device, idx, &event);
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    ret = gpe_remove_user(event);
+    ret = gpe_remove_user_unlocked(event);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
 }
 
@@ -2205,15 +2229,14 @@ uacpi_status uacpi_clear_gpe(
 {
     uacpi_status ret;
     struct gp_event *event;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
     ret = sanitize_device_and_find_gpe(&gpe_device, idx, &event);
     if (uacpi_unlikely_error(ret))
@@ -2221,7 +2244,7 @@ uacpi_status uacpi_clear_gpe(
 
     ret = clear_gpe(event);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
 }
 
@@ -2238,20 +2261,16 @@ static uacpi_status gpe_suspend_resume(
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
     ret = sanitize_device_and_find_gpe(&gpe_device, idx, &event);
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     event->block_interrupts = state == GPE_STATE_DISABLED;
     ret = set_gpe_state_unlocked(event, state);
-    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
 }
 
@@ -2275,31 +2294,23 @@ uacpi_status uacpi_finish_handling_gpe(
 {
     uacpi_status ret;
     struct gp_event *event;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
     ret = sanitize_device_and_find_gpe(&gpe_device, idx, &event);
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    event = get_gpe(gpe_device, idx);
-    if (uacpi_unlikely(event == UACPI_NULL)) {
-        ret = UACPI_STATUS_NOT_FOUND;
-        goto out;
-    }
-
-    ret = restore_gpe(event);
+    ret = restore_gpe_unlocked(event);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
-
 }
 
 static uacpi_status gpe_get_mask_unmask(
@@ -2482,9 +2493,7 @@ static uacpi_status gpe_enable_disable_for_wake(
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
     ret = sanitize_device_and_find_gpe(&gpe_device, idx, &event);
     if (uacpi_unlikely_error(ret))
@@ -2498,15 +2507,13 @@ static uacpi_status gpe_enable_disable_for_wake(
     reg = event->reg;
     mask = gpe_get_mask(event);
 
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     if (enabled)
         reg->wake_mask |= mask;
     else
         reg->wake_mask &= ~mask;
-    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
 }
 
@@ -3068,9 +3075,7 @@ uacpi_status uacpi_gpe_info(
     if (uacpi_unlikely(uacpi_is_hardware_reduced()))
         return UACPI_STATUS_NOT_FOUND;
 
-    ret = uacpi_recursive_lock_acquire(&g_event_lock);
-    if (uacpi_unlikely_error(ret))
-        return ret;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
     ret = sanitize_device_and_find_gpe(&gpe_device, idx, &event);
     if (uacpi_unlikely_error(ret))
@@ -3082,8 +3087,6 @@ uacpi_status uacpi_gpe_info(
     mask = gpe_get_mask(event);
     reg = event->reg;
 
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-
     if (reg->runtime_mask & mask)
         info |= UACPI_EVENT_INFO_ENABLED;
     if (reg->masked_mask & mask)
@@ -3093,22 +3096,19 @@ uacpi_status uacpi_gpe_info(
 
     ret = uacpi_gas_read_mapped(&reg->enable, &raw_value);
     if (uacpi_unlikely_error(ret))
-        goto out_unlock;
+        goto out;
     if (raw_value & mask)
         info |= UACPI_EVENT_INFO_HW_ENABLED;
 
     ret = uacpi_gas_read_mapped(&reg->status, &raw_value);
     if (uacpi_unlikely_error(ret))
-        goto out_unlock;
+        goto out;
     if (raw_value & mask)
         info |= UACPI_EVENT_INFO_HW_STATUS;
 
     *out_info = info;
-
-out_unlock:
-    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 out:
-    uacpi_recursive_lock_release(&g_event_lock);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
 }
 

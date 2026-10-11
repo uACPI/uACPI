@@ -90,6 +90,14 @@ uacpi_status uacpi_fixed_event_info(
     uacpi_fixed_event event, uacpi_event_info *out_info
 ))
 
+/**
+ * Returns the state of the GPE at 'idx' managed by 'gpe_device'.
+ *
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This may be called from an interrupt context, which includes the handler
+ *   of the event itself
+ */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_gpe_info(
    uacpi_namespace_node *gpe_device, uacpi_u16 idx,
@@ -186,7 +194,9 @@ uacpi_status uacpi_setup_gpe_for_wake(
  * function only affects the GPE enable register state following the call to
  * uacpi_gpe_enable_all_for_wake.
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - Both may be called from an interrupt context
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_enable_gpe_for_wake(
@@ -215,11 +225,15 @@ UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 )
 
 /**
- * Enable/disable a general purpose event managed by 'gpe_device'. Internally
- * this uses reference counting to make sure a GPE is not disabled until all
- * possible users of it do so. GPEs not marked for wake are enabled
- * automatically so this API is only needed for wake events or those that don't
- * have a corresponding AML handler.
+ * Enable a general purpose event managed by 'gpe_device'. Internally this uses
+ * reference counting to make sure a GPE is not disabled until all possible
+ * users of it do so. GPEs not marked for wake are enabled automatically so
+ * this API is only needed for wake events or those that don't have a
+ * corresponding AML handler.
+ *
+ * Some hardware doesn't raise an interrupt for an edge triggered event that
+ * is already pending by the time it's enabled, so such an event is dispatched
+ * right away instead.
  *
  * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
  */
@@ -227,6 +241,17 @@ UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_enable_gpe(
     uacpi_namespace_node *gpe_device, uacpi_u16 idx
 ))
+
+/**
+ * Disable a general purpose event managed by 'gpe_device'. This drops a
+ * reference taken by uacpi_enable_gpe: the event is only disabled once it has
+ * none left.
+ *
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This may be called from an interrupt context, which includes the handler
+ *   of the event itself
+ */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_disable_gpe(
     uacpi_namespace_node *gpe_device, uacpi_u16 idx
@@ -235,7 +260,10 @@ uacpi_status uacpi_disable_gpe(
 /**
  * Clear the status bit of the event 'idx' managed by 'gpe_device'.
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This may be called from an interrupt context, which includes the handler
+ *   of the event itself
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_clear_gpe(
@@ -248,7 +276,10 @@ uacpi_status uacpi_clear_gpe(
  * corresponding bit in the enable registers. This is used for switching the GPE
  * to poll mode.
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - Both may be called from an interrupt context, which includes the handler
+ *   of the event itself
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_suspend_gpe(
@@ -264,7 +295,10 @@ uacpi_status uacpi_resume_gpe(
  * status registers if it hasn't been cleared yet and re-enables the event if
  * it was enabled before.
  *
- * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
+ * NOTE:
+ * - 'gpe_device' may be null for GPEs managed by \_GPE
+ * - This may be called from an interrupt context, which includes the handler
+ *   of the event itself
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_finish_handling_gpe(
