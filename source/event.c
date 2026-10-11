@@ -1379,10 +1379,13 @@ enum event_clear_if_first {
 };
 
 static uacpi_status gpe_add_user(
-    struct gp_event *event, enum event_clear_if_first clear_if_first
+    struct gp_event *event, enum event_clear_if_first clear_if_first,
+    uacpi_bool *out_is_first
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
+
+    *out_is_first = UACPI_FALSE;
 
     if (uacpi_unlikely(event->num_users == 0xFF))
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -1397,7 +1400,10 @@ static uacpi_status gpe_add_user(
         if (uacpi_unlikely_error(ret)) {
             gp_event_toggle_masks(event, UACPI_FALSE);
             event->num_users--;
+            return ret;
         }
+
+        *out_is_first = UACPI_TRUE;
     }
 
     return ret;
@@ -1417,9 +1423,17 @@ const uacpi_char *uacpi_gpe_triggering_to_string(
     }
 }
 
-static uacpi_bool gpe_needs_polling(struct gp_event *event)
+/*
+ * Some hardware doesn't raise an interrupt for an edge triggered event that
+ * is already pending by the time it's enabled, so it has to be checked for by
+ * hand. That's only the case for the user that got it enabled: it's up to the
+ * interrupt handler from there on.
+ */
+static uacpi_bool gpe_needs_polling(
+    struct gp_event *event, uacpi_bool is_first_user
+)
 {
-    return event->num_users && event->triggering == UACPI_GPE_TRIGGERING_EDGE;
+    return is_first_user && event->triggering == UACPI_GPE_TRIGGERING_EDGE;
 }
 
 static uacpi_status gpe_mask_unmask(
@@ -1511,6 +1525,7 @@ static uacpi_iteration_decision do_initialize_gpe_block(
     uacpi_bool *poll_blocks = opaque;
     uacpi_size i, j, count_enabled = 0;
     struct gp_event *event;
+    uacpi_bool is_first_user;
 
     // Already taken care of by one of the previous calls
     if (block->finalized)
@@ -1524,14 +1539,16 @@ static uacpi_iteration_decision do_initialize_gpe_block(
                 event->handler_type != GPE_HANDLER_TYPE_AML_HANDLER)
                 continue;
 
-            ret = gpe_add_user(event, EVENT_CLEAR_IF_FIRST_NO);
+            ret = gpe_add_user(
+                event, EVENT_CLEAR_IF_FIRST_NO, &is_first_user
+            );
             if (uacpi_unlikely_error(ret)) {
                 uacpi_warn("failed to enable GPE(%02X): %s",
                            event->idx, uacpi_status_to_string(ret));
                 continue;
             }
 
-            *poll_blocks |= gpe_needs_polling(event);
+            *poll_blocks |= gpe_needs_polling(event, is_first_user);
             count_enabled++;
         }
     }
@@ -1714,7 +1731,7 @@ uacpi_status uacpi_uninstall_gpe_handler(
     uacpi_status ret;
     struct gp_event *event;
     struct gpe_native_handler *native_handler;
-    uacpi_bool did_mask;
+    uacpi_bool did_mask, is_first_user = UACPI_FALSE;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
@@ -1750,7 +1767,7 @@ uacpi_status uacpi_uninstall_gpe_handler(
     if ((event->handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
          event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) &&
          native_handler->previously_enabled) {
-        gpe_add_user(event, EVENT_CLEAR_IF_FIRST_NO);
+        gpe_add_user(event, EVENT_CLEAR_IF_FIRST_NO, &is_first_user);
     }
 
     uacpi_free(native_handler, sizeof(*native_handler));
@@ -1758,7 +1775,13 @@ uacpi_status uacpi_uninstall_gpe_handler(
     if (did_mask)
         gpe_mask_unmask(event, UACPI_FALSE);
 
-    if (gpe_needs_polling(event))
+    /*
+     * An event that we had to mask was disabled for as long as it took to
+     * replace its handler, so it's no different from one that was only now
+     * enabled by getting its first user: it might've become pending without
+     * anyone noticing.
+     */
+    if (gpe_needs_polling(event, is_first_user || did_mask))
         maybe_dispatch_gpe(gpe_device, event);
 out:
     event_config_unlock();
@@ -1771,6 +1794,7 @@ uacpi_status uacpi_enable_gpe(
 {
     uacpi_status ret;
     struct gp_event *event;
+    uacpi_bool is_first_user;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
@@ -1790,11 +1814,11 @@ uacpi_status uacpi_enable_gpe(
         goto out;
     }
 
-    ret = gpe_add_user(event, EVENT_CLEAR_IF_FIRST_YES);
+    ret = gpe_add_user(event, EVENT_CLEAR_IF_FIRST_YES, &is_first_user);
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    if (gpe_needs_polling(event))
+    if (gpe_needs_polling(event, is_first_user))
         maybe_dispatch_gpe(gpe_device, event);
 
 out:
