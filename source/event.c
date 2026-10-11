@@ -754,10 +754,14 @@ static uacpi_interrupt_ret dispatch_gpe(
 }
 
 /*
- * The list of blocks is modified with the event lock held, but is walked by
- * the interrupt handlers without it. A block is fully initialized before it's
- * linked in, and is only freed after every interrupt handler that might've
- * been looking at it at the time it was unlinked has returned.
+ * The lists of interrupt contexts & blocks are modified with both the event
+ * lock and the GPE state lock held, so having either one is enough to walk
+ * them.
+ *
+ * The interrupt handlers walk the blocks with no locks at all though. A block
+ * is fully initialized before it's linked in, and is only freed after every
+ * interrupt handler that might've been looking at it at the time it was
+ * unlinked has returned.
  */
 static struct gpe_block *load_gpe_block(struct gpe_block **block)
 {
@@ -850,6 +854,7 @@ static uacpi_status find_or_create_gpe_interrupt_ctx(
 {
     uacpi_status ret;
     struct gpe_interrupt_ctx *entry = g_gpe_interrupt_head;
+    uacpi_cpu_flags flags;
 
     while (entry) {
         if (entry->irq == irq) {
@@ -879,10 +884,13 @@ static uacpi_status find_or_create_gpe_interrupt_ctx(
     }
 
     entry->irq = irq;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     entry->next = g_gpe_interrupt_head;
     if (g_gpe_interrupt_head != UACPI_NULL)
         g_gpe_interrupt_head->prev = entry;
     g_gpe_interrupt_head = entry;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     *out_ctx = entry;
     return UACPI_STATUS_OK;
@@ -894,6 +902,10 @@ static uacpi_status find_or_create_gpe_interrupt_ctx(
  */
 static void unlink_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
 {
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+
     if (ctx->prev != UACPI_NULL)
         ctx->prev->next = ctx->next;
     else
@@ -902,6 +914,12 @@ static void unlink_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
     if (ctx->next != UACPI_NULL)
         ctx->next->prev = ctx->prev;
 
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+    /*
+     * This might have to wait for the handler to return, and the handler is
+     * free to take the lock, so it can't be done with it held.
+     */
     if (ctx->irq != g_uacpi_rt_ctx.fadt.sci_int) {
         uacpi_kernel_uninstall_interrupt_handler(
             handle_gpes, ctx->irq_handle
@@ -1096,6 +1114,8 @@ static void uninstall_gpe_block(struct gpe_block *block)
     }
 
     // 4. Make sure the interrupt handler is no longer able to find the block
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+
     if (block == ctx->gpe_head) {
         uacpi_atomic_store_ptr(&ctx->gpe_head, block->next);
     } else {
@@ -1110,6 +1130,8 @@ static void uninstall_gpe_block(struct gpe_block *block)
             prev_block = prev_block->next;
         }
     }
+
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     /*
      * This GPE block was the last user of this interrupt context, remove it
@@ -1293,6 +1315,7 @@ static uacpi_status create_gpe_block(
     struct gp_event *event;
     struct acpi_gas tmp_gas = { 0 };
     uacpi_size i, j;
+    uacpi_cpu_flags flags;
 
     tmp_gas.address_space_id = address_space_id;
     tmp_gas.register_bit_width = 8;
@@ -1371,8 +1394,10 @@ static uacpi_status create_gpe_block(
     );
 
     // The block is complete, make it visible to the interrupt handler
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     block->next = block->irq_ctx->gpe_head;
     uacpi_atomic_store_ptr(&block->irq_ctx->gpe_head, block);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     /*
      * The events of this block are only enabled once the initialization is
