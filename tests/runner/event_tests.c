@@ -815,6 +815,52 @@ static void do_test_gpe_handlers(void)
     CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
     CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
 
+    /*
+     * That's only done for whoever gets the event enabled: one that already
+     * is can raise an interrupt by itself, so it's left for its handler.
+     */
+    log.count = 0;
+    log.ret = UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+
+    gpe_set_status(11);
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+    CHECK(log.count == 0);
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(log.count == 1);
+    CHECK_GPE_INFO(UACPI_NULL, 11, GPE_INFO_ENABLED);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+
+    /*
+     * Uninstalling a handler is the exception: the event is disabled for as
+     * long as that takes, so it's polled once that is done even if it has
+     * other users.
+     */
+    log.count = 0;
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 1, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 1));
+
+    gpe_set_status(1);
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 1, log_gpe));
+    flush_work();
+    CHECK(log.count == 0);
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
     // A raw handler is on its own, we don't touch the event in any way
     log.count = 0;
     log.ret = UACPI_INTERRUPT_HANDLED;
