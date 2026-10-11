@@ -225,12 +225,39 @@ void uacpi_kernel_io_unmap(uacpi_handle handle)
         return UACPI_STATUS_OK;                                            \
     }
 
+static bool io_write_failure_is_armed;
+static uacpi_io_addr io_write_failure_addr;
+
+void fake_io_fail_next_write(uacpi_io_addr addr)
+{
+    interface_lock();
+    io_write_failure_is_armed = true;
+    io_write_failure_addr = addr;
+    interface_unlock();
+}
+
+static bool io_write_should_fail(uacpi_io_addr addr)
+{
+    bool should_fail;
+
+    interface_lock();
+    should_fail = io_write_failure_is_armed && addr == io_write_failure_addr;
+    if (should_fail)
+        io_write_failure_is_armed = false;
+    interface_unlock();
+
+    return should_fail;
+}
+
 #define UACPI_IO_WRITE(bits)                                              \
     uacpi_status uacpi_kernel_io_write##bits(                             \
         uacpi_handle handle, uacpi_size offset, uacpi_u##bits in_value    \
     )                                                                     \
     {                                                                     \
         uacpi_io_addr addr = (uacpi_io_addr)((uintptr_t)handle) + offset; \
+                                                                          \
+        if (io_write_should_fail(addr))                                   \
+            return UACPI_STATUS_HARDWARE_TIMEOUT;                         \
                                                                           \
         io_write(addr, &in_value, bits / 8);                              \
         return UACPI_STATUS_OK;                                           \

@@ -282,6 +282,13 @@ void fake_io_set_write_one_to_clear(uacpi_io_addr base, uacpi_size len);
 void fake_io_raise(uacpi_io_addr addr, uint8_t bits);
 void fake_io_lower(uacpi_io_addr addr, uint8_t bits);
 
+/*
+ * Have the next write to the fake IO register at 'addr' fail. The register is
+ * left the way it was, and the write is reported to uACPI as a hardware
+ * timeout.
+ */
+void fake_io_fail_next_write(uacpi_io_addr addr);
+
 // Invoke the handlers that are currently installed for this IRQ
 uacpi_interrupt_ret fake_irq_raise(uacpi_u32 irq);
 
