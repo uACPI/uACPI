@@ -347,6 +347,17 @@ static void region_uninstall_handler(
     }
 
 out:
+    /*
+     * This is done while the region still has its handler, as _REG is what
+     * lets AML know that it's about to lose access to the region, and is
+     * thus its last chance to make use of it.
+     */
+    if ((region->state_flags & UACPI_OP_REGION_STATE_REG_EXECUTED) &&
+        unreg == UNREG_YES) {
+        region_run_reg(node, ACPI_REG_DISCONNECT);
+        region->state_flags &= ~UACPI_OP_REGION_STATE_REG_EXECUTED;
+    }
+
     if (region->state_flags & UACPI_OP_REGION_STATE_ATTACHED) {
         uacpi_region_detach_data detach_data = { 0 };
 
@@ -367,12 +378,6 @@ out:
                 node, "error during handler detach for", ret
             );
         }
-    }
-
-    if ((region->state_flags & UACPI_OP_REGION_STATE_REG_EXECUTED) &&
-        unreg == UNREG_YES) {
-        region_run_reg(node, ACPI_REG_DISCONNECT);
-        region->state_flags &= ~UACPI_OP_REGION_STATE_REG_EXECUTED;
     }
 
     uacpi_address_space_handler_unref(region->handler);
@@ -458,7 +463,7 @@ static uacpi_iteration_decision do_install_or_uninstall_handler(
                 return UACPI_ITERATION_DECISION_CONTINUE;
             }
 
-            region_uninstall_handler(node, UNREG_NO);
+            region_uninstall_handler(node, UNREG_YES);
         }
 
         return UACPI_ITERATION_DECISION_CONTINUE;
@@ -768,7 +773,7 @@ uacpi_status uacpi_uninstall_address_space_handler(
     // Are we the last linked handler?
     if (prev_handler == handler) {
         handlers->head = handler->next;
-        goto out_unreg;
+        goto out;
     }
 
     // Nope, we're somewhere in the middle. Do a search.
@@ -780,10 +785,6 @@ uacpi_status uacpi_uninstall_address_space_handler(
 
         prev_handler = prev_handler->next;
     }
-
-out_unreg:
-    if (space_needs_reg(space))
-        reg_or_unreg_all_opregions(device_node, space, ACPI_REG_DISCONNECT);
 
 out:
     if (handler != UACPI_NULL)
