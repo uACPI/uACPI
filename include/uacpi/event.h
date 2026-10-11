@@ -291,6 +291,8 @@ uacpi_status uacpi_clear_gpe(
  * - 'gpe_device' may be null for GPEs managed by \_GPE
  * - Both may be called from an interrupt context, which includes the handler
  *   of the event itself
+ * - An event doesn't stay suspended once a native handler is installed to it
+ *   or uninstalled from it
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_suspend_gpe(

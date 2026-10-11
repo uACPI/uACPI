@@ -1378,6 +1378,24 @@ static void gpe_set_handler(
 }
 
 /*
+ * An event that was claimed by the interrupt handler stays blocked until it's
+ * restored, which is up to whoever is handling it. If the handler is replaced
+ * while that is still the case there's nobody left to do that, and it's not
+ * something that the next handler would know to do either, so the claim has
+ * to go along with the handler that it was made for.
+ *
+ * This is only safe to do for an event that is quiescent.
+ */
+static void gpe_drop_claim(struct gp_event *event)
+{
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    event->block_interrupts = UACPI_FALSE;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+}
+
+/*
  * An event that is configured for implicit notify might be in use at the
  * moment: its work looks at the handler with the namespace locked, and the
  * interrupt handler does so with the GPE state lock held. We can't wait for
@@ -2189,6 +2207,7 @@ static uacpi_status do_install_gpe_handler(
     }
 
     gpe_set_handler(event, native_handler, type, triggering);
+    gpe_drop_claim(event);
 
     if (did_mask)
         gpe_mask_unmask(event, UACPI_FALSE);
@@ -2265,6 +2284,7 @@ uacpi_status uacpi_uninstall_gpe_handler(
         native_handler->previous_handler_type,
         native_handler->previous_triggering
     );
+    gpe_drop_claim(event);
 
     if ((event->handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
          event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) &&
