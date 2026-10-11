@@ -796,5 +796,41 @@ void test_address_spaces(void)
     if (!out_value)
         error("OEM address space disconnect test failed");
 
+    /*
+     * A region is left with no handler once the one that was closer to it is
+     * uninstalled, even if there's another one further up. There's nothing
+     * for it to be connected to in that case, no matter who asks for it.
+     */
+    st = uacpi_install_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_IPMI, ipmi_handler, NULL
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CREG", true);
+    check_connected(arg, "CRG2", true);
+
+    st = uacpi_install_address_space_handler(
+        ipmi_device, UACPI_ADDRESS_SPACE_IPMI, ipmi_handler, NULL
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_uninstall_address_space_handler(
+        ipmi_device, UACPI_ADDRESS_SPACE_IPMI, ipmi_handler
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CRG2", false);
+
+    st = uacpi_reg_all_opregions(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_IPMI
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CREG", true);
+    check_connected(arg, "CRG2", false);
+
+    st = uacpi_uninstall_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_IPMI, ipmi_handler
+    );
+    ensure_ok_status(st);
+    check_connected(arg, "CREG", false);
+
     uacpi_object_unref(arg);
 }
