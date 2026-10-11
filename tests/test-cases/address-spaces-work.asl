@@ -497,6 +497,54 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
     }
 
     /*
+     * This one accesses the region while it's still being attached, which is
+     * what gets it attached once more, before the first attach is complete.
+     */
+    Device (OEM6) {
+        Name (_HID, "TEST0008")
+
+        OperationRegion (REG6, 0x80, 0, 1)
+        Field (REG6, ByteAcc, NoLock, Preserve) {
+            FLD6, 8,
+        }
+
+        Name (ATTS, 0)
+        Name (DETS, 0)
+
+        Method (ATCH) {
+            ATTS++
+
+            If (ATTS == 1) {
+                Local0 = FLD6
+            }
+        }
+
+        Method (DTCH) {
+            DETS++
+        }
+
+        Method (READ) {
+            Return (FLD6)
+        }
+    }
+
+    /*
+     * To be evaluated after FLD6 was accessed. Only one of the two attaches
+     * gets to stay, the other one is undone right away.
+     *
+     * Return -> Ones on success, Zero on failure
+     */
+    Method (COE6) {
+        If (\OEM6.ATTS != 2 || \OEM6.DETS != 1) {
+            Printf("REG6 was attached %o time(s) and detached %o time(s)",
+                   \OEM6.ATTS, \OEM6.DETS)
+            Return (Zero)
+        }
+
+        Return (Ones)
+    }
+
+    /*
      * This one stays around until the handler is uninstalled, and makes use of
      * its region one last time as it's told that it's being disconnected.
      */

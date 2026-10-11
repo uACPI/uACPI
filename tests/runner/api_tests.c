@@ -696,6 +696,20 @@ void test_address_spaces(void)
     if (!out_value)
         error("OEM address space attach test failed");
 
+    /*
+     * A region that is accessed by its handler while it's still being
+     * attached ends up attached twice, out of which only one is kept.
+     */
+    st = uacpi_eval_simple_integer(NULL, "\\OEM6.READ", &out_value);
+    ensure_ok_status(st);
+    if (out_value != 0x5A)
+        error("unexpected value of a region that was attached twice");
+
+    st = uacpi_eval_simple_integer(NULL, "COE6", &out_value);
+    ensure_ok_status(st);
+    if (!out_value)
+        error("OEM address space double attach test failed");
+
     // Give one of the IPMI regions a handler that is closer to it
     st = uacpi_namespace_node_find(NULL, "\\IPM2", &ipmi_device);
     ensure_ok_status(st);
