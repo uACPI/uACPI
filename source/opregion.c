@@ -319,6 +319,26 @@ uacpi_status uacpi_opregion_attach(uacpi_namespace_node *node)
         goto out;
     }
 
+    if (uacpi_unlikely(region->state_flags & UACPI_OP_REGION_STATE_ATTACHED)) {
+        uacpi_region_detach_data detach_data = { 0 };
+
+        /*
+         * The region was attached once more in the meantime, which is what
+         * happens if the handler ends up accessing the region that it's still
+         * in the middle of attaching. It only gets to be attached once, and
+         * that one was there first, so this is the one to be undone.
+         */
+        detach_data.region_node = node;
+        detach_data.region_context = attach_data.out_region_context;
+        detach_data.handler_context = handler->user_context;
+
+        uacpi_namespace_write_unlock();
+        handler->callback(UACPI_REGION_OP_DETACH, &detach_data);
+        uacpi_namespace_write_lock();
+
+        goto out;
+    }
+
     region->state_flags |= UACPI_OP_REGION_STATE_ATTACHED;
     region->user_context = attach_data.out_region_context;
 
