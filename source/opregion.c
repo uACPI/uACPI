@@ -629,6 +629,15 @@ static uacpi_iteration_decision do_run_reg(
         return UACPI_ITERATION_DECISION_CONTINUE;
 
     /*
+     * A region that has no handler is not accessible, so there's nothing for
+     * it to be connected to. The same goes for one that is in the middle of
+     * being disconnected, as its handler is about to be gone.
+     */
+    if (region->handler == UACPI_NULL ||
+        (region->state_flags & UACPI_OP_REGION_STATE_DISCONNECTING))
+        return UACPI_ITERATION_DECISION_CONTINUE;
+
+    /*
      * The _REG method is free to do whatever it wants to the region, which
      * includes getting rid of it, e.g. by overwriting it via CopyObject. Keep
      * it alive until we're done with it.
