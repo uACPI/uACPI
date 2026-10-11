@@ -568,6 +568,15 @@ static uacpi_iteration_decision do_install_or_uninstall_handler(
 
             region_install_handler(region, ctx->handler);
         } else {
+            /*
+             * A region that has no handler is not ours to uninstall, and is
+             * nothing to complain about either: it's one that was left this
+             * way by a closer handler that is gone by now, or one that is in
+             * the middle of being detached by whoever has called us.
+             */
+            if (region->handler == UACPI_NULL)
+                return UACPI_ITERATION_DECISION_CONTINUE;
+
             if (uacpi_unlikely(region->handler != ctx->handler)) {
                 uacpi_trace_region_error(
                     node, "handler mismatch for",
