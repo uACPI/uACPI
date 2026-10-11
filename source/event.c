@@ -1077,7 +1077,8 @@ static uacpi_status find_or_create_gpe_interrupt_ctx(
 
 /*
  * Makes sure the context is no longer used by anyone, it's up to the caller to
- * free it once that's safe to do.
+ * free it once that's safe to do. The event lock is dropped while the handler
+ * of the context is being uninstalled.
  */
 static void unlink_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
 {
@@ -1098,11 +1099,19 @@ static void unlink_gpe_interrupt_ctx(struct gpe_interrupt_ctx *ctx)
     /*
      * This might have to wait for the handler to return, and the handler is
      * free to take the lock, so it can't be done with it held.
+     *
+     * The same goes for the event lock: the handler might be executing the
+     * work that it has scheduled right away, and that is free to end up
+     * waiting for it, e.g. by loading a table. Everything that the handler
+     * is still able to get to stays around until the caller has waited for
+     * it, so there's nothing for it to break in the meantime.
      */
     if (ctx->irq != g_uacpi_rt_ctx.fadt.sci_int) {
+        uacpi_recursive_lock_release(&g_event_lock);
         uacpi_kernel_uninstall_interrupt_handler(
             handle_gpes, ctx->irq_handle
         );
+        uacpi_recursive_lock_acquire(&g_event_lock);
     }
 }
 
