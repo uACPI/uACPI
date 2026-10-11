@@ -685,10 +685,8 @@ static uacpi_interrupt_ret dispatch_gpe(
     uacpi_cpu_flags flags;
 
     /*
-     * The handler of an event is set up with no regard for us, as the event
-     * is expected to be quiescent at the time. What tells us that it's ready
-     * is the event getting enabled, which is always done with this lock held,
-     * so taking it is what guarantees that we see the handler in its entirety
+     * The handler of an event is always replaced with this lock held, so
+     * taking it is what guarantees that we see the handler in its entirety
      * even if it was set up by a different CPU just now.
      */
     flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
@@ -1194,6 +1192,25 @@ struct gpe_match_ctx {
     uacpi_bool post_dynamic_table_load;
 };
 
+/*
+ * The interrupt handler looks at the handler of an event, as well as at how
+ * it's triggered, with the GPE state lock held, so that's what both have to
+ * be replaced under for it to see them in their entirety.
+ */
+static void gpe_set_handler(
+    struct gp_event *event, uacpi_handle handler, enum gpe_handler_type type,
+    uacpi_u8 triggering
+)
+{
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    event->any_handler = handler;
+    event->handler_type = type;
+    event->triggering = triggering;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+}
+
 static uacpi_iteration_decision do_match_gpe_methods(
     uacpi_handle opaque, uacpi_namespace_node *node, uacpi_u32 depth
 )
@@ -1240,8 +1257,7 @@ static uacpi_iteration_decision do_match_gpe_methods(
        gpe_release_implicit_notify_handlers(event);
        UACPI_FALLTHROUGH;
     case GPE_HANDLER_TYPE_NONE:
-        event->aml_handler = node;
-        event->handler_type = GPE_HANDLER_TYPE_AML_HANDLER;
+        gpe_set_handler(event, node, GPE_HANDLER_TYPE_AML_HANDLER, triggering);
         break;
 
     case GPE_HANDLER_TYPE_AML_HANDLER:
@@ -1267,7 +1283,6 @@ static uacpi_iteration_decision do_match_gpe_methods(
 
     uacpi_trace("assigned GPE(%02X) -> %.4s",
                 (uacpi_u32)idx, node->name.text);
-    event->triggering = triggering;
     ctx->matched_count++;
 
     return UACPI_ITERATION_DECISION_CONTINUE;
@@ -1952,9 +1967,7 @@ static uacpi_status do_install_gpe_handler(
         }
     }
 
-    event->native_handler = native_handler;
-    event->handler_type = type;
-    event->triggering = triggering;
+    gpe_set_handler(event, native_handler, type, triggering);
 
     if (did_mask)
         gpe_mask_unmask(event, UACPI_FALSE);
@@ -2026,9 +2039,11 @@ uacpi_status uacpi_uninstall_gpe_handler(
     if (uacpi_unlikely_error(ret))
         goto out;
 
-    event->aml_handler = native_handler->previous_handler;
-    event->triggering = native_handler->previous_triggering;
-    event->handler_type = native_handler->previous_handler_type;
+    gpe_set_handler(
+        event, native_handler->previous_handler,
+        native_handler->previous_handler_type,
+        native_handler->previous_triggering
+    );
 
     if ((event->handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
          event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) &&
@@ -2270,6 +2285,7 @@ uacpi_status uacpi_setup_gpe_for_wake(
     uacpi_status ret;
     struct gp_event *event;
     uacpi_bool did_mask;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
@@ -2304,8 +2320,10 @@ uacpi_status uacpi_setup_gpe_for_wake(
     if (wake_device != UACPI_NULL) {
         switch (event->handler_type) {
         case GPE_HANDLER_TYPE_NONE:
-            event->handler_type = GPE_HANDLER_TYPE_IMPLICIT_NOTIFY;
-            event->triggering = UACPI_GPE_TRIGGERING_LEVEL;
+            gpe_set_handler(
+                event, UACPI_NULL, GPE_HANDLER_TYPE_IMPLICIT_NOTIFY,
+                UACPI_GPE_TRIGGERING_LEVEL
+            );
             break;
 
         case GPE_HANDLER_TYPE_AML_HANDLER:
@@ -2370,7 +2388,10 @@ uacpi_status uacpi_setup_gpe_for_wake(
         }
     }
 
+    // This shares a byte with the above, so the same goes for it as well
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     event->wake = UACPI_TRUE;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
 out_unmask:
     if (did_mask)
