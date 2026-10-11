@@ -386,19 +386,36 @@ struct gp_event {
     struct gpe_register *reg;
     uacpi_u16 idx;
 
-    // "reference count" of the number of times this event has been enabled
-    uacpi_u8 num_users;
-
     uacpi_u8 handler_type : 3;
     uacpi_u8 triggering : 1;
     uacpi_u8 wake : 1;
-    uacpi_u8 block_interrupts : 1;
+
+    /*
+     * Everything below is the state of the event, which unlike the above is
+     * also modified by the interrupt handler & the deferred work, neither of
+     * which is able to take the event lock. It's protected by the GPE state
+     * spinlock instead, and is the reason why none of it is a part of the
+     * bitfield above.
+     */
+
+    // "reference count" of the number of times this event has been enabled
+    uacpi_u8 num_users;
+
+    /*
+     * Set for an event that is to stay disabled no matter how many users it
+     * has: one that is being handled at the moment, or one that was suspended.
+     */
+    uacpi_bool block_interrupts;
 };
 
 struct gpe_register {
     uacpi_mapped_gas status;
     uacpi_mapped_gas enable;
 
+    /*
+     * The masks below, as well as the enable register itself, are protected
+     * by the GPE state spinlock, see the note in struct gp_event.
+     */
     uacpi_u8 runtime_mask;
     uacpi_u8 wake_mask;
     uacpi_u8 masked_mask;
@@ -450,13 +467,15 @@ enum gpe_state {
     GPE_STATE_DISABLED,
 };
 
-static uacpi_status set_gpe_state(struct gp_event *event, enum gpe_state state)
+// Must be called with the GPE state lock held
+static uacpi_status set_gpe_state_unlocked(
+    struct gp_event *event, enum gpe_state state
+)
 {
     uacpi_status ret;
     struct gpe_register *reg = event->reg;
     uacpi_u64 enable_mask;
     uacpi_u8 event_bit;
-    uacpi_cpu_flags flags;
 
     event_bit = gpe_get_mask(event);
     if (state != GPE_STATE_DISABLED && (reg->masked_mask & event_bit))
@@ -469,11 +488,9 @@ static uacpi_status set_gpe_state(struct gp_event *event, enum gpe_state state)
         state = GPE_STATE_ENABLED;
     }
 
-    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
-
     ret = uacpi_gas_read_mapped(&reg->enable, &enable_mask);
     if (uacpi_unlikely_error(ret))
-        goto out;
+        return ret;
 
     switch (state) {
     case GPE_STATE_ENABLED:
@@ -483,13 +500,21 @@ static uacpi_status set_gpe_state(struct gp_event *event, enum gpe_state state)
         enable_mask &= ~event_bit;
         break;
     default:
-        ret = UACPI_STATUS_INVALID_ARGUMENT;
-        goto out;
+        return UACPI_STATUS_INVALID_ARGUMENT;
     }
 
-    ret = uacpi_gas_write_mapped(&reg->enable, enable_mask);
-out:
+    return uacpi_gas_write_mapped(&reg->enable, enable_mask);
+}
+
+static uacpi_status set_gpe_state(struct gp_event *event, enum gpe_state state)
+{
+    uacpi_status ret;
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    ret = set_gpe_state_unlocked(event, state);
     uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
     return ret;
 }
 
@@ -500,7 +525,8 @@ static uacpi_status clear_gpe(struct gp_event *event)
     return uacpi_gas_write_mapped(&reg->status, gpe_get_mask(event));
 }
 
-static uacpi_status restore_gpe(struct gp_event *event)
+// Must be called with the GPE state lock held
+static uacpi_status restore_gpe_unlocked(struct gp_event *event)
 {
     uacpi_status ret;
 
@@ -510,8 +536,20 @@ static uacpi_status restore_gpe(struct gp_event *event)
             return ret;
     }
 
-    ret = set_gpe_state(event, GPE_STATE_ENABLED_CONDITIONALLY);
+    ret = set_gpe_state_unlocked(event, GPE_STATE_ENABLED_CONDITIONALLY);
     event->block_interrupts = UACPI_FALSE;
+
+    return ret;
+}
+
+static uacpi_status restore_gpe(struct gp_event *event)
+{
+    uacpi_status ret;
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    ret = restore_gpe_unlocked(event);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     return ret;
 }
@@ -612,6 +650,7 @@ static uacpi_interrupt_ret dispatch_gpe(
 {
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
+    uacpi_cpu_flags flags;
 
     /*
      * For raw handlers we don't do any management whatsoever, we just let the
@@ -624,14 +663,17 @@ static uacpi_interrupt_ret dispatch_gpe(
         );
     }
 
-    ret = set_gpe_state(event, GPE_STATE_DISABLED);
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    ret = set_gpe_state_unlocked(event, GPE_STATE_DISABLED);
+    if (uacpi_likely_success(ret))
+        event->block_interrupts = UACPI_TRUE;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
     if (uacpi_unlikely_error(ret)) {
         uacpi_error("failed to disable GPE(%02X): %s",
                     event->idx, uacpi_status_to_string(ret));
         return int_ret;
     }
-
-    event->block_interrupts = UACPI_TRUE;
 
     if (event->triggering == UACPI_GPE_TRIGGERING_EDGE) {
         ret = clear_gpe(event);
@@ -688,12 +730,18 @@ static uacpi_interrupt_ret detect_gpes(struct gpe_block *block)
     struct gp_event *event;
     uacpi_u64 status, enable;
     uacpi_size i, j;
+    uacpi_bool is_unused;
+    uacpi_cpu_flags flags;
 
     while (block) {
         for (i = 0; i < block->num_registers; ++i) {
             reg = &block->registers[i];
 
-            if (!reg->runtime_mask && !reg->wake_mask)
+            flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+            is_unused = !reg->runtime_mask && !reg->wake_mask;
+            uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+            if (is_unused)
                 continue;
 
             ret = uacpi_gas_read_mapped(&reg->status, &status);
@@ -844,27 +892,35 @@ static uacpi_status gpe_block_apply_action(
     uacpi_size i;
     uacpi_u8 value;
     struct gpe_register *reg;
+    uacpi_cpu_flags flags;
 
     for (i = 0; i < block->num_registers; ++i) {
         reg = &block->registers[i];
 
+        if (action == GPE_BLOCK_ACTION_CLEAR_ALL) {
+            ret = uacpi_gas_write_mapped(&reg->status, 0xFF);
+            if (uacpi_unlikely_error(ret))
+                return ret;
+            continue;
+        }
+
+        /*
+         * This is one critical section on purpose: the mask that we pick must
+         * still be the one that is in effect by the time it's written to the
+         * register.
+         */
+        flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+
         switch (action) {
-        case GPE_BLOCK_ACTION_DISABLE_ALL:
-            value = 0;
-            break;
         case GPE_BLOCK_ACTION_ENABLE_ALL_FOR_RUNTIME:
             value = reg->runtime_mask;
             break;
         case GPE_BLOCK_ACTION_ENABLE_ALL_FOR_WAKE:
             value = reg->wake_mask;
             break;
-        case GPE_BLOCK_ACTION_CLEAR_ALL:
-            ret = uacpi_gas_write_mapped(&reg->status, 0xFF);
-            if (uacpi_unlikely_error(ret))
-                return ret;
-            continue;
         default:
-            return UACPI_STATUS_INVALID_ARGUMENT;
+            value = 0;
+            break;
         }
 
         reg->current_mask = value;
@@ -878,6 +934,8 @@ static uacpi_status gpe_block_apply_action(
             value &= ~reg->masked_mask;
 
         ret = uacpi_gas_write_mapped(&reg->enable, value);
+        uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
         if (uacpi_unlikely_error(ret))
             return ret;
     }
@@ -893,6 +951,7 @@ static void gpe_block_mask_safe(struct gpe_block *block)
 {
     uacpi_size i;
     struct gpe_register *reg;
+    uacpi_cpu_flags flags;
 
     /*
      * 1. Mask the GPEs, this makes sure their state is no longer modifyable
@@ -901,8 +960,10 @@ static void gpe_block_mask_safe(struct gpe_block *block)
      * are enabled at the moment: we drop the event lock while waiting below,
      * and nobody should be able to enable an event in the meantime.
      */
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     for (i = 0; i < block->num_registers; ++i)
         block->registers[i].masked_mask = 0xFF;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     for (i = 0; i < block->num_registers; ++i) {
         reg = &block->registers[i];
@@ -1353,7 +1414,8 @@ static void gp_event_toggle_masks(struct gp_event *event, uacpi_bool set_on)
     reg->current_mask = reg->runtime_mask;
 }
 
-static uacpi_status gpe_remove_user(struct gp_event *event)
+// Must be called with the GPE state lock held
+static uacpi_status gpe_remove_user_unlocked(struct gp_event *event)
 {
     uacpi_status ret = UACPI_STATUS_OK;
 
@@ -1363,12 +1425,24 @@ static uacpi_status gpe_remove_user(struct gp_event *event)
     if (--event->num_users == 0) {
         gp_event_toggle_masks(event, UACPI_FALSE);
 
-        ret = set_gpe_state(event, GPE_STATE_DISABLED);
+        ret = set_gpe_state_unlocked(event, GPE_STATE_DISABLED);
         if (uacpi_unlikely_error(ret)) {
             gp_event_toggle_masks(event, UACPI_TRUE);
             event->num_users++;
         }
     }
+
+    return ret;
+}
+
+static uacpi_status gpe_remove_user(struct gp_event *event)
+{
+    uacpi_status ret;
+    uacpi_cpu_flags flags;
+
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    ret = gpe_remove_user_unlocked(event);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
     return ret;
 }
@@ -1384,11 +1458,16 @@ static uacpi_status gpe_add_user(
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
+    uacpi_cpu_flags flags;
 
     *out_is_first = UACPI_FALSE;
 
-    if (uacpi_unlikely(event->num_users == 0xFF))
-        return UACPI_STATUS_INVALID_ARGUMENT;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+
+    if (uacpi_unlikely(event->num_users == 0xFF)) {
+        ret = UACPI_STATUS_INVALID_ARGUMENT;
+        goto out;
+    }
 
     if (++event->num_users == 1) {
         if (clear_if_first == EVENT_CLEAR_IF_FIRST_YES)
@@ -1396,16 +1475,18 @@ static uacpi_status gpe_add_user(
 
         gp_event_toggle_masks(event, UACPI_TRUE);
 
-        ret = set_gpe_state(event, GPE_STATE_ENABLED);
+        ret = set_gpe_state_unlocked(event, GPE_STATE_ENABLED);
         if (uacpi_unlikely_error(ret)) {
             gp_event_toggle_masks(event, UACPI_FALSE);
             event->num_users--;
-            return ret;
+            goto out;
         }
 
         *out_is_first = UACPI_TRUE;
     }
 
+out:
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
     return ret;
 }
 
@@ -1440,48 +1521,60 @@ static uacpi_status gpe_mask_unmask(
     struct gp_event *event, uacpi_bool should_mask
 )
 {
+    uacpi_status ret = UACPI_STATUS_OK;
     struct gpe_register *reg;
     uacpi_u8 mask;
+    uacpi_bool is_masked;
+    uacpi_cpu_flags flags;
 
     reg = event->reg;
     mask = gpe_get_mask(event);
 
-    if (should_mask) {
-        if (reg->masked_mask & mask)
-            return UACPI_STATUS_INVALID_ARGUMENT;
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
 
-        // 1. Mask the GPE, this makes sure its state is no longer modifyable
-        reg->masked_mask |= mask;
-
-        /*
-         * 2. Wait for in-flight work & IRQs to finish, these might already
-         *    be past the respective "if (masked)" check and therefore may
-         *    try to re-enable a masked GPE.
-         */
-        wait_for_work_completion_unlocked();
-
-        /*
-         * 3. Now that this GPE's state is unmodifyable and we know that currently
-         *    in-flight IRQs will see the masked state, we can safely disable this
-         *    event knowing it won't be re-enabled by a racing IRQ.
-         */
-        set_gpe_state(event, GPE_STATE_DISABLED);
-
-        /*
-         * 4. Wait for the last possible IRQ to finish, now that this event is
-         *    disabled.
-         */
-        wait_for_work_completion_unlocked();
-
-        return UACPI_STATUS_OK;
+    is_masked = (reg->masked_mask & mask) != 0;
+    if (is_masked == should_mask) {
+        ret = UACPI_STATUS_INVALID_ARGUMENT;
+        goto out;
     }
 
-    if (!(reg->masked_mask & mask))
-        return UACPI_STATUS_INVALID_ARGUMENT;
+    if (!should_mask) {
+        reg->masked_mask &= ~mask;
+        if (!event->block_interrupts && event->num_users)
+            set_gpe_state_unlocked(event, GPE_STATE_ENABLED_CONDITIONALLY);
+    }
 
-    reg->masked_mask &= ~mask;
-    if (!event->block_interrupts && event->num_users)
-        set_gpe_state(event, GPE_STATE_ENABLED_CONDITIONALLY);
+out:
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+    // The rest has to wait for the event to quiesce, so can't be done above
+    if (!should_mask || uacpi_unlikely_error(ret))
+        return ret;
+
+    // 1. Mask the GPE, this makes sure its state is no longer modifyable
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    reg->masked_mask |= mask;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+    /*
+     * 2. Wait for in-flight work & IRQs to finish, these might already
+     *    be past the respective "if (masked)" check and therefore may
+     *    try to re-enable a masked GPE.
+     */
+    wait_for_work_completion_unlocked();
+
+    /*
+     * 3. Now that this GPE's state is unmodifyable and we know that currently
+     *    in-flight IRQs will see the masked state, we can safely disable this
+     *    event knowing it won't be re-enabled by a racing IRQ.
+     */
+    set_gpe_state(event, GPE_STATE_DISABLED);
+
+    /*
+     * 4. Wait for the last possible IRQ to finish, now that this event is
+     *    disabled.
+     */
+    wait_for_work_completion_unlocked();
 
     return UACPI_STATUS_OK;
 }
@@ -1499,18 +1592,25 @@ static uacpi_status gpe_mask_unmask(
 static uacpi_bool gpe_mask_safe(struct gp_event *event)
 {
     uacpi_u8 mask;
+    uacpi_bool is_enabled, is_masked;
+    uacpi_cpu_flags flags;
 
     mask = gpe_get_mask(event);
 
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+    is_enabled = (event->reg->current_mask & mask) != 0;
+    is_masked = (event->reg->masked_mask & mask) != 0;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
     // No need to flush or do anything if it's not currently enabled
-    if (!(event->reg->current_mask & mask))
+    if (!is_enabled)
         return UACPI_FALSE;
 
     /*
      * Same if it was already masked by the user: the event is known to be
      * quiescent, and it's not up to us to unmask it once we're done.
      */
-    if (event->reg->masked_mask & mask)
+    if (is_masked)
         return UACPI_FALSE;
 
     gpe_mask_unmask(event, UACPI_TRUE);
@@ -1674,9 +1774,8 @@ static uacpi_status do_install_gpe_handler(
 
     if ((event->handler_type == GPE_HANDLER_TYPE_AML_HANDLER ||
         event->handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY) &&
-        event->num_users != 0) {
+        uacpi_likely_success(gpe_remove_user(event))) {
         native_handler->previously_enabled = UACPI_TRUE;
-        gpe_remove_user(event);
 
         if (uacpi_unlikely(event->triggering != triggering)) {
             uacpi_warn(
@@ -1884,6 +1983,7 @@ static uacpi_status gpe_suspend_resume(
 {
     uacpi_status ret;
     struct gp_event *event;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
@@ -1898,8 +1998,10 @@ static uacpi_status gpe_suspend_resume(
     if (uacpi_unlikely_error(ret))
         goto out;
 
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     event->block_interrupts = state == GPE_STATE_DISABLED;
-    ret = set_gpe_state(event, state);
+    ret = set_gpe_state_unlocked(event, state);
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 out:
     uacpi_recursive_lock_release(&g_event_lock);
     return ret;
@@ -2117,6 +2219,7 @@ static uacpi_status gpe_enable_disable_for_wake(
     struct gp_event *event;
     struct gpe_register *reg;
     uacpi_u8 mask;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
@@ -2139,10 +2242,12 @@ static uacpi_status gpe_enable_disable_for_wake(
     reg = event->reg;
     mask = gpe_get_mask(event);
 
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
     if (enabled)
         reg->wake_mask |= mask;
     else
         reg->wake_mask &= ~mask;
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
 out:
     uacpi_recursive_lock_release(&g_event_lock);
@@ -2698,6 +2803,7 @@ uacpi_status uacpi_gpe_info(
     uacpi_u8 mask;
     uacpi_u64 raw_value;
     uacpi_event_info info = 0;
+    uacpi_cpu_flags flags;
 
     UACPI_ENSURE_INIT_LEVEL_AT_LEAST(UACPI_INIT_LEVEL_NAMESPACE_LOADED);
 
@@ -2718,6 +2824,8 @@ uacpi_status uacpi_gpe_info(
     mask = gpe_get_mask(event);
     reg = event->reg;
 
+    flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+
     if (reg->runtime_mask & mask)
         info |= UACPI_EVENT_INFO_ENABLED;
     if (reg->masked_mask & mask)
@@ -2727,17 +2835,20 @@ uacpi_status uacpi_gpe_info(
 
     ret = uacpi_gas_read_mapped(&reg->enable, &raw_value);
     if (uacpi_unlikely_error(ret))
-        goto out;
+        goto out_unlock;
     if (raw_value & mask)
         info |= UACPI_EVENT_INFO_HW_ENABLED;
 
     ret = uacpi_gas_read_mapped(&reg->status, &raw_value);
     if (uacpi_unlikely_error(ret))
-        goto out;
+        goto out_unlock;
     if (raw_value & mask)
         info |= UACPI_EVENT_INFO_HW_STATUS;
 
     *out_info = info;
+
+out_unlock:
+    uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 out:
     uacpi_recursive_lock_release(&g_event_lock);
     return ret;
