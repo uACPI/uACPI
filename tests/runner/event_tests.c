@@ -583,6 +583,71 @@ static void gpe_latch_once_cleared(
     gpe_set_status(latch->idx);
 }
 
+typedef struct {
+    size_t count;
+
+    // The state of the event at the time that the handler was invoked
+    uacpi_event_info info;
+} gpe_owner_t;
+
+/*
+ * A raw handler is the one in charge of its event: it has to acknowledge it,
+ * and is the only one who is able to keep it from firing again right away.
+ */
+static uacpi_interrupt_ret gpe_ack_and_suspend(
+    uacpi_handle ctx, uacpi_namespace_node *gpe_device, uacpi_u16 idx
+)
+{
+    gpe_owner_t *owner = ctx;
+
+    owner->count++;
+
+    CHECK_OK(uacpi_gpe_info(gpe_device, idx, &owner->info));
+    CHECK_OK(uacpi_clear_gpe(gpe_device, idx));
+    CHECK_OK(uacpi_suspend_gpe(gpe_device, idx));
+
+    return UACPI_INTERRUPT_HANDLED;
+}
+
+// Same as above, but the event is allowed to fire again
+static uacpi_interrupt_ret gpe_ack_and_resume(
+    uacpi_handle ctx, uacpi_namespace_node *gpe_device, uacpi_u16 idx
+)
+{
+    gpe_ack_and_suspend(ctx, gpe_device, idx);
+    CHECK_OK(uacpi_resume_gpe(gpe_device, idx));
+
+    return UACPI_INTERRUPT_HANDLED;
+}
+
+// An event that is only supposed to fire once, so it gets rid of its only user
+static uacpi_interrupt_ret gpe_fire_once(
+    uacpi_handle ctx, uacpi_namespace_node *gpe_device, uacpi_u16 idx
+)
+{
+    gpe_owner_t *owner = ctx;
+
+    owner->count++;
+
+    CHECK_OK(uacpi_gpe_info(gpe_device, idx, &owner->info));
+    CHECK_OK(uacpi_disable_gpe(gpe_device, idx));
+
+    // Not something that it was set up for
+    CHECK_STATUS(
+        uacpi_enable_gpe_for_wake(gpe_device, idx),
+        UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_STATUS(
+        uacpi_disable_gpe_for_wake(gpe_device, idx),
+        UACPI_STATUS_INVALID_ARGUMENT
+    );
+
+    // The event has no users at this point, so this has nothing to enable
+    CHECK_OK(uacpi_finish_handling_gpe(gpe_device, idx));
+
+    return UACPI_INTERRUPT_HANDLED;
+}
+
 /*
  * This is executed twice: with the deferred work executed right by whoever
  * schedules it, and with it handed off to the work threads. All of the state
@@ -594,6 +659,7 @@ static void do_test_gpe_handlers(void)
     uacpi_u64 cnt0, cnt1, cnt80, cntff;
     gpe_log_t log = { 0 };
     gpe_latch_t latch = { 0 };
+    gpe_owner_t owner = { 0 };
 
     gpe = uacpi_namespace_get_predefined(UACPI_PREDEFINED_NAMESPACE_GPE);
 
@@ -1011,6 +1077,84 @@ static void do_test_gpe_handlers(void)
 
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
     CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+
+    /*
+     * A handler is invoked from an interrupt context, and is allowed to manage
+     * its event from there. For a raw one that's the only way to get the event
+     * to stop firing: it's level triggered here, so it stays pending until the
+     * handler clears it.
+     */
+    CHECK_OK(uacpi_install_gpe_handler_raw(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_LEVEL, gpe_ack_and_suspend, &owner
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+
+    gpe_fire(11);
+    CHECK(owner.count == 1);
+    CHECK(owner.info == (GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS));
+    CHECK_GPE_INFO(
+        UACPI_NULL, 11,
+        UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED
+    );
+
+    // The event was suspended by the handler, so it doesn't get to fire
+    gpe_set_status(11);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(owner.count == 1);
+
+    // It's still pending though, so it does as soon as it's resumed
+    CHECK_OK(uacpi_resume_gpe(UACPI_NULL, 11));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(owner.count == 2);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(
+        UACPI_NULL, 11, gpe_ack_and_suspend
+    ));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+
+    // A handler is allowed to resume the event that it has suspended as well
+    CHECK_OK(uacpi_install_gpe_handler_raw(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_LEVEL, gpe_ack_and_resume, &owner
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+
+    gpe_fire(11);
+    CHECK(owner.count == 3);
+    CHECK_GPE_INFO(UACPI_NULL, 11, GPE_INFO_ENABLED);
+
+    gpe_fire(11);
+    CHECK(owner.count == 4);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, gpe_ack_and_resume));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+
+    /*
+     * Same goes for a regular handler, even though its event is disabled &
+     * cleared for it. This one drops the only user of its event, so there's
+     * nothing to enable once it's done.
+     */
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_EDGE, gpe_fire_once, &owner
+    ));
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+
+    gpe_fire(11);
+    CHECK(owner.count == 5);
+    CHECK(
+        owner.info ==
+        (UACPI_EVENT_INFO_HAS_HANDLER | UACPI_EVENT_INFO_ENABLED)
+    );
+    CHECK_GPE_INFO(UACPI_NULL, 11, UACPI_EVENT_INFO_HAS_HANDLER);
+
+    gpe_set_status(11);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(owner.count == 5);
+
+    CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, gpe_fire_once));
     CHECK_GPE_INFO(UACPI_NULL, 11, 0);
 }
 
