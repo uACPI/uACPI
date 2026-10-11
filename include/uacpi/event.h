@@ -320,11 +320,15 @@ uacpi_status uacpi_finish_handling_gpe(
 
 /**
  * Hard mask/umask a general purpose event at 'idx' managed by 'gpe_device'.
- * This is used to permanently silence an event so that further calls to
- * enable/disable as well as suspend/resume get ignored. This might be necessary
- * for GPEs that cause an event storm due to the kernel's inability to properly
- * handle them. The only way to enable a masked event at runtime is by a call
- * to unmask.
+ * This is used to permanently silence an event: it stays disabled no matter
+ * how many times it's enabled or resumed. This might be necessary for GPEs
+ * that cause an event storm due to the kernel's inability to properly handle
+ * them. The only way to enable a masked event at runtime is by a call to
+ * unmask.
+ *
+ * Calls to enable/disable as well as suspend/resume still keep track of what
+ * the event is supposed to be like while it's masked, which is what decides
+ * whether it gets enabled once it's unmasked.
  *
  * Note that the mask only applies while the system is running: an event that
  * is enabled for wake is still going to be enabled by
