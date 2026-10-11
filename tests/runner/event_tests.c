@@ -1156,6 +1156,39 @@ static void do_test_gpe_handlers(void)
     CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 11));
     CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, gpe_fire_once));
     CHECK_GPE_INFO(UACPI_NULL, 11, 0);
+
+    /*
+     * A raw handler is only ever invoked for an interrupt. An edge triggered
+     * event that is already pending by the time it's enabled is still left
+     * for the interrupt handler to find, as nobody else is able to tell
+     * whether it was already taken care of.
+     */
+    log.count = 0;
+    log.ret = UACPI_INTERRUPT_HANDLED;
+
+    CHECK_OK(uacpi_install_gpe_handler_raw(
+        UACPI_NULL, 11, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+
+    latch.idx = 11;
+    latch.is_done = false;
+    fake_io_set_hook(gpe_latch_once_cleared, &latch);
+
+    CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 11));
+    fake_io_set_hook(UACPI_NULL, UACPI_NULL);
+    CHECK(latch.is_done);
+    CHECK(log.count == 0);
+    CHECK_GPE_INFO(
+        UACPI_NULL, 11, GPE_INFO_ENABLED | UACPI_EVENT_INFO_HW_STATUS
+    );
+
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(log.count == 1);
+
+    CHECK_OK(uacpi_clear_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 11));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 11, log_gpe));
+    CHECK_GPE_INFO(UACPI_NULL, 11, 0);
 }
 
 void test_gpe_handlers(void)
