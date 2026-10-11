@@ -883,7 +883,15 @@ static uacpi_interrupt_ret dispatch_gpe(
                 handler_type == GPE_HANDLER_TYPE_IMPLICIT_NOTIFY)
                 gpe_work_done(event);
 
-            set_gpe_state(event, GPE_STATE_ENABLED_CONDITIONALLY);
+            /*
+             * Nobody is going to handle this event, which means that nobody is
+             * going to restore it either, so undo all of the claim.
+             */
+            flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+            set_gpe_state_unlocked(event, GPE_STATE_ENABLED_CONDITIONALLY);
+            event->block_interrupts = UACPI_FALSE;
+            uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
             return int_ret;
         }
     }
