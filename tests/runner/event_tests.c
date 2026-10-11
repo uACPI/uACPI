@@ -1879,6 +1879,24 @@ void test_gpe_blocks(void)
         ), UACPI_STATUS_INVALID_ARGUMENT
     );
 
+    /*
+     * An event is identified by a 16-bit index, so that's as many of them as
+     * a block is able to have. One that has none at all is not a block.
+     */
+    CHECK_STATUS(
+        uacpi_install_gpe_block(
+            gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO, 0,
+            GPE_BLOCK_IRQ
+        ), UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_STATUS(
+        uacpi_install_gpe_block(
+            gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO, 0x2000,
+            GPE_BLOCK_IRQ
+        ), UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_STATUS(uacpi_gpe_info(gpeb, 0, &info), UACPI_STATUS_NOT_FOUND);
+
     CHECK_OK(uacpi_install_gpe_block(
         gpeb, GPEB_ADDRESS, UACPI_ADDRESS_SPACE_SYSTEM_IO,
         GPEB_NUM_REGISTERS, GPE_BLOCK_IRQ
