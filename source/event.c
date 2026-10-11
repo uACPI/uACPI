@@ -409,6 +409,13 @@ struct gp_event {
     uacpi_u8 wake : 1;
 
     /*
+     * Set for an event that has a user that it was given automatically when
+     * the GPE initialization was finalized, which is taken away from it once
+     * it's set up for wake.
+     */
+    uacpi_u8 has_auto_user : 1;
+
+    /*
      * Everything below is the state of the event, which unlike the above is
      * also modified by the interrupt handler & the deferred work, neither of
      * which is able to take the event lock. It's protected by the GPE state
@@ -2099,6 +2106,7 @@ static uacpi_iteration_decision do_initialize_gpe_block(
     uacpi_size i, j, count_enabled = 0;
     struct gp_event *event;
     uacpi_bool is_first_user;
+    uacpi_cpu_flags flags;
 
     // Already taken care of by one of the previous calls
     if (block->finalized)
@@ -2120,6 +2128,11 @@ static uacpi_iteration_decision do_initialize_gpe_block(
                            event->idx, uacpi_status_to_string(ret));
                 continue;
             }
+
+            // This shares a byte with the handler type, see gpe_set_handler
+            flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+            event->has_auto_user = UACPI_TRUE;
+            uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
 
             *poll_blocks |= gpe_needs_polling(event, is_first_user);
             count_enabled++;
@@ -2618,6 +2631,7 @@ uacpi_status uacpi_setup_gpe_for_wake(
 
     if (wake_device != UACPI_NULL) {
         struct gpe_implicit_notify_handler *implicit_handler;
+        uacpi_u8 num_users;
 
         switch (event->handler_type) {
         case GPE_HANDLER_TYPE_IMPLICIT_NOTIFY:
@@ -2671,8 +2685,32 @@ uacpi_status uacpi_setup_gpe_for_wake(
              * An AML handler already exists, we expect it to call Notify() as
              * it sees fit. For now just make sure this event is disabled if it
              * had been enabled automatically previously during initialization.
+             *
+             * This is only done for the user that it was given back then: any
+             * other one belongs to somebody else, and is not ours to take.
              */
-            gpe_remove_user(event);
+            if (!event->has_auto_user)
+                break;
+
+            /*
+             * The user might be gone already if the event was disabled by
+             * someone who has never enabled it, in which case there's nothing
+             * left to take away. Otherwise only forget about it if it was
+             * actually removed.
+             */
+            flags = uacpi_kernel_lock_spinlock(g_gpe_state_slock);
+            num_users = event->num_users;
+            if (uacpi_likely(num_users != 0))
+                ret = gpe_remove_user_unlocked(event);
+            if (uacpi_likely_success(ret))
+                event->has_auto_user = UACPI_FALSE;
+            uacpi_kernel_unlock_spinlock(g_gpe_state_slock, flags);
+
+            if (uacpi_unlikely(num_users == 0))
+                uacpi_warn("inconsistent use count for GPE(%02X)", event->idx);
+
+            if (uacpi_unlikely_error(ret))
+                goto out_unmask;
             break;
 
         case GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW:
