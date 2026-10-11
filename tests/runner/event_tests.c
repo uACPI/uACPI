@@ -760,6 +760,7 @@ static void do_test_gpe_handlers(void)
 {
     uacpi_namespace_node *gpe;
     uacpi_u64 cnt0, cnt1, cnt80, cntff;
+    size_t i;
     gpe_log_t log = { 0 };
     gpe_latch_t latch = { 0 };
     gpe_owner_t owner = { 0 };
@@ -1198,6 +1199,46 @@ static void do_test_gpe_handlers(void)
     // This was ours, the method has been given its own back
     CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
     CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    /*
+     * The user that the method gets back has to fit along with those that
+     * the event has got in the meantime. If it doesn't, the handler stays
+     * where it is, as the method would be left without one otherwise.
+     */
+    log.count = 0;
+    log.ret = UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
+
+    CHECK_OK(uacpi_install_gpe_handler(
+        UACPI_NULL, 1, UACPI_GPE_TRIGGERING_EDGE, log_gpe, &log
+    ));
+
+    for (i = 0; i < 0xFF; ++i)
+        CHECK_OK(uacpi_enable_gpe(UACPI_NULL, 1));
+
+    CHECK_STATUS(
+        uacpi_enable_gpe(UACPI_NULL, 1), UACPI_STATUS_INVALID_ARGUMENT
+    );
+    CHECK_STATUS(
+        uacpi_uninstall_gpe_handler(UACPI_NULL, 1, log_gpe),
+        UACPI_STATUS_INVALID_ARGUMENT
+    );
+
+    gpe_fire(1);
+    CHECK(log.count == 1);
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
+    CHECK_OK(uacpi_uninstall_gpe_handler(UACPI_NULL, 1, log_gpe));
+
+    for (i = 0; i < 0xFE; ++i)
+        CHECK_OK(uacpi_disable_gpe(UACPI_NULL, 1));
+
+    CHECK_GPE_INFO(UACPI_NULL, 1, GPE_INFO_ENABLED);
+
+    gpe_fire(1);
+    flush_work();
+    CHECK(log.count == 1);
+    CHECK(eval_integer("\\_GPE.CNT1") == ++cnt1);
 
     // A raw handler is on its own, we don't touch the event in any way
     log.count = 0;
