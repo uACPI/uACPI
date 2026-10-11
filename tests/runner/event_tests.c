@@ -1270,6 +1270,34 @@ static uacpi_interrupt_ret log_fixed_event(uacpi_handle ctx)
     return UACPI_INTERRUPT_HANDLED;
 }
 
+typedef struct {
+    uacpi_fixed_event event;
+    size_t count;
+
+    // Whether the event is allowed to fire again once it's been handled
+    bool rearm;
+
+    // The state of the event at the time that the handler was invoked
+    uacpi_event_info info;
+} fixed_owner_t;
+
+// A handler is invoked from an interrupt context, and manages its event there
+static uacpi_interrupt_ret fixed_event_manage_self(uacpi_handle ctx)
+{
+    fixed_owner_t *owner = ctx;
+
+    owner->count++;
+
+    CHECK_OK(uacpi_fixed_event_info(owner->event, &owner->info));
+    CHECK_OK(uacpi_clear_fixed_event(owner->event));
+    CHECK_OK(uacpi_disable_fixed_event(owner->event));
+
+    if (owner->rearm)
+        CHECK_OK(uacpi_enable_fixed_event(owner->event));
+
+    return UACPI_INTERRUPT_HANDLED;
+}
+
 static void fixed_event_set_status(uacpi_u16 mask)
 {
     fake_io_raise(FAKE_PM1A_EVT_BLK, (uint8_t)(mask & 0xFF));
@@ -1279,6 +1307,7 @@ static void fixed_event_set_status(uacpi_u16 mask)
 void test_fixed_events(void)
 {
     fixed_log_t power = { 0 }, rtc = { 0 };
+    fixed_owner_t owner = { 0 };
 
     CHECK_STATUS(
         uacpi_install_fixed_event_handler(
@@ -1370,6 +1399,46 @@ void test_fixed_events(void)
     CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
     CHECK(power.count == 3);
     CHECK_OK(uacpi_clear_fixed_event(UACPI_FIXED_EVENT_POWER_BUTTON));
+
+    /*
+     * An event that is only supposed to fire once: its handler disables it,
+     * which is something that it's allowed to do right from the interrupt
+     * context that it's invoked in.
+     */
+    owner.event = UACPI_FIXED_EVENT_SLEEP_BUTTON;
+    CHECK_OK(uacpi_install_fixed_event_handler(
+        UACPI_FIXED_EVENT_SLEEP_BUTTON, fixed_event_manage_self, &owner
+    ));
+
+    fixed_event_set_status(ACPI_PM1_STS_SLPBTN_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(owner.count == 1);
+    CHECK(owner.info == FIXED_INFO_ENABLED);
+    CHECK_FIXED_INFO(
+        UACPI_FIXED_EVENT_SLEEP_BUTTON, UACPI_EVENT_INFO_HAS_HANDLER
+    );
+
+    fixed_event_set_status(ACPI_PM1_STS_SLPBTN_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_NOT_HANDLED);
+    CHECK(owner.count == 1);
+
+    // It's still pending, so it fires as soon as it's enabled again
+    owner.rearm = true;
+    CHECK_OK(uacpi_enable_fixed_event(UACPI_FIXED_EVENT_SLEEP_BUTTON));
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(owner.count == 2);
+
+    // The handler has enabled the event by itself this time around
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_SLEEP_BUTTON, FIXED_INFO_ENABLED);
+
+    fixed_event_set_status(ACPI_PM1_STS_SLPBTN_STS_MASK);
+    CHECK(fake_irq_raise(FAKE_SCI_IRQ) == UACPI_INTERRUPT_HANDLED);
+    CHECK(owner.count == 3);
+
+    CHECK_OK(uacpi_uninstall_fixed_event_handler(
+        UACPI_FIXED_EVENT_SLEEP_BUTTON
+    ));
+    CHECK_FIXED_INFO(UACPI_FIXED_EVENT_SLEEP_BUTTON, 0);
 
     /*
      * The handler of the RTC is left in place on purpose, it's expected to
