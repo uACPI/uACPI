@@ -159,6 +159,77 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
             Return (Zero)
         }
 
+        /*
+         * A PCC field is only supposed to be accessed one byte at a time,
+         * which makes the command four writes. It's only sent once all of
+         * them are done, which the handler keeps count of for us.
+         */
+        Field (GPOP, ByteAcc, NoLock, Preserve)
+        {
+            Offset(8),
+            CMDB, 32,
+            SNDS, 8,
+        }
+
+        CMDB = 0xDEADBEEF
+
+        If (CMDB != 0xBEEFDEAD) {
+            Printf ("Unexpected CMDB value %o", CMDB)
+            Return (Zero)
+        }
+
+        If (SNDS != 2) {
+            Printf ("Unexpected number of commands sent %o", SNDS)
+            Return (Zero)
+        }
+
+        /*
+         * The command doesn't have to be written in its entirety either, a
+         * field that only covers the first byte of it is just as good. The
+         * rest of it is whatever was there before, which the handler is
+         * aware of.
+         */
+        Field (GPOP, ByteAcc, NoLock, Preserve)
+        {
+            Offset(8),
+            CMDL, 8,
+        }
+
+        CMDL = 0xEF
+
+        If (CMDB != 0xFEEDFACE) {
+            Printf ("Unexpected CMDB value %o", CMDB)
+            Return (Zero)
+        }
+
+        If (SNDS != 3) {
+            Printf ("Unexpected number of commands sent %o", SNDS)
+            Return (Zero)
+        }
+
+        /*
+         * Same goes for a field that is wider than the command. This one
+         * takes up the byte that the handler keeps count in as well, so
+         * that's back to zero by the time that the command is sent.
+         */
+        Field (GPOP, ByteAcc, NoLock, Preserve)
+        {
+            Offset(8),
+            CMDW, 48,
+        }
+
+        CMDW = 0xDEADBEEF
+
+        If (CMDB != 0xBEEFDEAD) {
+            Printf ("Unexpected CMDB value %o", CMDB)
+            Return (Zero)
+        }
+
+        If (SNDS != 1) {
+            Printf ("Unexpected number of commands sent %o", SNDS)
+            Return (Zero)
+        }
+
         Return (Ones)
     }
 

@@ -257,10 +257,22 @@ static uacpi_status pcc_handler(uacpi_region_op op, uacpi_handle op_data)
     CHECK_STRING(rw_data->buffer.const_text, "HELLO");
 
     memcpy(&x, rw_data->buffer.bytes + 8, sizeof(x));
-    CHECK_VALUE(x, 0xDEADBEEF);
 
-    x = 0xBEEFDEAD;
+    /*
+     * The second one is what the response to the first one turns into once
+     * the first byte of it is overwritten with that of the command.
+     */
+    if (x == 0xDEADBEEF) {
+        x = 0xBEEFDEAD;
+    } else {
+        CHECK_VALUE(x, 0xBEEFDEEF);
+        x = 0xFEEDFACE;
+    }
+
     memcpy(rw_data->buffer.bytes + 8, &x, sizeof(x));
+
+    // The number of commands sent so far, which is right past the command
+    rw_data->buffer.bytes[12]++;
 
     return UACPI_STATUS_OK;
 }
