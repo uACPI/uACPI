@@ -998,6 +998,37 @@ static uacpi_bool space_needs_bounds_checking(uacpi_address_space space)
         space != UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO;
 }
 
+/*
+ * A command is sent over a PCC subspace as soon as its command field is
+ * written, which is any field that starts where the command does: it doesn't
+ * have to be as wide, nor is it limited to it.
+ *
+ * A field is written one access at a time though, and a PCC one is only
+ * supposed to be accessed byte by byte, so what was written is not all there
+ * until the last access of the field. That's the only one to send it for.
+ */
+#define PCC_COMMAND_OFFSET 8
+#define PCC_COMMAND_SIZE 4
+
+static uacpi_bool pcc_write_completes_command(
+    uacpi_field_unit *field, uacpi_u32 offset
+)
+{
+    uacpi_u32 access_bits, last_bit, last_offset;
+
+    if (field->byte_offset < PCC_COMMAND_OFFSET ||
+        field->byte_offset >= PCC_COMMAND_OFFSET + PCC_COMMAND_SIZE)
+        return UACPI_FALSE;
+
+    access_bits = field->access_width_bytes * 8;
+    last_bit = field->bit_offset_within_first_byte + field->bit_length - 1;
+
+    last_offset = field->byte_offset;
+    last_offset += (last_bit / access_bits) * field->access_width_bytes;
+
+    return offset == last_offset;
+}
+
 uacpi_status uacpi_dispatch_opregion_io(
     uacpi_field_unit *field, uacpi_u32 offset, uacpi_region_op op,
     union uacpi_opregion_io_data data
@@ -1092,7 +1123,7 @@ uacpi_status uacpi_dispatch_opregion_io(
          * the shared memory region starts with, so the offset of every field
          * is 4 bytes less than what it is there.
          */
-        if (offset >= 8 && offset < 12) {
+        if (pcc_write_completes_command(field, offset)) {
             uacpi_memzero(&handler_data.pcc.buffer, sizeof(handler_data.pcc.buffer));
             handler_data.pcc.buffer.bytes = region->internal_buffer;
             handler_data.pcc.buffer.length = region->length;
