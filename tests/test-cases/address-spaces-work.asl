@@ -130,7 +130,7 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
             L0, 8,
             L1, 8,
             O, 8,
-            Offset(12),
+            Offset(8),
             CMD, 32,
         }
 

@@ -256,11 +256,11 @@ static uacpi_status pcc_handler(uacpi_region_op op, uacpi_handle op_data)
     CHECK_VALUE(rw_data->buffer.data, rw_data->region_context);
     CHECK_STRING(rw_data->buffer.const_text, "HELLO");
 
-    memcpy(&x, rw_data->buffer.bytes + 12, sizeof(x));
+    memcpy(&x, rw_data->buffer.bytes + 8, sizeof(x));
     CHECK_VALUE(x, 0xDEADBEEF);
 
     x = 0xBEEFDEAD;
-    memcpy(rw_data->buffer.bytes + 12, &x, sizeof(x));
+    memcpy(rw_data->buffer.bytes + 8, &x, sizeof(x));
 
     return UACPI_STATUS_OK;
 }

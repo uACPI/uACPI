@@ -1087,8 +1087,12 @@ uacpi_status uacpi_dispatch_opregion_io(
          * Dispatch a PCC send command if this was a write to the command field
          *
          * ACPI 6.5: 14.3. Extended PCC Subspace Shared Memory Region
+         *
+         * Note that a PCC region covers whatever follows the signature that
+         * the shared memory region starts with, so the offset of every field
+         * is 4 bytes less than what it is there.
          */
-        if (offset >= 12 && offset < 16) {
+        if (offset >= 8 && offset < 12) {
             uacpi_memzero(&handler_data.pcc.buffer, sizeof(handler_data.pcc.buffer));
             handler_data.pcc.buffer.bytes = region->internal_buffer;
             handler_data.pcc.buffer.length = region->length;
