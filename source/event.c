@@ -1603,7 +1603,16 @@ static uacpi_status create_gpe_block(
     struct gp_event *event;
     struct acpi_gas tmp_gas = { 0 };
     uacpi_size i, j;
+    uacpi_u32 num_events;
     uacpi_cpu_flags flags;
+
+    if (uacpi_unlikely(num_registers == 0))
+        return UACPI_STATUS_INVALID_ARGUMENT;
+
+    // An event is identified by a 16-bit index
+    num_events = num_registers * EVENTS_PER_GPE_REGISTER;
+    if (uacpi_unlikely(base_idx + num_events > 0xFFFF))
+        return UACPI_STATUS_INVALID_ARGUMENT;
 
     tmp_gas.address_space_id = address_space_id;
     tmp_gas.register_bit_width = 8;

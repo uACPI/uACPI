@@ -375,6 +375,8 @@ uacpi_status uacpi_enable_all_wake_gpes(void)
  * NOTE:
  * - The events of a newly installed block that have a matching AML handler
  *   are not enabled until uacpi_finalize_gpe_initialization is called
+ * - A block must have at least one register, each of which serves 8 events.
+ *   The maximum number of registers per block is 8191 (65528 events)
  * - Neither of these may be called from an interrupt handler, nor from
  *   deferred work (see uacpi_kernel_schedule_work), which includes notify
  *   handlers, as they might have to wait for both of those to complete
