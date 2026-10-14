@@ -2717,7 +2717,7 @@ uacpi_status uacpi_setup_gpe_for_wake(
         case GPE_HANDLER_TYPE_NATIVE_HANDLER:
             uacpi_warn(
                 "not configuring implicit notify for GPE(%02X) -> %.4s: "
-                " a user handler already installed", event->idx,
+                "a user handler already installed", event->idx,
                 wake_device->name.text
             );
             break;
