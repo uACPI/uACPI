@@ -24,6 +24,8 @@ typedef enum uacpi_fixed_event {
  * NOTE: neither of these may be called from an interrupt handler, nor from
  *       deferred work (see uacpi_kernel_schedule_work), which includes notify
  *       handlers, as they might have to wait for both of those to complete.
+ *       The same goes for an address space handler, and for whoever is
+ *       holding the global lock.
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_fixed_event_handler(
@@ -131,7 +133,8 @@ const uacpi_char *uacpi_gpe_triggering_to_string(
  * - 'gpe_device' may be null for GPEs managed by \_GPE
  * - This must not be called from an interrupt handler, nor from deferred work
  *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
- *   might have to wait for both of those to complete
+ *   might have to wait for both of those to complete. The same goes for an
+ *   address space handler, and for whoever is holding the global lock
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_gpe_handler(
@@ -158,7 +161,8 @@ uacpi_status uacpi_install_gpe_handler(
  * - 'gpe_device' may be null for GPEs managed by \_GPE
  * - This must not be called from an interrupt handler, nor from deferred work
  *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
- *   might have to wait for both of those to complete
+ *   might have to wait for both of those to complete. The same goes for an
+ *   address space handler, and for whoever is holding the global lock
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_gpe_handler_raw(
@@ -174,7 +178,8 @@ uacpi_status uacpi_install_gpe_handler_raw(
  * - 'gpe_device' may be null for GPEs managed by \_GPE
  * - This must not be called from an interrupt handler, nor from deferred work
  *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
- *   might have to wait for both of those to complete
+ *   might have to wait for both of those to complete. The same goes for an
+ *   address space handler, and for whoever is holding the global lock
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_uninstall_gpe_handler(
@@ -190,7 +195,8 @@ uacpi_status uacpi_uninstall_gpe_handler(
  * - 'gpe_device' may be null for GPEs managed by \_GPE
  * - This must not be called from an interrupt handler, nor from deferred work
  *   (see uacpi_kernel_schedule_work), which includes notify handlers, as it
- *   might have to wait for both of those to complete
+ *   might have to wait for both of those to complete. The same goes for an
+ *   address space handler, and for whoever is holding the global lock
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_setup_gpe_for_wake(
@@ -338,7 +344,9 @@ uacpi_status uacpi_finish_handling_gpe(
  * - 'gpe_device' may be null for GPEs managed by \_GPE
  * - Neither of these may be called from an interrupt handler, nor from
  *   deferred work (see uacpi_kernel_schedule_work), which includes notify
- *   handlers, as they might have to wait for both of those to complete
+ *   handlers, as they might have to wait for both of those to complete. The
+ *   same goes for an address space handler, and for whoever is holding the
+ *   global lock
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_mask_gpe(
@@ -383,7 +391,9 @@ uacpi_status uacpi_enable_all_wake_gpes(void)
  *   The maximum number of registers per block is 8191 (65528 events)
  * - Neither of these may be called from an interrupt handler, nor from
  *   deferred work (see uacpi_kernel_schedule_work), which includes notify
- *   handlers, as they might have to wait for both of those to complete
+ *   handlers, as they might have to wait for both of those to complete. The
+ *   same goes for an address space handler, and for whoever is holding the
+ *   global lock
  */
 UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
 uacpi_status uacpi_install_gpe_block(

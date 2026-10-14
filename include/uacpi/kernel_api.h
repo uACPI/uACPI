@@ -416,6 +416,11 @@ void uacpi_kernel_schedule_work(
  *
  * Note that the waits must be done in this order specifically.
  *
+ * uACPI never calls this from an interrupt handler or from deferred work, so
+ * it's free to sleep, and never ends up waiting for its own caller. This
+ * relies on the host not calling any API that is documented as off limits to
+ * those from there.
+ *
  * NOTE: if any of the work is executed synchronously, this must wait for the
  *       work that another thread is in the middle of executing that way too.
  */

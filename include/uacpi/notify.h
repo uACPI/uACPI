@@ -25,8 +25,9 @@ uacpi_status uacpi_install_notify_handler(
  * once this function returns.
  *
  * NOTE: this waits for all of the in-flight notifications to complete, and
- *       therefore must not be called from a notify handler, or any other work
- *       scheduled via uacpi_kernel_schedule_work.
+ *       therefore must not be called from a notify handler, any other work
+ *       scheduled via uacpi_kernel_schedule_work, an address space handler,
+ *       or with the global lock held.
  */
 uacpi_status uacpi_uninstall_notify_handler(
     uacpi_namespace_node *node, uacpi_notify_handler handler
