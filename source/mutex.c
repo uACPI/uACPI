@@ -133,7 +133,7 @@ uacpi_status uacpi_acquire_native_mutex_with_timeout(
     if (uacpi_unlikely(mtx == UACPI_NULL))
         return UACPI_STATUS_INVALID_ARGUMENT;
 
-    ret = uacpi_kernel_acquire_mutex(mtx, timeout);
+    ret = uacpi_kernel_wait_for_semaphore(mtx, timeout);
     if (uacpi_likely_success(ret))
         return ret;
 
