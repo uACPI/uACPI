@@ -684,6 +684,14 @@ out_no_unlock:
     }
 }
 
+enum gpe_dispatcher {
+    // The handler of the interrupt that the event has raised
+    GPE_DISPATCHER_INTERRUPT,
+
+    // Whoever has enabled the event, and is checking if it's pending already
+    GPE_DISPATCHER_POLL,
+};
+
 /*
  * Makes sure that an event is only ever dispatched by one of those who notice
  * that it's pending, which besides the interrupt handler might be someone who
@@ -694,10 +702,14 @@ out_no_unlock:
  * else finds it disabled, and leaves it alone. A raw handler is the exception:
  * the event is not ours to manage in that case, so it's only checked for being
  * able to fire to begin with, and is otherwise left the way it was found.
+ *
+ * That leaves us with nothing to tell that such an event was already taken
+ * care of, so it's never claimed by a poll: a raw handler is only ever invoked
+ * for an interrupt, and is expected to do any polling that it needs itself.
  */
 static uacpi_status gpe_try_claim(
-    struct gp_event *event, uacpi_u8 *out_handler_type,
-    uacpi_bool *out_did_claim
+    struct gp_event *event, enum gpe_dispatcher dispatcher,
+    uacpi_u8 *out_handler_type, uacpi_bool *out_did_claim
 )
 {
     uacpi_status ret = UACPI_STATUS_OK;
@@ -731,7 +743,7 @@ static uacpi_status gpe_try_claim(
         goto out;
 
     if (*out_handler_type == GPE_HANDLER_TYPE_NATIVE_HANDLER_RAW) {
-        *out_did_claim = UACPI_TRUE;
+        *out_did_claim = dispatcher == GPE_DISPATCHER_INTERRUPT;
         goto out;
     }
 
@@ -747,7 +759,8 @@ out:
 }
 
 static uacpi_interrupt_ret dispatch_gpe(
-    uacpi_namespace_node *device_node, struct gp_event *event
+    uacpi_namespace_node *device_node, struct gp_event *event,
+    enum gpe_dispatcher dispatcher
 )
 {
     uacpi_status ret;
@@ -755,7 +768,7 @@ static uacpi_interrupt_ret dispatch_gpe(
     uacpi_u8 handler_type;
     uacpi_bool did_claim;
 
-    ret = gpe_try_claim(event, &handler_type, &did_claim);
+    ret = gpe_try_claim(event, dispatcher, &handler_type, &did_claim);
     if (uacpi_unlikely_error(ret)) {
         uacpi_error("failed to claim GPE(%02X): %s",
                     event->idx, uacpi_status_to_string(ret));
@@ -839,7 +852,9 @@ static struct gpe_block *load_gpe_block(struct gpe_block **block)
     return (struct gpe_block*)uacpi_atomic_load_ptr(block);
 }
 
-static uacpi_interrupt_ret detect_gpes(struct gpe_interrupt_ctx *ctx)
+static uacpi_interrupt_ret detect_gpes(
+    struct gpe_interrupt_ctx *ctx, enum gpe_dispatcher dispatcher
+)
 {
     uacpi_status ret;
     uacpi_interrupt_ret int_ret = UACPI_INTERRUPT_NOT_HANDLED;
@@ -880,7 +895,9 @@ static uacpi_interrupt_ret detect_gpes(struct gpe_interrupt_ctx *ctx)
                     continue;
 
                 event = &block->events[j + i * EVENTS_PER_GPE_REGISTER];
-                int_ret |= dispatch_gpe(block->device_node, event);
+                int_ret |= dispatch_gpe(
+                    block->device_node, event, dispatcher
+                );
             }
         }
 
@@ -905,7 +922,7 @@ static uacpi_status maybe_dispatch_gpe(
     if (!(status & gpe_get_mask(event)))
         return ret;
 
-    dispatch_gpe(gpe_device, event);
+    dispatch_gpe(gpe_device, event, GPE_DISPATCHER_POLL);
     return ret;
 }
 
@@ -916,7 +933,7 @@ static uacpi_interrupt_ret handle_gpes(uacpi_handle opaque)
     if (uacpi_unlikely(ctx == UACPI_NULL))
         return UACPI_INTERRUPT_NOT_HANDLED;
 
-    return detect_gpes(ctx);
+    return detect_gpes(ctx, GPE_DISPATCHER_INTERRUPT);
 }
 
 static uacpi_status find_or_create_gpe_interrupt_ctx(
@@ -1951,7 +1968,7 @@ uacpi_status uacpi_finalize_gpe_initialization(void)
         irq_ctx = g_gpe_interrupt_head;
 
         while (irq_ctx) {
-            detect_gpes(irq_ctx);
+            detect_gpes(irq_ctx, GPE_DISPATCHER_POLL);
             irq_ctx = irq_ctx->next;
         }
     }

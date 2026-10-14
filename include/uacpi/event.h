@@ -144,6 +144,16 @@ uacpi_status uacpi_install_gpe_handler(
  * 'gpe_device'. The handler is dispatched immediately after the event is
  * received, status & enable bits are untouched.
  *
+ * The handler is in charge of the event from that point on: it's expected to
+ * clear its status via uacpi_clear_gpe, and to keep it from firing when
+ * needed via uacpi_suspend_gpe & uacpi_resume_gpe, both of which may be
+ * called by the handler itself. The event still has to be enabled via
+ * uacpi_enable_gpe in order to fire to begin with.
+ *
+ * The event is not polled by uACPI when it's enabled, so the caller is
+ * expected to do that themselves after enabling or resuming it, by checking
+ * for UACPI_EVENT_INFO_HW_STATUS via uacpi_gpe_info.
+ *
  * NOTE:
  * - 'gpe_device' may be null for GPEs managed by \_GPE
  * - This must not be called from an interrupt handler, nor from deferred work
@@ -233,7 +243,8 @@ UACPI_ALWAYS_ERROR_FOR_REDUCED_HARDWARE(
  *
  * Some hardware doesn't raise an interrupt for an edge triggered event that
  * is already pending by the time it's enabled, so such an event is dispatched
- * right away instead.
+ * right away instead, unless it has a raw handler, see
+ * uacpi_install_gpe_handler_raw.
  *
  * NOTE: 'gpe_device' may be null for GPEs managed by \_GPE
  */
