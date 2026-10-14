@@ -47,8 +47,8 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
     }
 
     Method (MAIN) {
-        // ACPICA runs _REG once more for an EC that has no regions left
-        If (\EC0.CONS == 0 || (_OSI ("TestRunner") && \EC0.CONS != 1)) {
+        // Once more as an orphan _REG, as REG0 is gone by then
+        If (\EC0.CONS != 2) {
             Printf("REG0 was connected %o time(s)", \EC0.CONS)
             Return (1)
         }

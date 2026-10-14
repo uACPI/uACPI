@@ -664,6 +664,119 @@ out:
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
+/*
+ * Firmware might expect _REG to be executed for an address space that it has
+ * no regions of, e.g. for an EC that it only ever accesses via SystemMemory.
+ */
+static void run_orphan_reg(
+    uacpi_namespace_node *node, enum uacpi_address_space space
+)
+{
+    uacpi_namespace_node *child = UACPI_NULL;
+
+    for (;;) {
+        uacpi_status ret;
+
+        ret = uacpi_namespace_node_next_typed_unlocked(
+            node, &child, UACPI_OBJECT_OPERATION_REGION_BIT
+        );
+        if (ret != UACPI_STATUS_OK)
+            /*
+             * No opregion child of this device is of this address space, so
+             * this _REG is indeed orphan as far as we're concerned.
+             */
+            break;
+
+        if (uacpi_namespace_node_get_object(child)->op_region->space == space)
+            return;
+    }
+
+    run_reg(node, space, ACPI_REG_CONNECT);
+}
+
+static uacpi_bool node_has_handler(
+    uacpi_namespace_node *node, enum uacpi_address_space space
+)
+{
+    uacpi_address_space_handlers *handlers;
+
+    handlers = uacpi_node_get_address_space_handlers(node);
+    if (handlers == UACPI_NULL)
+        return UACPI_FALSE;
+
+    return find_handler(handlers, space) != UACPI_NULL;
+}
+
+static uacpi_iteration_decision do_run_orphan_ec_reg(
+    void *opaque, uacpi_namespace_node *node, uacpi_u32 depth
+)
+{
+    static const uacpi_char *const ec_ids[] = { "PNP0C09", UACPI_NULL };
+    uacpi_namespace_node *device_node = opaque;
+    uacpi_bool has_own_handler = UACPI_FALSE;
+
+    UACPI_UNUSED(depth);
+
+    if (uacpi_unlikely_error(uacpi_namespace_write_lock()))
+        return UACPI_ITERATION_DECISION_BREAK;
+
+    if (node != device_node) {
+        has_own_handler = node_has_handler(
+            node, UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER
+        );
+    }
+    uacpi_namespace_write_unlock();
+
+    // That handler takes care of everything underneath it
+    if (has_own_handler)
+        return UACPI_ITERATION_DECISION_NEXT_PEER;
+
+    // This might execute AML, so it's done with the namespace unlocked
+    if (!uacpi_device_matches_pnp_id(node, ec_ids))
+        return UACPI_ITERATION_DECISION_CONTINUE;
+
+    if (uacpi_unlikely_error(uacpi_namespace_write_lock()))
+        return UACPI_ITERATION_DECISION_BREAK;
+
+    // The handler might've been uninstalled while the namespace was unlocked
+    has_own_handler = node_has_handler(
+        device_node, UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER
+    );
+
+    if (has_own_handler)
+        run_orphan_reg(node, UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER);
+
+    uacpi_namespace_write_unlock();
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+/*
+ * An embedded controller is looked for by its PNP id, as the handler that it
+ * uses is not necessarily installed to the EC device itself, e.g. it might be
+ * installed to the root instead, so that the regions outside of the EC device
+ * are covered as well.
+ *
+ * Must be called with the namespace write-locked. The lock is dropped while
+ * the devices are looked at, and is held again by the time this returns.
+ */
+static void run_orphan_ec_regs(uacpi_namespace_node *device_node)
+{
+    uacpi_iteration_decision decision;
+
+    uacpi_namespace_write_unlock();
+
+    decision = do_run_orphan_ec_reg(device_node, device_node, 0);
+    if (decision == UACPI_ITERATION_DECISION_CONTINUE) {
+        uacpi_namespace_do_for_each_child(
+            device_node, do_run_orphan_ec_reg, UACPI_NULL,
+            UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY,
+            UACPI_SHOULD_LOCK_YES, UACPI_PERMANENT_ONLY_YES, device_node
+        );
+    }
+
+    uacpi_namespace_write_lock();
+}
+
 static uacpi_status reg_all_opregions(
     uacpi_namespace_node *device_node, enum uacpi_address_space space
 )
@@ -696,6 +809,10 @@ static uacpi_status reg_all_opregions(
         uacpi_address_space_to_string(space),
         device_node->name.text, ctx.reg_executed, ctx.reg_errors
     );
+
+    if (space == UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER)
+        run_orphan_ec_regs(device_node);
+
     return UACPI_STATUS_OK;
 }
 
