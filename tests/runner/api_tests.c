@@ -565,6 +565,7 @@ void test_address_spaces(void)
     struct uninstaller_ctx self_ctx = { 0 };
     struct uninstaller_ctx old_ctx = { 0 }, new_ctx = { 0 };
     uacpi_namespace_node *oem_device, *ipmi_device, *taken_device;
+    uacpi_namespace_node *gpio_device;
     uacpi_u64 out_value;
 
     arg = uacpi_object_create_integer(0);
@@ -843,6 +844,34 @@ void test_address_spaces(void)
     );
     ensure_ok_status(st);
     check_connected(arg, "CREG", false);
+
+    /*
+     * The _REG of a GPIO controller that has no GeneralPurposeIo regions is
+     * only executed for a handler that is installed to the controller itself,
+     * not for the one at the root.
+     */
+    st = uacpi_eval_simple_integer(NULL, "\\GPO2.AVBL", &out_value);
+    ensure_ok_status(st);
+    if (out_value != 0)
+        error("GPIO _REG was executed for a handler of another device");
+
+    st = uacpi_namespace_node_find(NULL, "\\GPO2", &gpio_device);
+    ensure_ok_status(st);
+
+    st = uacpi_install_address_space_handler(
+        gpio_device, UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO, gpio_handler, NULL
+    );
+    ensure_ok_status(st);
+
+    st = uacpi_eval_simple_integer(NULL, "\\GPO2.AVBL", &out_value);
+    ensure_ok_status(st);
+    if (out_value != 1)
+        error("GPIO _REG was not executed for a controller with no regions");
+
+    st = uacpi_uninstall_address_space_handler(
+        gpio_device, UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO, gpio_handler
+    );
+    ensure_ok_status(st);
 
     uacpi_object_unref(arg);
 }

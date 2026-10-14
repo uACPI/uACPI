@@ -64,6 +64,20 @@ DefinitionBlock ("x.aml", "SSDT", 1, "uTEST", "ASPTESTS", 0xF0F0F0F0)
         Name (_UID, 1)
     }
 
+    // Has no GeneralPurposeIo regions, yet expects its _REG to be executed
+    Device (GPO2)
+    {
+        Name (_HID, "INT33FC" /* Intel Baytrail GPIO Controller */)
+        Name (_UID, 2)
+        Name (AVBL, 0)
+
+        Method (_REG, 2) {
+            If (Arg0 == 8) {
+                AVBL = Arg1
+            }
+        }
+    }
+
     Method (DGIO, 0, Serialized) {
         OperationRegion (GPOP, GeneralPurposeIo, Zero, 0x06)
         Field (GPOP, ByteAcc, NoLock, Preserve)
