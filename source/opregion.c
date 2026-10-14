@@ -119,12 +119,9 @@ static uacpi_bool space_needs_reg(enum uacpi_address_space space)
     return UACPI_TRUE;
 }
 
-/*
- * The address space is passed in explicitly as the node might not even be an
- * operation region anymore by the time we get here, see the callers.
- */
-static uacpi_status region_run_reg(
-    uacpi_namespace_node *node, uacpi_u16 space, uacpi_u8 connection_code
+// Returns UACPI_STATUS_NOT_FOUND if 'scope' has no _REG
+static uacpi_status run_reg(
+    uacpi_namespace_node *scope, uacpi_u16 space, uacpi_u8 connection_code
 )
 {
     uacpi_status ret;
@@ -133,7 +130,7 @@ static uacpi_status region_run_reg(
     uacpi_object *reg_obj, *args[2];
 
     ret = uacpi_namespace_node_resolve(
-        node->parent, "_REG", UACPI_SHOULD_LOCK_NO,
+        scope, "_REG", UACPI_SHOULD_LOCK_NO,
         UACPI_MAY_SEARCH_ABOVE_PARENT_NO, UACPI_PERMANENT_ONLY_NO, &reg_node
     );
     if (uacpi_unlikely_error(ret))
@@ -163,8 +160,16 @@ static uacpi_status region_run_reg(
     ret = uacpi_execute_control_method(
         reg_node, reg_obj->method, &method_args, UACPI_NULL
     );
-    if (uacpi_unlikely_error(ret))
-        uacpi_trace_region_error(node, "error during _REG execution for", ret);
+    if (uacpi_unlikely_error(ret)) {
+        const uacpi_char *path;
+
+        path = uacpi_namespace_node_generate_absolute_path(scope);
+        uacpi_error(
+            "error during _REG execution for %s (%s): %s", path,
+            uacpi_address_space_to_string(space), uacpi_status_to_string(ret)
+        );
+        uacpi_free_dynamic_string(path);
+    }
 
     uacpi_object_unref(args[0]);
     uacpi_object_unref(args[1]);
@@ -422,7 +427,7 @@ out:
         region->state_flags &= ~UACPI_OP_REGION_STATE_REG_EXECUTED;
         region->state_flags |= UACPI_OP_REGION_STATE_DISCONNECTING;
 
-        region_run_reg(node, region->space, ACPI_REG_DISCONNECT);
+        run_reg(node->parent, region->space, ACPI_REG_DISCONNECT);
 
         region->state_flags &= ~UACPI_OP_REGION_STATE_DISCONNECTING;
     }
@@ -644,7 +649,7 @@ static uacpi_iteration_decision do_run_reg(
      */
     uacpi_object_ref(obj);
 
-    ret = region_run_reg(node, region->space, ACPI_REG_CONNECT);
+    ret = run_reg(node->parent, region->space, ACPI_REG_CONNECT);
     if (ret == UACPI_STATUS_NOT_FOUND)
         goto out;
 
@@ -969,7 +974,7 @@ uacpi_status uacpi_initialize_opregion_node(uacpi_namespace_node *node)
     if (uacpi_get_current_init_level() < UACPI_INIT_LEVEL_NAMESPACE_LOADED)
         goto out;
 
-    if (region_run_reg(node, region->space, ACPI_REG_CONNECT) !=
+    if (run_reg(node->parent, region->space, ACPI_REG_CONNECT) !=
         UACPI_STATUS_NOT_FOUND)
         region->state_flags |= UACPI_OP_REGION_STATE_REG_EXECUTED;
 
