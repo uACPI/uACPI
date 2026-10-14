@@ -3757,10 +3757,10 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
     switch (op_ctx->op->code)
     {
     case UACPI_AML_OP_SignalOp:
-        uacpi_kernel_signal_event(obj->event->handle);
+        uacpi_signal_native_event(obj->event->handle);
         break;
     case UACPI_AML_OP_ResetOp:
-        uacpi_kernel_reset_event(obj->event->handle);
+        uacpi_reset_native_event(obj->event->handle);
         break;
     case UACPI_AML_OP_WaitOp: {
         uacpi_u64 timeout;
@@ -3779,7 +3779,7 @@ static uacpi_status handle_event_ctl(struct execution_context *ctx)
         uacpi_object_ref(obj);
 
         uacpi_namespace_write_unlock();
-        ret = uacpi_kernel_wait_for_event(obj->event->handle, timeout);
+        ret = uacpi_wait_for_native_event(obj->event->handle, timeout);
         uacpi_namespace_write_lock();
 
         uacpi_object_unref(obj);

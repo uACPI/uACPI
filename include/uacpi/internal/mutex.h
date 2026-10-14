@@ -62,6 +62,33 @@ static inline uacpi_status uacpi_release_native_mutex_may_be_null(
     return UACPI_STATUS_OK;
 }
 
+static inline uacpi_handle uacpi_create_native_event(void)
+{
+    return uacpi_kernel_create_event();
+}
+
+static inline void uacpi_free_native_event(uacpi_handle evt)
+{
+    uacpi_kernel_free_event(evt);
+}
+
+static inline uacpi_bool uacpi_wait_for_native_event(
+    uacpi_handle evt, uacpi_u16 timeout
+)
+{
+    return uacpi_kernel_wait_for_event(evt, timeout);
+}
+
+static inline void uacpi_signal_native_event(uacpi_handle evt)
+{
+    uacpi_kernel_signal_event(evt);
+}
+
+static inline void uacpi_reset_native_event(uacpi_handle evt)
+{
+    uacpi_kernel_reset_event(evt);
+}
+
 struct uacpi_recursive_lock {
     uacpi_handle mutex;
     uacpi_size depth;

@@ -12,6 +12,7 @@
 #include <uacpi/internal/event.h>
 #include <uacpi/internal/notify.h>
 #include <uacpi/internal/osi.h>
+#include <uacpi/internal/mutex.h>
 #include <uacpi/internal/registers.h>
 
 struct uacpi_runtime_context g_uacpi_rt_ctx = { 0 };
@@ -164,7 +165,7 @@ void uacpi_state_reset(void)
 
 #ifndef UACPI_REDUCED_HARDWARE
     if (g_uacpi_rt_ctx.global_lock_event)
-        uacpi_kernel_free_event(g_uacpi_rt_ctx.global_lock_event);
+        uacpi_free_native_event(g_uacpi_rt_ctx.global_lock_event);
     if (g_uacpi_rt_ctx.global_lock_spinlock)
         uacpi_kernel_free_spinlock(g_uacpi_rt_ctx.global_lock_spinlock);
 #endif

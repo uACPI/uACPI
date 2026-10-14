@@ -86,7 +86,7 @@ static uacpi_status uacpi_acquire_global_lock_from_firmware(void)
         );
         uacpi_kernel_unlock_spinlock(g_uacpi_rt_ctx.global_lock_spinlock, flags);
 
-        uacpi_kernel_wait_for_event(g_uacpi_rt_ctx.global_lock_event, 0xFFFF);
+        uacpi_wait_for_native_event(g_uacpi_rt_ctx.global_lock_event, 0xFFFF);
         flags = uacpi_kernel_lock_spinlock(g_uacpi_rt_ctx.global_lock_spinlock);
     }
 

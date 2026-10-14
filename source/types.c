@@ -213,7 +213,7 @@ static uacpi_bool event_alloc(uacpi_object *obj)
     if (uacpi_unlikely(event == UACPI_NULL))
         return UACPI_FALSE;
 
-    event->handle = uacpi_kernel_create_event();
+    event->handle = uacpi_create_native_event();
     if (event->handle == UACPI_NULL) {
         uacpi_free(event, sizeof(*event));
         return UACPI_FALSE;
@@ -505,7 +505,7 @@ static void free_event(uacpi_handle handle)
 {
     uacpi_event *event = handle;
 
-    uacpi_kernel_free_event(event->handle);
+    uacpi_free_native_event(event->handle);
     uacpi_free(event, sizeof(*event));
 }
 
