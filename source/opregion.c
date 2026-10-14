@@ -813,6 +813,14 @@ static uacpi_status reg_all_opregions(
     if (space == UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER)
         run_orphan_ec_regs(device_node);
 
+    /*
+     * Unlike an EC, a GPIO controller has no common PNP id to be looked for
+     * by. Its handler is normally installed to the controller itself though,
+     * so that is the only one that is checked.
+     */
+    if (space == UACPI_ADDRESS_SPACE_GENERAL_PURPOSE_IO)
+        run_orphan_reg(device_node, space);
+
     return UACPI_STATUS_OK;
 }
 
