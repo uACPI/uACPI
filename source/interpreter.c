@@ -747,11 +747,6 @@ static uacpi_status handle_buffer(struct execution_context *ctx)
         return UACPI_STATUS_AML_BAD_ENCODING;
     }
 
-    if (uacpi_unlikely(declared_size->integer == 0)) {
-        uacpi_error("attempted to create an empty buffer");
-        return UACPI_STATUS_AML_BAD_ENCODING;
-    }
-
     buffer_size = declared_size->integer;
     if (uacpi_unlikely(init_size > buffer_size)) {
         uacpi_error(
@@ -761,8 +756,12 @@ static uacpi_status handle_buffer(struct execution_context *ctx)
         return UACPI_STATUS_AML_BAD_ENCODING;
     }
 
+    /*
+     * NT allows empty buffers, these still get a byte of storage, same as the
+     * ones made by make_null_buffer().
+     */
     dst = item_array_at(&op_ctx->items, 3)->obj;
-    dst->buffer->data = uacpi_kernel_alloc(buffer_size);
+    dst->buffer->data = uacpi_kernel_alloc(UACPI_MAX(buffer_size, 1));
     if (uacpi_unlikely(dst->buffer->data == UACPI_NULL))
         return UACPI_STATUS_OUT_OF_MEMORY;
     dst->buffer->size = buffer_size;
