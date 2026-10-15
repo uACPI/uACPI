@@ -114,6 +114,10 @@ void uacpi_read_buffer_field(
     const uacpi_buffer_field *field, void *dst
 )
 {
+    // There's nothing to read from a buffer field that's empty
+    if (uacpi_unlikely(field->bit_length == 0))
+        return;
+
     if (!(field->bit_index & 7)) {
         uacpi_u8 *src = field->backing->data;
         uacpi_size count;
@@ -150,6 +154,10 @@ void uacpi_write_buffer_field(
     const void *src, uacpi_size size
 )
 {
+    // There's nothing to write to a buffer field that's empty
+    if (uacpi_unlikely(field->bit_length == 0))
+        return;
+
     if (!(field->bit_index & 7)) {
         uacpi_u8 *dst, last_byte, tail_shift;
         uacpi_size count;
