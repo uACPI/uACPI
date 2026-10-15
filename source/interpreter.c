@@ -1844,8 +1844,13 @@ static uacpi_status handle_create_field(struct execution_context *ctx)
              */
             switch (access_type) {
             case 0:
-                 // TODO: optimize to calculate best access strategy
-                 UACPI_FALLTHROUGH;
+                /*
+                 * NT always accesses AnyAcc fields one byte at a time, no
+                 * matter their size or alignment, so that's the only way
+                 * firmware has ever been tested. Don't try to pick a wider
+                 * access here, it could break hardware that works fine on NT.
+                 */
+                UACPI_FALLTHROUGH;
             case 1:
             case 5:
                 field->access_width_bytes = 1;
