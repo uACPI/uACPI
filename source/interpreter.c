@@ -2437,8 +2437,47 @@ static uacpi_status object_replace_child(
 static uacpi_bool object_is_written_in_place(uacpi_object *obj)
 {
     return uacpi_object_is_one_of(
-        obj, UACPI_OBJECT_BUFFER_FIELD_BIT | UACPI_OBJECT_FIELD_UNIT_BIT
+        obj, UACPI_OBJECT_BUFFER_FIELD_BIT | UACPI_OBJECT_FIELD_UNIT_BIT |
+             UACPI_OBJECT_BUFFER_INDEX_BIT
     );
+}
+
+/*
+ * An Index() of a package refers to the slot that the element is stored in,
+ * and keeps doing so after the element is replaced. A copy of it would only
+ * refer to the element that's in there right now, so it's shared instead.
+ */
+static uacpi_bool object_is_package_index(uacpi_object *obj)
+{
+    return obj->type == UACPI_OBJECT_REFERENCE &&
+           obj->flags == UACPI_REFERENCE_KIND_PKG_INDEX;
+}
+
+static uacpi_status object_copy_for_overwrite(
+    uacpi_object *src, uacpi_object **out_obj
+)
+{
+    uacpi_status ret;
+    uacpi_object *obj;
+
+    if (object_is_package_index(src)) {
+        uacpi_object_ref(src);
+        *out_obj = src;
+        return UACPI_STATUS_OK;
+    }
+
+    obj = uacpi_create_object(UACPI_OBJECT_UNINITIALIZED);
+    if (uacpi_unlikely(obj == UACPI_NULL))
+        return UACPI_STATUS_OUT_OF_MEMORY;
+
+    ret = uacpi_object_assign(obj, src, UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
+    if (uacpi_unlikely_error(ret)) {
+        uacpi_object_unref(obj);
+        return ret;
+    }
+
+    *out_obj = obj;
+    return UACPI_STATUS_OK;
 }
 
 /*
@@ -2485,14 +2524,11 @@ static uacpi_bool object_is_written_in_place(uacpi_object *obj)
             dst->inner_object, src_obj, UACPI_NULL
         );
 
-    new_obj = uacpi_create_object(UACPI_OBJECT_UNINITIALIZED);
-    if (uacpi_unlikely(new_obj == UACPI_NULL))
-        return UACPI_STATUS_OUT_OF_MEMORY;
+    ret = object_copy_for_overwrite(src_obj, &new_obj);
+    if (uacpi_unlikely_error(ret))
+        return ret;
 
-    ret = uacpi_object_assign(new_obj, src_obj,
-                              UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
-    if (uacpi_likely_success(ret))
-        ret = check_no_reference_cycle(dst, new_obj);
+    ret = check_no_reference_cycle(dst, new_obj);
     if (uacpi_unlikely_error(ret)) {
         uacpi_object_unref(new_obj);
         return ret;
@@ -2561,14 +2597,11 @@ static uacpi_status store_to_reference(
         uacpi_status ret;
         uacpi_object *new_obj;
 
-        new_obj = uacpi_create_object(UACPI_OBJECT_UNINITIALIZED);
-        if (uacpi_unlikely(new_obj == UACPI_NULL))
-            return UACPI_STATUS_OUT_OF_MEMORY;
+        ret = object_copy_for_overwrite(src_obj, &new_obj);
+        if (uacpi_unlikely_error(ret))
+            return ret;
 
-        ret = uacpi_object_assign(new_obj, src_obj,
-                                  UACPI_ASSIGN_BEHAVIOR_DEEP_COPY);
-        if (uacpi_likely_success(ret))
-            ret = check_no_reference_cycle(dst, new_obj);
+        ret = check_no_reference_cycle(dst, new_obj);
         if (uacpi_unlikely_error(ret)) {
             uacpi_object_unref(new_obj);
             return ret;
@@ -6028,6 +6061,12 @@ static uacpi_status exec_op(struct execution_context *ctx)
 
             item_array_pop(&op_ctx->items);
             item = item_array_last(&op_ctx->items);
+
+            // An Index() of a package must keep referring to the same slot
+            if (object_is_package_index(item->obj)) {
+                uacpi_object_unref(temp);
+                break;
+            }
 
             if (op == UACPI_PARSE_OP_OBJECT_CONVERT_TO_SHALLOW_COPY)
                 behavior = UACPI_ASSIGN_BEHAVIOR_SHALLOW_COPY;
