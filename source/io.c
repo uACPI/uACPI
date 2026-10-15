@@ -579,6 +579,12 @@ uacpi_status uacpi_read_field_unit(
     if (did_handle)
         goto out;
 
+    // There's nothing to read from a field that the AML declared as empty
+    if (uacpi_unlikely(field->bit_length == 0)) {
+        uacpi_memzero(dst, size);
+        goto out;
+    }
+
     field_byte_length = uacpi_round_up_bits_to_bytes(field->bit_length);
 
     /*
@@ -708,6 +714,10 @@ uacpi_status uacpi_write_field_unit(
         wtr_response, &did_handle
     );
     if (did_handle)
+        goto out;
+
+    // There's nothing to write to a field that the AML declared as empty
+    if (uacpi_unlikely(field->bit_length == 0))
         goto out;
 
     ret = write_generic_field_unit(field, src, size);
