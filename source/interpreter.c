@@ -2973,11 +2973,11 @@ static uacpi_status buffer_to_string(
         }
     }
 
-    // Comma for every value but one
-    final_size += buf->size - 1;
-
-    // Null terminator
-    final_size += 1;
+    /*
+     * Comma for every value but one and a null terminator, the latter being
+     * all there is for an empty buffer.
+     */
+    final_size += UACPI_MAX(buf->size, 1);
 
     str->data = uacpi_kernel_alloc(final_size);
     if (uacpi_unlikely(str->data == UACPI_NULL))
@@ -3003,6 +3003,7 @@ static uacpi_status buffer_to_string(
         if (i != buf->size - 1)
             *cursor++ = ',';
     }
+    *cursor = '\0';
 
     str->size = final_size;
     return UACPI_STATUS_OK;
@@ -3058,9 +3059,6 @@ static uacpi_status handle_to(struct execution_context *ctx)
             ret = integer_to_string(src->integer, dst->buffer, is_hex);
             break;
         } else if (src->type == UACPI_OBJECT_BUFFER) {
-            if (uacpi_unlikely(src->buffer->size == 0))
-                return make_null_string(dst->buffer);
-
             ret = buffer_to_string(src->buffer, dst->buffer, is_hex);
             break;
         }
@@ -3213,7 +3211,8 @@ static uacpi_status handle_concatenate(struct execution_context *ctx)
         get_object_storage(arg1, &arg1_buf, UACPI_TRUE);
         buf_size = arg0_buf->size + arg1_buf.length;
 
-        dst_buf = uacpi_kernel_alloc(buf_size);
+        // Two empty buffers make an empty buffer, see make_null_buffer()
+        dst_buf = uacpi_kernel_alloc(UACPI_MAX(buf_size, 1));
         if (uacpi_unlikely(dst_buf == UACPI_NULL))
             return UACPI_STATUS_OUT_OF_MEMORY;
 
