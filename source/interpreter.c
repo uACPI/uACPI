@@ -2431,6 +2431,17 @@ static uacpi_status object_replace_child(
 }
 
 /*
+ * NT never overwrites these objects, no matter how they were reached, it
+ * always stores to them _with_ implicit cast instead.
+ */
+static uacpi_bool object_is_written_in_place(uacpi_object *obj)
+{
+    return uacpi_object_is_one_of(
+        obj, UACPI_OBJECT_BUFFER_FIELD_BIT | UACPI_OBJECT_FIELD_UNIT_BIT
+    );
+}
+
+/*
  * Breakdown of what happens here:
  *
  * CopyObject(..., Obj) where Obj is:
@@ -2440,6 +2451,9 @@ static uacpi_status object_replace_child(
  *            overwrite the referenced object.
  * 4. RefOf -> Not allowed here.
  * 5. Index -> Overwrite Object stored at the index.
+ *
+ * Unless the object that would get overwritten is one of the objects that NT
+ * always stores to instead, e.g. a field.
  */
  static uacpi_status copy_object_to_reference(uacpi_object *dst,
                                               uacpi_object *src)
@@ -2452,12 +2466,9 @@ static uacpi_status object_replace_child(
         uacpi_object *referenced_obj;
 
         referenced_obj = uacpi_unwrap_internal_reference(dst);
-        if (referenced_obj->type == UACPI_OBJECT_REFERENCE) {
+        if (referenced_obj->type == UACPI_OBJECT_REFERENCE)
             dst = reference_unwind(referenced_obj);
-            break;
-        }
-
-        UACPI_FALLTHROUGH;
+        break;
     }
     case UACPI_REFERENCE_KIND_LOCAL:
     case UACPI_REFERENCE_KIND_PKG_INDEX:
@@ -2468,6 +2479,11 @@ static uacpi_status object_replace_child(
     }
 
     src_obj = uacpi_unwrap_internal_reference(src);
+
+    if (object_is_written_in_place(dst->inner_object))
+        return object_assign_with_implicit_cast(
+            dst->inner_object, src_obj, UACPI_NULL
+        );
 
     new_obj = uacpi_create_object(UACPI_OBJECT_UNINITIALIZED);
     if (uacpi_unlikely(new_obj == UACPI_NULL))
@@ -2497,6 +2513,9 @@ static uacpi_status object_replace_child(
  *            case OVERWRITE the referenced object.
  * 3. NAME -> Store with implicit cast.
  * 4. RefOf -> Not allowed here.
+ *
+ * Unless the object that would get overwritten is one of the objects that NT
+ * always stores to instead, e.g. a field.
  */
 static uacpi_status store_to_reference(
     uacpi_object *dst, uacpi_object *src, uacpi_data_view *wtr_response
@@ -2534,6 +2553,9 @@ static uacpi_status store_to_reference(
 
     src_obj = uacpi_unwrap_internal_reference(src);
     overwrite |= dst->inner_object->type == UACPI_OBJECT_UNINITIALIZED;
+
+    if (object_is_written_in_place(dst->inner_object))
+        overwrite = UACPI_FALSE;
 
     if (overwrite) {
         uacpi_status ret;
@@ -4618,7 +4640,6 @@ static uacpi_status handle_inc_dec(struct execution_context *ctx)
 {
     uacpi_object *src, *dst;
     struct op_context *op_ctx = ctx->cur_op_ctx;
-    uacpi_bool field_allowed = UACPI_FALSE;
     uacpi_object_type true_src_type;
     uacpi_status ret;
 
@@ -4628,15 +4649,9 @@ static uacpi_status handle_inc_dec(struct execution_context *ctx)
     if (src->type == UACPI_OBJECT_REFERENCE) {
         /*
          * Increment/Decrement are the only two operators that modify the value
-         * in-place, thus we need very specific dereference rules here.
-         *
-         * Reading buffer fields & field units is only allowed if we were passed
-         * a namestring directly as opposed to some nested reference chain
-         * containing a field at the bottom.
+         * in-place. Same as NT, fields are read no matter how many references
+         * it takes to get to them, the result is written back the same way.
          */
-        if (src->flags == UACPI_REFERENCE_KIND_NAMED)
-            field_allowed = src->inner_object->type != UACPI_OBJECT_REFERENCE;
-
         src = reference_unwind(src)->inner_object;
     } // else buffer index
 
@@ -4648,9 +4663,6 @@ static uacpi_status handle_inc_dec(struct execution_context *ctx)
         break;
     case UACPI_OBJECT_FIELD_UNIT:
     case UACPI_OBJECT_BUFFER_FIELD:
-        if (uacpi_unlikely(!field_allowed))
-            goto out_bad_type;
-
         ret = field_get_read_type(src, &true_src_type);
         if (uacpi_unlikely_error(ret))
             goto out_bad_type;
