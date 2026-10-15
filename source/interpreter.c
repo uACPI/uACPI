@@ -2500,7 +2500,8 @@ static uacpi_status object_copy_for_overwrite(
  *
  * CopyObject(..., Obj) where Obj is:
  * 1. LocalX -> Overwrite LocalX.
- * 2. NAME -> Overwrite NAME.
+ * 2. NAME -> Overwrite NAME, or the object it refers to if it holds a
+ *            RefOf() of something.
  * 3. ArgX -> Overwrite ArgX unless ArgX is a reference, in that case
  *            overwrite the referenced object.
  * 4. RefOf -> Not allowed here.
@@ -2526,7 +2527,14 @@ static uacpi_status object_copy_for_overwrite(
     }
     case UACPI_REFERENCE_KIND_LOCAL:
     case UACPI_REFERENCE_KIND_PKG_INDEX:
+        break;
     case UACPI_REFERENCE_KIND_NAMED:
+        /*
+         * A name that holds a reference is an alias of what it refers to, NT
+         * only overwrites the name itself if it's an Index() of a package.
+         */
+        if (!object_is_package_index(dst->inner_object))
+            dst = reference_unwind(dst);
         break;
     default:
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -5369,6 +5377,7 @@ static uacpi_u8 handler_idx_of_op[0x100] = {
     [UACPI_AML_OP_LLessOp] = OP_HANDLER_BINARY_LOGIC,
 
     [UACPI_AML_OP_InternalOpNamedObject] = OP_HANDLER_NAMED_OBJECT,
+    [UACPI_AML_OP_InternalOpDerefNamedObject] = OP_HANDLER_DEREF_OF,
 
     [UACPI_AML_OP_BufferOp] = OP_HANDLER_BUFFER,
 
@@ -6163,6 +6172,23 @@ static uacpi_status exec_op(struct execution_context *ctx)
                 new_op += obj->method->args;
                 break;
             }
+
+            /*
+             * A named object that holds a reference is an alias of whatever
+             * it refers to on NT, so reading it reads that instead.
+             */
+            case UACPI_OBJECT_REFERENCE:
+            case UACPI_OBJECT_BUFFER_INDEX:
+                if (!op_wants_term_arg_or_operand(prev_op))
+                    break;
+
+                uacpi_object_ref(obj);
+                uacpi_namespace_node_unref(item->node);
+                item->obj = obj;
+                item->type = ITEM_OBJECT;
+
+                new_op = UACPI_AML_OP_InternalOpDerefNamedObject;
+                break;
 
             case UACPI_OBJECT_BUFFER_FIELD:
             case UACPI_OBJECT_FIELD_UNIT: {
