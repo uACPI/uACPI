@@ -2431,6 +2431,21 @@ static uacpi_status object_replace_child(
 }
 
 /*
+ * Objects that only ever come from a declaration in the namespace. Unlike
+ * CopyObject, a store through an ArgX reference doesn't overwrite them on NT.
+ */
+static uacpi_bool object_is_namespace_only(uacpi_object *obj)
+{
+    return uacpi_object_is_one_of(
+        obj, UACPI_OBJECT_DEVICE_BIT | UACPI_OBJECT_EVENT_BIT |
+             UACPI_OBJECT_METHOD_BIT | UACPI_OBJECT_MUTEX_BIT |
+             UACPI_OBJECT_OPERATION_REGION_BIT |
+             UACPI_OBJECT_POWER_RESOURCE_BIT | UACPI_OBJECT_PROCESSOR_BIT |
+             UACPI_OBJECT_THERMAL_ZONE_BIT
+    );
+}
+
+/*
  * NT never overwrites these objects, no matter how they were reached, it
  * always stores to them _with_ implicit cast instead.
  */
@@ -2574,6 +2589,14 @@ static uacpi_status store_to_reference(
         if (referenced_obj->type == UACPI_OBJECT_REFERENCE) {
             overwrite = dst->flags == UACPI_REFERENCE_KIND_ARG;
             dst = reference_unwind(referenced_obj);
+
+            if (overwrite && object_is_namespace_only(dst->inner_object)) {
+                uacpi_error(
+                    "attempted to overwrite %s object via an ArgX reference",
+                    uacpi_object_type_to_string(dst->inner_object->type)
+                );
+                return UACPI_STATUS_AML_INCOMPATIBLE_OBJECT_TYPE;
+            }
             break;
         }
 
