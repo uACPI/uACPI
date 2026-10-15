@@ -4299,9 +4299,15 @@ static uacpi_status handle_create_buffer_field(struct execution_context *ctx)
 
         field->bit_index = idx_obj->integer;
 
-        if (uacpi_unlikely(!len_obj->integer ||
-                            len_obj->integer > 0xFFFFFFFF)) {
-            uacpi_error("invalid bit field length (%u)", field->bit_length);
+        /*
+         * NT allows a length of 0, the result is a buffer field that's never
+         * read from or written to.
+         */
+        if (uacpi_unlikely(len_obj->integer > 0xFFFFFFFF)) {
+            uacpi_error(
+                "invalid bit field length (%"UACPI_PRIu64")",
+                UACPI_FMT64(len_obj->integer)
+            );
             return UACPI_STATUS_AML_BAD_ENCODING;
         }
 
