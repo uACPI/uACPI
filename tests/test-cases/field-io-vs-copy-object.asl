@@ -1,4 +1,4 @@
-// Name: A field can be overwritten while it's being accessed
+// Name: What a field is written from can be overwritten mid-access
 // Expect: str => check-aml-with-threads
 
 DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
@@ -16,9 +16,6 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
      * holding the lock ourselves.
      */
     Field (REG0, ByteAcc, Lock, Preserve) {
-        FLD0, 8,
-        FLD1, 8,
-
         // These take more than one access to write
         FLD2, 16,
         FLD3, 64,
@@ -26,8 +23,6 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
 
     // Same memory, but accessible at any time
     Field (REG0, ByteAcc, NoLock, Preserve) {
-        RAW0, 8,
-        RAW1, 8,
         RAW2, 16,
         RAW3, 64,
     }
@@ -37,8 +32,6 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
 
     // How far the other thread has made it
     Name (STAT, 0)
-
-    Name (RVAL, 0)
 
     /*
      * The test runner executes WORK on a thread of its own every time that the
@@ -51,10 +44,6 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
             STAT = 1
 
             If (Arg0 == 0) {
-                RVAL = FLD0
-            } ElseIf (Arg0 == 1) {
-                FLD1 = 0xAB
-            } ElseIf (Arg0 == 2) {
                 FLD2 = INT0
             } Else {
                 FLD3 = BUF0
@@ -102,48 +91,14 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
     }
 
     Method (TEST) {
-        RAW0 = 0x5A
-
         /*
          * The namespace is unlocked while an access is waiting for the global
-         * lock, so nothing prevents the field from being overwritten at that
-         * point. Whoever is doing the access must still be able to finish it.
+         * lock, so nothing prevents the object that a field is written from
+         * from being overwritten at that point, and it's what the data comes
+         * from once the access gets to proceed. The field itself can't be
+         * overwritten, NT stores to it even via CopyObject.
          */
         If (!STRT (0)) {
-            Return (Zero)
-        }
-
-        CopyObject (Zero, FLD0)
-
-        If (!FINI ()) {
-            Return (Zero)
-        }
-
-        If (RVAL != 0x5A) {
-            Printf("Read %o from a field that was overwritten", RVAL)
-            Return (Zero)
-        }
-
-        If (!STRT (1)) {
-            Return (Zero)
-        }
-
-        CopyObject (Zero, FLD1)
-
-        If (!FINI ()) {
-            Return (Zero)
-        }
-
-        If (RAW1 != 0xAB) {
-            Printf("Wrote %o to a field that was overwritten", RAW1)
-            Return (Zero)
-        }
-
-        /*
-         * Same thing for the object that a field is written from, as it's
-         * what the data comes from once the access gets to proceed.
-         */
-        If (!STRT (2)) {
             Return (Zero)
         }
 
@@ -158,7 +113,7 @@ DefinitionBlock ("", "DSDT", 2, "uTEST", "TESTTABL", 0xF0F0F0F0)
             Return (Zero)
         }
 
-        If (!STRT (3)) {
+        If (!STRT (1)) {
             Return (Zero)
         }
 
