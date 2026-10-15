@@ -967,6 +967,46 @@ static void write_buffer_index(uacpi_buffer_index *buf_idx,
 }
 
 /*
+ * NT stores a String or a Buffer to a field one field-sized chunk at a time,
+ * see uacpi_write_field_unit_in_chunks(). For anything that's plain memory
+ * only the last chunk makes a difference, and an empty source doesn't change
+ * it at all. Returns whether there's anything left to write.
+ */
+static uacpi_bool trim_to_last_chunk(
+    uacpi_object *src, uacpi_data_view *buf, uacpi_size chunk_size
+)
+{
+    uacpi_size offset;
+
+    // Nothing to write to an empty buffer field, or from an empty source
+    if (chunk_size == 0 || buf->length == 0)
+        return UACPI_FALSE;
+    if (src->type == UACPI_OBJECT_INTEGER)
+        return UACPI_TRUE;
+
+    offset = (buf->length - 1) / chunk_size * chunk_size;
+    buf->bytes += offset;
+    buf->length -= offset;
+    return UACPI_TRUE;
+}
+
+static uacpi_status store_to_field_unit(
+    uacpi_field_unit *field, uacpi_object *src, uacpi_data_view *buf,
+    uacpi_data_view *wtr_response
+)
+{
+    // An Integer is always written in one go
+    if (src->type == UACPI_OBJECT_INTEGER)
+        return uacpi_write_field_unit(
+            field, buf->bytes, buf->length, wtr_response
+        );
+
+    return uacpi_write_field_unit_in_chunks(
+        field, buf->bytes, buf->length, wtr_response
+    );
+}
+
+/*
  * The word "implicit cast" here is only because it's called that in
  * the specification. In reality, we just copy one buffer to another
  * because that's what NT does.
@@ -998,11 +1038,20 @@ static uacpi_status object_assign_with_implicit_cast(
         break;
     }
 
-    case UACPI_OBJECT_BUFFER_FIELD:
+    case UACPI_OBJECT_BUFFER_FIELD: {
+        uacpi_size chunk_size;
+
+        chunk_size = uacpi_round_up_bits_to_bytes(
+            dst->buffer_field.bit_length
+        );
+        if (!trim_to_last_chunk(src, &src_buf, chunk_size))
+            break;
+
         uacpi_write_buffer_field(
             &dst->buffer_field, src_buf.bytes, src_buf.length
         );
         break;
+    }
 
     case UACPI_OBJECT_FIELD_UNIT:
         /*
@@ -1013,14 +1062,16 @@ static uacpi_status object_assign_with_implicit_cast(
          * that happens, so take one that is ours alone.
          */
         uacpi_object_ref(src);
-        ret = uacpi_write_field_unit(
-            dst->field_unit, src_buf.bytes, src_buf.length,
-            wtr_response
+        ret = store_to_field_unit(
+            dst->field_unit, src, &src_buf, wtr_response
         );
         uacpi_object_unref(src);
         return ret;
 
     case UACPI_OBJECT_BUFFER_INDEX:
+        if (!trim_to_last_chunk(src, &src_buf, 1))
+            break;
+
         write_buffer_index(&dst->buffer_index, &src_buf);
         break;
 

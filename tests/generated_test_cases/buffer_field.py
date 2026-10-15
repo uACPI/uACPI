@@ -127,7 +127,7 @@ def _do_generate_buffer_writes_answers(
         field_name = f"FI{field_size:02X}"
 
         src.l(ASL.create_field("BUFX", i, field_size, field_name))
-        src.l(ASL.assign(field_name, "BUFF"))
+        src.l(ASL.assign(field_name, _last_chunk_of_buff(field_size)))
         src.l(ASL.assign("Debug", field_name))
 
     _generate_for_each_bit_combination(src, gen_buffer_dump)
@@ -157,13 +157,24 @@ def generate_buffer_writes_test(compiler: str, bin_dir: str) -> str:
     return _do_generate_buffer_writes_test(compiler, bin_dir)
 
 
+_BUFF_BYTES = [0xAC, 0x12, 0x42, 0xCA, 0xDE, 0xFF, 0xCB, 0xDD]
+
+
+def _last_chunk_of_buff(field_size: int) -> str:
+    """
+    NT stores a buffer to a buffer field one field-sized chunk at a time, so
+    it's the last chunk that ends up in there. acpiexec truncates the buffer
+    instead, so it only gets to see that chunk.
+    """
+    chunk_size = (field_size + 7) // 8
+    offset = (len(_BUFF_BYTES) - 1) // chunk_size * chunk_size
+    return ASL.buffer(_BUFF_BYTES[offset:])
+
+
 def _generate_buffer_test_prologue() -> ASLSource:
     src = ASLSource(2)
 
-    src.l(ASL.name(
-        "BUFF",
-        ASL.buffer([0xAC, 0x12, 0x42, 0xCA, 0xDE, 0xFF, 0xCB, 0xDD])
-    ))
+    src.l(ASL.name("BUFF", ASL.buffer(_BUFF_BYTES)))
     src.l(ASL.name(
         "BUFX",
         ASL.buffer(count=8)

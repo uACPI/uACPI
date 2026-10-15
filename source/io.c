@@ -693,14 +693,16 @@ static uacpi_status write_generic_field_unit(
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_write_field_unit(
+static uacpi_status write_field_unit(
     uacpi_field_unit *field, const void *src, uacpi_size size,
-    uacpi_data_view *wtr_response
+    uacpi_size chunk_size, uacpi_data_view *wtr_response
 )
 {
     uacpi_status ret;
     uacpi_bool did_handle;
     uacpi_data_view data_view = { 0 };
+    const uacpi_u8 *bytes = src;
+    uacpi_size offset;
 
     data_view.const_data = src;
     data_view.length = size;
@@ -720,11 +722,36 @@ uacpi_status uacpi_write_field_unit(
     if (uacpi_unlikely(field->bit_length == 0))
         goto out;
 
-    ret = write_generic_field_unit(field, src, size);
+    for (offset = 0; offset < size; offset += chunk_size) {
+        ret = write_generic_field_unit(
+            field, bytes + offset, UACPI_MIN(chunk_size, size - offset)
+        );
+        if (uacpi_unlikely_error(ret))
+            break;
+    }
 
 out:
     unlock_field_unit_transaction(field);
     return ret;
+}
+
+uacpi_status uacpi_write_field_unit(
+    uacpi_field_unit *field, const void *src, uacpi_size size,
+    uacpi_data_view *wtr_response
+)
+{
+    return write_field_unit(field, src, size, size, wtr_response);
+}
+
+uacpi_status uacpi_write_field_unit_in_chunks(
+    uacpi_field_unit *field, const void *src, uacpi_size size,
+    uacpi_data_view *wtr_response
+)
+{
+    return write_field_unit(
+        field, src, size, uacpi_round_up_bits_to_bytes(field->bit_length),
+        wtr_response
+    );
 }
 
 uacpi_status uacpi_field_unit_get_read_type(
