@@ -4,6 +4,7 @@
 #include <string.h>
 #include <uacpi/opregion.h>
 #include <uacpi/resources.h>
+#include <uacpi/tables.h>
 #include <uacpi/types.h>
 
 static void check_ok(uacpi_object **objects, uacpi_object_array *arr)
@@ -904,4 +905,45 @@ void test_global_lock(void)
 
     st = uacpi_release_global_lock(next_seq);
     ensure_ok_status(st);
+}
+
+void test_bad_checksum_tables(void)
+{
+    // A zero checksum doesn't make this header sum up to zero
+    static struct acpi_sdt_hdr bad_table = {
+        .signature = { 'T', 'E', 'S', 'T' },
+        .length = sizeof(struct acpi_sdt_hdr),
+    };
+    uacpi_status st;
+    uacpi_size idx;
+    uacpi_table tbl;
+    int i;
+
+    // The table is mapped by its virtual address like the runner's own ones
+    g_expect_virtual_addresses = true;
+
+    idx = uacpi_table_count();
+    st = uacpi_table_install_physical(
+        (uacpi_phys_addr)(uintptr_t)&bad_table, UACPI_NULL
+    );
+    ensure_ok_status(st);
+
+    // The first reference finds the bad checksum, the second one refuses early
+    for (i = 0; i < 2; ++i) {
+        st = uacpi_table_ref_by_index(idx);
+        if (st != UACPI_STATUS_BAD_CHECKSUM)
+            error(
+                "referenced a table with a bad checksum: %s",
+                uacpi_status_to_string(st)
+            );
+    }
+
+    // Neither of the failed references may keep the tables locked
+    st = uacpi_table_find_by_signature(ACPI_DSDT_SIGNATURE, &tbl);
+    ensure_ok_status(st);
+
+    st = uacpi_table_unref(&tbl);
+    ensure_ok_status(st);
+
+    g_expect_virtual_addresses = false;
 }
