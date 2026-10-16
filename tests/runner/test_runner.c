@@ -28,6 +28,9 @@
 // The test wants a FADT that doesn't describe any GPE blocks
 #define API_TEST_NO_FADT_GPE_BLOCKS (1 << 0)
 
+// The test wants uACPI initialized with UACPI_FLAG_BAD_CSUM_FATAL
+#define API_TEST_BAD_CSUM_FATAL (1 << 1)
+
 /*
  * Tests that exercise the API directly instead of evaluating \MAIN, selected
  * by the value that the test case is expected to return.
@@ -68,6 +71,10 @@ static const struct api_test builtin_api_tests[] = {
     { "resource-tests", run_resource_tests, 0 },
     { "fixed-events", test_fixed_events, 0 },
     { "global-lock", test_global_lock, 0 },
+    {
+        "bad-checksum-tables", test_bad_checksum_tables,
+        API_TEST_BAD_CSUM_FATAL
+    },
 };
 
 static const struct api_test *find_api_test(
@@ -431,6 +438,7 @@ static void run_test(
     struct full_xsdt *xsdt;
     uacpi_status st;
     uacpi_table tbl;
+    uacpi_u64 init_flags;
     bool is_test_mode;
     uacpi_object *ret = NULL;
 
@@ -454,7 +462,11 @@ static void run_test(
     st = uacpi_table_unref(&tbl);
     ensure_ok_status(st);
 
-    st = uacpi_initialize(UACPI_FLAG_NO_ACPI_MODE);
+    init_flags = UACPI_FLAG_NO_ACPI_MODE;
+    if (api_test != NULL && (api_test->flags & API_TEST_BAD_CSUM_FATAL))
+        init_flags |= UACPI_FLAG_BAD_CSUM_FATAL;
+
+    st = uacpi_initialize(init_flags);
     ensure_ok_status(st);
 
     /*
