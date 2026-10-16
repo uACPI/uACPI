@@ -1,4 +1,4 @@
-project('uacpi', meson_version: '>=1.1', version: '6.1.1')
+project('uacpi', meson_version: '>=1.1', version: '7.0.0')
 
 src = [
     'source/tables.c',
