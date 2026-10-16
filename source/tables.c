@@ -1223,8 +1223,10 @@ static uacpi_status table_ctl(uacpi_size idx, struct table_ctl_request *req)
     }
 
     tbl = table_array_at(&tables, idx);
-    if (uacpi_unlikely(uacpi_unlikely(skip_due_to_bad_csum(tbl))))
-        return UACPI_STATUS_BAD_CHECKSUM;
+    if (uacpi_unlikely(skip_due_to_bad_csum(tbl))) {
+        ret = UACPI_STATUS_BAD_CHECKSUM;
+        goto out;
+    }
 
     if (req->type & TABLE_CTL_VALIDATE_SET_FLAGS) {
         uacpi_u8 mask = req->expect_set;
